@@ -1,0 +1,10 @@
+{
+  "id": "family.analyst",
+  "extends": "family.base",
+  "version": "0.1.0",
+  "summary": "Analytical roles that read sources and produce designs or specifications.",
+  "rules": ["Pass artifacts by reference.", "Abstain with reason and missing when inputs are insufficient."],
+  "permissions": {"read": ["art:*"], "write": ["repo:*"], "network": false, "code_exec": "sandbox"},
+  "budget": {"max_usd_per_contract": 5.0, "max_turns": 30},
+  "gates": [{"on": "output", "type": "deterministic", "check": "jsonschema"}]
+}

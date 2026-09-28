@@ -1,0 +1,412 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ooat.invalid/spec/v0.1/event.schema.json",
+  "title": "OOAT ledger event",
+  "description": "Immutable ledger record: envelope plus a body validated per event type (spec sections 7 and 9). Keys, types and reason codes are English; free-text fields follow lang.",
+  "type": "object",
+  "required": ["id", "ts", "task", "actor", "type", "refs", "body"],
+  "additionalProperties": false,
+  "properties": {
+    "id": {"$ref": "common.schema.json#/$defs/event_id"},
+    "ts": {"description": "ISO 8601 UTC.", "type": "string", "format": "date-time", "pattern": "Z$"},
+    "task": {
+      "description": "Task id. ADAPTER_ACKNOWLEDGED is not tied to a task and uses null.",
+      "anyOf": [{"$ref": "common.schema.json#/$defs/task_id"}, {"type": "null"}]
+    },
+    "contract": {"anyOf": [{"$ref": "common.schema.json#/$defs/contract_id"}, {"type": "null"}]},
+    "actor": {"$ref": "#/$defs/actor"},
+    "type": {"$ref": "#/$defs/event_type"},
+    "refs": {"type": "array", "items": {"$ref": "common.schema.json#/$defs/ref"}, "uniqueItems": true},
+    "lang": {"$ref": "common.schema.json#/$defs/lang"},
+    "body": {"type": "object"},
+    "cost": {"$ref": "#/$defs/cost"}
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"type": {"not": {"const": "ADAPTER_ACKNOWLEDGED"}}}},
+      "then": {"properties": {"task": {"$ref": "common.schema.json#/$defs/task_id"}}}
+    },
+    {
+      "description": "Contract-level events must name their contract.",
+      "if": {"properties": {"type": {"enum": ["CLAIM", "RESULT", "ABSTAIN", "CONTRACT_ISSUED"]}}},
+      "then": {"required": ["contract"], "properties": {"contract": {"$ref": "common.schema.json#/$defs/contract_id"}}}
+    },
+    {
+      "description": "Only an agent claims, returns a result or objects.",
+      "if": {"properties": {"type": {"enum": ["CLAIM", "RESULT", "OBJECTION"]}}},
+      "then": {"properties": {"actor": {"properties": {"kind": {"const": "agent"}}}}}
+    },
+    {
+      "description": "Only a human answers, rates, reports defects or acknowledges adapters.",
+      "if": {"properties": {"type": {"enum": ["HIL_RESPONSE", "TASK_RATED", "DEFECT_FOUND", "ADAPTER_ACKNOWLEDGED"]}}},
+      "then": {"properties": {"actor": {"properties": {"kind": {"const": "hil"}}}}}
+    },
+    {
+      "description": "An objection points to a specific artifact version.",
+      "if": {"properties": {"type": {"const": "OBJECTION"}}},
+      "then": {"properties": {"refs": {"contains": {"$ref": "common.schema.json#/$defs/artifact_ref"}}}}
+    },
+    {"if": {"properties": {"type": {"const": "TASK_SUBMITTED"}}}, "then": {"properties": {"body": {"$ref": "#/$defs/body_task_submitted"}}}},
+    {"if": {"properties": {"type": {"const": "TOPOLOGY_DECIDED"}}}, "then": {"properties": {"body": {"$ref": "#/$defs/body_topology_decided"}}}},
+    {"if": {"properties": {"type": {"const": "CONTRACT_ISSUED"}}}, "then": {"properties": {"body": {"$ref": "#/$defs/body_contract_issued"}}}},
+    {"if": {"properties": {"type": {"const": "CLAIM"}}}, "then": {"properties": {"body": {"$ref": "#/$defs/body_claim"}}}},
+    {"if": {"properties": {"type": {"const": "RESULT"}}}, "then": {"properties": {"body": {"$ref": "#/$defs/body_result"}}}},
+    {"if": {"properties": {"type": {"const": "ABSTAIN"}}}, "then": {"properties": {"body": {"$ref": "#/$defs/body_abstain"}}}},
+    {"if": {"properties": {"type": {"const": "OBJECTION"}}}, "then": {"properties": {"body": {"$ref": "#/$defs/body_objection"}}}},
+    {"if": {"properties": {"type": {"const": "OBJECTION_RESOLVED"}}}, "then": {"properties": {"body": {"$ref": "#/$defs/body_objection_resolved"}}}},
+    {"if": {"properties": {"type": {"const": "DECISION"}}}, "then": {"properties": {"body": {"$ref": "#/$defs/body_decision"}}}},
+    {"if": {"properties": {"type": {"enum": ["GATE_PASSED", "GATE_FAILED"]}}}, "then": {"properties": {"body": {"$ref": "#/$defs/body_gate"}}}},
+    {"if": {"properties": {"type": {"const": "HIL_REQUEST"}}}, "then": {"properties": {"body": {"$ref": "#/$defs/body_hil_request"}}}},
+    {"if": {"properties": {"type": {"const": "HIL_RESPONSE"}}}, "then": {"properties": {"body": {"$ref": "#/$defs/body_hil_response"}}}},
+    {"if": {"properties": {"type": {"const": "BUDGET_WARNING"}}}, "then": {"properties": {"body": {"$ref": "#/$defs/body_budget_warning"}}}},
+    {"if": {"properties": {"type": {"const": "QUOTA_WARNING"}}}, "then": {"properties": {"body": {"$ref": "#/$defs/body_quota_warning"}}}},
+    {"if": {"properties": {"type": {"const": "TASK_CLOSED"}}}, "then": {"properties": {"body": {"$ref": "#/$defs/body_task_closed"}}}},
+    {"if": {"properties": {"type": {"const": "TASK_RATED"}}}, "then": {"properties": {"body": {"$ref": "#/$defs/body_task_rated"}}}},
+    {"if": {"properties": {"type": {"const": "DEFECT_FOUND"}}}, "then": {"properties": {"body": {"$ref": "#/$defs/body_defect_found"}}}},
+    {"if": {"properties": {"type": {"const": "ADAPTER_ACKNOWLEDGED"}}}, "then": {"properties": {"body": {"$ref": "#/$defs/body_adapter_acknowledged"}}}}
+  ],
+  "$defs": {
+    "event_type": {
+      "enum": [
+        "TASK_SUBMITTED", "TOPOLOGY_DECIDED", "CONTRACT_ISSUED", "CLAIM", "RESULT", "ABSTAIN",
+        "OBJECTION", "OBJECTION_RESOLVED", "DECISION", "GATE_PASSED", "GATE_FAILED",
+        "HIL_REQUEST", "HIL_RESPONSE", "BUDGET_WARNING", "QUOTA_WARNING",
+        "TASK_CLOSED", "TASK_RATED", "DEFECT_FOUND", "ADAPTER_ACKNOWLEDGED"
+      ]
+    },
+    "actor": {
+      "type": "object",
+      "required": ["kind", "id"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": {"enum": ["agent", "hil", "system"]},
+        "id": {"type": "string", "minLength": 1},
+        "role": {"$ref": "common.schema.json#/$defs/role_ref"}
+      },
+      "if": {"properties": {"kind": {"const": "agent"}}},
+      "then": {"required": ["role"], "properties": {"id": {"$ref": "common.schema.json#/$defs/agent_id"}}},
+      "else": {"not": {"required": ["role"]}}
+    },
+    "cost": {
+      "description": "Filled in by the provider gateway.",
+      "type": "object",
+      "required": ["basis"],
+      "additionalProperties": false,
+      "properties": {
+        "adapter": {"$ref": "common.schema.json#/$defs/provider_id"},
+        "tier": {"$ref": "common.schema.json#/$defs/tier"},
+        "tokens_in": {"type": "integer", "minimum": 0},
+        "tokens_cached": {"type": "integer", "minimum": 0},
+        "tokens_out": {"type": "integer", "minimum": 0},
+        "quota_units": {"type": "number", "minimum": 0},
+        "usd": {"$ref": "common.schema.json#/$defs/usd"},
+        "basis": {"enum": ["exact", "estimated", "shadow"]},
+        "price_ver": {"type": "string", "minLength": 1}
+      }
+    },
+    "text": {"type": "string", "minLength": 1},
+
+    "body_task_submitted": {
+      "description": "Acceptance and expected output may be missing; Gate rule A1 then sends the task to CLARIFYING.",
+      "type": "object",
+      "required": ["goal"],
+      "additionalProperties": false,
+      "properties": {
+        "goal": {"$ref": "#/$defs/text"},
+        "expected_output": {"$ref": "#/$defs/text"},
+        "acceptance": {"type": "array", "items": {"$ref": "#/$defs/text"}},
+        "task_type": {"type": "string", "pattern": "^[a-z][a-z0-9_.]*$"},
+        "value": {
+          "oneOf": [
+            {"type": "object", "required": ["class"], "additionalProperties": false, "properties": {"class": {"$ref": "common.schema.json#/$defs/value_class"}}},
+            {"type": "object", "required": ["usd"], "additionalProperties": false, "properties": {"usd": {"$ref": "common.schema.json#/$defs/usd"}}}
+          ]
+        },
+        "budget_usd": {"$ref": "common.schema.json#/$defs/usd"},
+        "risk_class": {"$ref": "common.schema.json#/$defs/risk_class"},
+        "data_class": {"$ref": "common.schema.json#/$defs/data_class"},
+        "profile": {"description": "Orchestrator profile, e.g. ceo, pm, key_account.", "type": "string", "pattern": "^[a-z][a-z0-9_]*$"},
+        "deadline": {"type": "string", "format": "date-time"}
+      }
+    },
+    "body_topology_decided": {
+      "type": "object",
+      "required": ["topology", "candidates", "rules_applied"],
+      "additionalProperties": false,
+      "properties": {
+        "topology": {"$ref": "common.schema.json#/$defs/topology"},
+        "candidates": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "required": ["topology"],
+            "additionalProperties": false,
+            "properties": {
+              "topology": {"$ref": "common.schema.json#/$defs/topology"},
+              "eliminated_by": {"type": "array", "items": {"$ref": "#/$defs/gate_rule"}, "uniqueItems": true},
+              "eu_usd": {"type": "number"},
+              "p_accept": {"$ref": "common.schema.json#/$defs/probability"},
+              "model_usd": {"$ref": "common.schema.json#/$defs/usd"},
+              "hil_hours": {"type": "number", "minimum": 0},
+              "p_silent": {"$ref": "common.schema.json#/$defs/probability"}
+            }
+          }
+        },
+        "rules_applied": {"type": "array", "items": {"$ref": "#/$defs/gate_rule"}, "uniqueItems": true},
+        "parameters": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "v_usd": {"$ref": "common.schema.json#/$defs/usd"},
+            "c_hil_usd_per_hour": {"$ref": "common.schema.json#/$defs/usd"},
+            "c_fail_usd": {"$ref": "common.schema.json#/$defs/usd"},
+            "budget_usd": {"$ref": "common.schema.json#/$defs/usd"},
+            "q_min": {"$ref": "common.schema.json#/$defs/probability"}
+          }
+        },
+        "uncertain": {"description": "EU gap below uncertainty: cheaper candidate picked, task flagged for calibration.", "type": "boolean"},
+        "overrides": {"description": "Set when a human overrides an earlier decision.", "$ref": "common.schema.json#/$defs/event_id"}
+      }
+    },
+    "gate_rule": {"type": "string", "pattern": "^A([1-9]|10)$"},
+    "body_contract_issued": {
+      "type": "object",
+      "required": ["contract"],
+      "additionalProperties": false,
+      "properties": {"contract": {"$ref": "contract.schema.json"}}
+    },
+    "body_claim": {"type": "object", "additionalProperties": false, "properties": {}},
+    "body_result": {
+      "description": "FAILED is a technical error (tool, timeout, API, quota) and carries an error instead of artifacts.",
+      "type": "object",
+      "required": ["outcome"],
+      "additionalProperties": false,
+      "properties": {
+        "outcome": {"enum": ["DONE", "PARTIAL", "FAILED"]},
+        "artifacts": {"type": "array", "items": {"$ref": "common.schema.json#/$defs/artifact_ref"}, "uniqueItems": true},
+        "self_assessment": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["criterion", "met"],
+            "additionalProperties": false,
+            "properties": {
+              "criterion": {"type": "string", "pattern": "^[a-z][a-z0-9_]*$"},
+              "met": {"type": "boolean"},
+              "note": {"$ref": "#/$defs/text"}
+            }
+          }
+        },
+        "remaining": {"description": "What is not done (PARTIAL).", "$ref": "#/$defs/text"},
+        "error": {
+          "type": "object",
+          "required": ["code", "message"],
+          "additionalProperties": false,
+          "properties": {
+            "code": {"enum": ["TOOL_ERROR", "TIMEOUT", "API_ERROR", "QUOTA_EXHAUSTED", "INVALID_OUTPUT"]},
+            "message": {"$ref": "#/$defs/text"}
+          }
+        }
+      },
+      "allOf": [
+        {"if": {"properties": {"outcome": {"enum": ["DONE", "PARTIAL"]}}}, "then": {"required": ["artifacts"], "properties": {"artifacts": {"minItems": 1}}}},
+        {"if": {"properties": {"outcome": {"const": "PARTIAL"}}}, "then": {"required": ["remaining"]}},
+        {"if": {"properties": {"outcome": {"const": "FAILED"}}}, "then": {"required": ["error"]}}
+      ]
+    },
+    "body_abstain": {
+      "type": "object",
+      "required": ["outcome", "reason", "missing", "confidence"],
+      "additionalProperties": false,
+      "properties": {
+        "outcome": {"$ref": "common.schema.json#/$defs/abstain_outcome"},
+        "reason": {"type": "string", "minLength": 1, "maxLength": 300},
+        "missing": {"description": "Exactly what is missing.", "$ref": "#/$defs/text"},
+        "confidence": {"$ref": "common.schema.json#/$defs/probability"}
+      }
+    },
+    "body_objection": {
+      "type": "object",
+      "required": ["reason_code", "claim", "severity"],
+      "additionalProperties": false,
+      "properties": {
+        "reason_code": {"enum": ["SPEC_VIOLATION", "FACT_UNSUPPORTED", "GRAIN_MISMATCH", "SECURITY_RISK", "COST_RISK", "INCONSISTENT_WITH_DECISION"]},
+        "claim": {"$ref": "#/$defs/text"},
+        "proposed_fix": {"$ref": "#/$defs/text"},
+        "severity": {"enum": ["blocking", "non_blocking"]},
+        "round": {"description": "Debate round; max. 2 per artifact.", "type": "integer", "minimum": 1, "maximum": 2}
+      }
+    },
+    "body_objection_resolved": {
+      "type": "object",
+      "required": ["objection", "resolution", "reason"],
+      "additionalProperties": false,
+      "properties": {
+        "objection": {"$ref": "common.schema.json#/$defs/event_id"},
+        "resolution": {"enum": ["accepted", "rejected"]},
+        "reason": {"$ref": "#/$defs/text"},
+        "new_version": {"$ref": "common.schema.json#/$defs/artifact_ref"}
+      }
+    },
+    "body_decision": {
+      "type": "object",
+      "required": ["decision"],
+      "additionalProperties": false,
+      "properties": {
+        "title": {"$ref": "#/$defs/text"},
+        "decision": {"$ref": "#/$defs/text"},
+        "rationale": {"$ref": "#/$defs/text"},
+        "supersedes": {"$ref": "common.schema.json#/$defs/event_id"}
+      }
+    },
+    "body_gate": {
+      "type": "object",
+      "required": ["gate", "evidence"],
+      "additionalProperties": false,
+      "properties": {
+        "gate": {"$ref": "common.schema.json#/$defs/gate_id"},
+        "criteria": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["id", "passed"],
+            "additionalProperties": false,
+            "properties": {
+              "id": {"type": "string", "pattern": "^[a-z][a-z0-9_]*$"},
+              "passed": {"type": "boolean"},
+              "score": {"$ref": "common.schema.json#/$defs/probability"},
+              "note": {"$ref": "#/$defs/text"}
+            }
+          }
+        },
+        "evidence": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/text"}}
+      }
+    },
+    "body_hil_request": {
+      "description": "Max. 3 options, always a recommendation and a default on silence; for R3 the default must be not acting.",
+      "type": "object",
+      "required": ["question", "options", "recommended", "default_on_silence", "deadline", "blocking", "evidence"],
+      "additionalProperties": false,
+      "properties": {
+        "question": {"$ref": "#/$defs/text"},
+        "risk_class": {"$ref": "common.schema.json#/$defs/risk_class"},
+        "options": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 3,
+          "items": {
+            "type": "object",
+            "required": ["id", "label", "cost_usd"],
+            "additionalProperties": false,
+            "properties": {
+              "id": {"type": "string", "pattern": "^[a-z0-9_]+$"},
+              "label": {"$ref": "#/$defs/text"},
+              "cost_usd": {"$ref": "common.schema.json#/$defs/usd"},
+              "impact": {"$ref": "#/$defs/text"},
+              "acts": {"description": "false marks the do-not-act option.", "type": "boolean"}
+            }
+          }
+        },
+        "recommended": {"type": "string", "pattern": "^[a-z0-9_]+$"},
+        "default_on_silence": {"type": "string", "pattern": "^[a-z0-9_]+$"},
+        "deadline": {"type": "string", "format": "date-time"},
+        "blocking": {"type": "boolean"},
+        "evidence": {"type": "array", "items": {"$ref": "common.schema.json#/$defs/ref"}, "uniqueItems": true}
+      },
+      "if": {"properties": {"risk_class": {"const": "R3"}}, "required": ["risk_class"]},
+      "then": {"properties": {"options": {"contains": {"properties": {"acts": {"const": false}}, "required": ["acts"]}}}}
+    },
+    "body_hil_response": {
+      "type": "object",
+      "required": ["request"],
+      "additionalProperties": false,
+      "properties": {
+        "request": {"$ref": "common.schema.json#/$defs/event_id"},
+        "choice": {"type": "string", "pattern": "^[a-z0-9_]+$"},
+        "text": {"$ref": "#/$defs/text"},
+        "default_applied": {"description": "True when the deadline passed and the default was applied.", "type": "boolean"}
+      },
+      "anyOf": [{"required": ["choice"]}, {"required": ["text"]}]
+    },
+    "body_budget_warning": {
+      "type": "object",
+      "required": ["level", "used_usd", "limit_usd"],
+      "additionalProperties": false,
+      "properties": {
+        "level": {"enum": ["system", "task", "contract"]},
+        "used_usd": {"$ref": "common.schema.json#/$defs/usd"},
+        "limit_usd": {"$ref": "common.schema.json#/$defs/usd"}
+      }
+    },
+    "body_quota_warning": {
+      "type": "object",
+      "required": ["adapter", "utilisation"],
+      "additionalProperties": false,
+      "properties": {
+        "adapter": {"$ref": "common.schema.json#/$defs/provider_id"},
+        "utilisation": {"$ref": "common.schema.json#/$defs/probability"},
+        "window_resets_at": {"type": "string", "format": "date-time"}
+      }
+    },
+    "body_task_closed": {
+      "type": "object",
+      "required": ["state", "summary", "cost"],
+      "additionalProperties": false,
+      "properties": {
+        "state": {"enum": ["CLOSED_DONE", "CLOSED_PARTIAL", "CLOSED_ABSTAINED", "CANCELLED"]},
+        "summary": {"$ref": "#/$defs/text"},
+        "artifacts": {"type": "array", "items": {"$ref": "common.schema.json#/$defs/artifact_ref"}, "uniqueItems": true},
+        "missing": {"description": "What could not be achieved and why (CLOSED_PARTIAL, CLOSED_ABSTAINED).", "$ref": "#/$defs/text"},
+        "cost": {
+          "description": "Topology cost stored in four parts so coordination overhead can be measured.",
+          "type": "object",
+          "required": ["contracts_usd", "gate_usd", "orchestrator_usd", "critic_usd"],
+          "additionalProperties": false,
+          "properties": {
+            "contracts_usd": {"$ref": "common.schema.json#/$defs/usd"},
+            "gate_usd": {"$ref": "common.schema.json#/$defs/usd"},
+            "orchestrator_usd": {"$ref": "common.schema.json#/$defs/usd"},
+            "critic_usd": {"$ref": "common.schema.json#/$defs/usd"},
+            "hil_hours": {"type": "number", "minimum": 0}
+          }
+        }
+      },
+      "allOf": [
+        {"if": {"properties": {"state": {"enum": ["CLOSED_PARTIAL", "CLOSED_ABSTAINED"]}}}, "then": {"required": ["missing"]}}
+      ]
+    },
+    "body_task_rated": {
+      "type": "object",
+      "required": ["accepted", "value_class"],
+      "additionalProperties": false,
+      "properties": {
+        "accepted": {"type": "boolean"},
+        "value_class": {"$ref": "common.schema.json#/$defs/value_class"},
+        "note": {"$ref": "#/$defs/text"}
+      }
+    },
+    "body_defect_found": {
+      "type": "object",
+      "required": ["artifact", "description"],
+      "additionalProperties": false,
+      "properties": {
+        "artifact": {"$ref": "common.schema.json#/$defs/artifact_ref"},
+        "contract": {"$ref": "common.schema.json#/$defs/contract_id"},
+        "description": {"$ref": "#/$defs/text"},
+        "client_facing": {"type": "boolean"}
+      }
+    },
+    "body_adapter_acknowledged": {
+      "type": "object",
+      "required": ["adapter", "manifest_version", "allowed_data_classes", "operator"],
+      "additionalProperties": false,
+      "properties": {
+        "adapter": {"$ref": "common.schema.json#/$defs/provider_id"},
+        "manifest_version": {"$ref": "common.schema.json#/$defs/semver"},
+        "allowed_data_classes": {"type": "array", "items": {"$ref": "common.schema.json#/$defs/data_class"}, "uniqueItems": true},
+        "operator": {"description": "Name of the acknowledging operator.", "$ref": "#/$defs/text"}
+      }
+    }
+  }
+}

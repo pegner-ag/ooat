@@ -1,0 +1,34 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ooat.invalid/spec/v0.1/family.schema.json",
+  "title": "OOAT role family",
+  "description": "Abstract ancestor of roles with shared rules, permissions, budget and gates (spec section 5). Inheritance rules (narrowing only, accumulating gates, depth <= 3) are enforced by the catalog linter, not by this schema.",
+  "type": "object",
+  "required": ["id", "version", "summary"],
+  "additionalProperties": false,
+  "properties": {
+    "id": {"$ref": "common.schema.json#/$defs/family_id"},
+    "extends": {"$ref": "common.schema.json#/$defs/family_id"},
+    "version": {"$ref": "common.schema.json#/$defs/semver"},
+    "status": {"$ref": "common.schema.json#/$defs/lifecycle_status"},
+    "summary": {"type": "string", "minLength": 1, "maxLength": 200},
+    "rules": {
+      "description": "Shared instructions placed first in every member's context (stable prefix for caching).",
+      "type": "array",
+      "items": {"type": "string", "minLength": 1}
+    },
+    "output_format": {"description": "Shared output format, e.g. a path to a template.", "type": "string", "minLength": 1},
+    "escalation": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "escalate_to": {"$ref": "common.schema.json#/$defs/tier"},
+        "escalate_when": {"type": "string", "minLength": 1},
+        "max_attempts": {"type": "integer", "minimum": 1}
+      }
+    },
+    "permissions": {"$ref": "common.schema.json#/$defs/permissions"},
+    "budget": {"$ref": "common.schema.json#/$defs/budget"},
+    "gates": {"type": "array", "items": {"$ref": "common.schema.json#/$defs/gate"}}
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "id": "cap.qa.check_kpis_mapped",
+  "version": "0.1.0",
+  "status": "draft",
+  "summary": "Decides whether every KPI in the requirements is mapped to a measure in the design.",
+  "impl": "decision",
+  "input_schema": "schemas/semantic_model_design.v1.json",
+  "output_schema": "schemas/noul_result.v1.json",
+  "acceptance": [{"id": "schema_valid", "type": "deterministic", "check": "jsonschema"}],
+  "model_policy": {"tier": "decision", "max_attempts": 1, "data_classes_allowed": ["public", "internal"]},
+  "cost_card": {"prior": {"p_accept": 0.8}, "observed": {"n": 0}},
+  "eval_set": "evals/cap.qa.check_kpis_mapped/"
+}

@@ -5,3 +5,8 @@
 - Spec examples (topology multipliers, worked EU examples, targets, effort estimates) are the author's priors,
   not measurements — never hard-code them as facts; they belong in configuration/priors.
 - Price per million tokens is deliberately not in the spec; it lives in `routing.json` with a validity date.
+- Bash heredocs with non-ASCII JSON failed in this shell; write JSON files with the Write tool instead.
+- Schema `$ref`s are relative (`common.schema.json#/$defs/...`) and resolve against `$id`; tests load all
+  schemas into a `referencing.Registry`. Keep every `$id` under the same base URI.
+- Cross-field rules JSON Schema cannot express (option ids, inheritance narrowing) belong in the linter; list
+  them in `spec/README.md`.

@@ -1,0 +1,19 @@
+{
+  "id": "role.bi.developer",
+  "extends": "family.analyst",
+  "version": "1.0.0",
+  "a2a": {"name": "BI Developer", "description": "Semantic model, measures and report specifications.", "skills_from": "capabilities"},
+  "capabilities": [
+    "cap.bi.kpi_tree", "cap.bi.design_semantic_model", "cap.bi.write_measure",
+    "cap.bi.report_spec", "cap.bi.validate_measure", "cap.data.read_dwh_metadata", "cap.doc.tech_note"
+  ],
+  "consumes": ["requirements_spec", "dwh_schema"],
+  "produces": ["semantic_model_design", "measures", "report_spec"],
+  "can_object_to": ["dwh_schema", "report_spec"],
+  "permissions": {"read": ["art:*", "repo:bi/*"], "write": ["repo:bi/*"], "network": false, "code_exec": "sandbox"},
+  "budget": {"max_usd_per_contract": 3.0, "max_turns": 25},
+  "gates": [
+    {"on": "write:prod", "type": "hil", "risk": "R3"},
+    {"on": "output", "type": "critic", "critic_role": "role.arch.data_architect"}
+  ]
+}

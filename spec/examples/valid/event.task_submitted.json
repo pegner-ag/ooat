@@ -1,0 +1,19 @@
+{
+  "id": "evt_01J9ZQ70A0K3M5N7P9Q1R3S5T7",
+  "ts": "2026-09-28T20:00:00Z",
+  "task": "tsk_01J9ZQ7A1BK3M5N7P9Q1R3S5T7",
+  "actor": {"kind": "hil", "id": "operator"},
+  "type": "TASK_SUBMITTED",
+  "refs": [],
+  "lang": "cs",
+  "body": {
+    "goal": "Rešerše 30 konkurentů pro web SME-AI.",
+    "expected_output": "Tabulka konkurentů se zdroji.",
+    "acceptance": ["Každý konkurent má alespoň jeden ověřitelný zdroj."],
+    "task_type": "research.competitors",
+    "value": {"usd": 400},
+    "risk_class": "R0",
+    "data_class": "public",
+    "profile": "ceo"
+  }
+}

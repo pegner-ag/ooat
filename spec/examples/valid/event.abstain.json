@@ -1,0 +1,16 @@
+{
+  "id": "evt_01J9ZQ9C0CK3M5N7P9Q1R3S5T7",
+  "ts": "2026-09-28T21:20:00Z",
+  "task": "tsk_01J9ZQ7A1BK3M5N7P9Q1R3S5T7",
+  "contract": "ctr_01J9ZQ7F3CK3M5N7P9Q1R3S5T7",
+  "actor": {"kind": "agent", "id": "agt_01J9ZQ7G4DK3M5N7P9Q1R3S5T7", "role": "role.bi.developer@1.0.0"},
+  "type": "ABSTAIN",
+  "refs": [],
+  "lang": "cs",
+  "body": {
+    "outcome": "ABSTAIN_UNKNOWN",
+    "reason": "Chybí definice KPI marže; ze vstupů ji nelze odvodit.",
+    "missing": "Definice KPI marže (vzorec a úroveň agregace).",
+    "confidence": 0.85
+  }
+}

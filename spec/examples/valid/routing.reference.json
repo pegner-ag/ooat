@@ -1,0 +1,18 @@
+{
+  "version": "0.1.0",
+  "tiers": {
+    "decision": ["prv.typesafe.api"],
+    "workhorse": ["prv.anthropic.subscription_cli"],
+    "frontier": ["prv.anthropic.subscription_cli"]
+  },
+  "prices": [],
+  "data_class_policy": {
+    "public": {"allowed": true},
+    "internal": {"allowed": true},
+    "client_confidential": {"allowed": true, "require_no_training": true, "require_known_region": true, "require_contract": true},
+    "personal": {"allowed": true, "require_no_training": true, "require_known_region": true, "require_contract": true},
+    "special_category": {"allowed": true, "require_verified_redaction": true}
+  },
+  "critic_other_vendor": true,
+  "display": {"currency": "CZK", "fx_source": "https://www.cnb.cz/"}
+}

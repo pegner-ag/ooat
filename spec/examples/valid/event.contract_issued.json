@@ -1,0 +1,24 @@
+{
+  "id": "evt_01J9ZQ72A2K3M5N7P9Q1R3S5T7",
+  "ts": "2026-09-28T20:01:00Z",
+  "task": "tsk_01J9ZQ7A1BK3M5N7P9Q1R3S5T7",
+  "contract": "ctr_01J9ZQ7F3CK3M5N7P9Q1R3S5T7",
+  "actor": {"kind": "system", "id": "ooat-core"},
+  "type": "CONTRACT_ISSUED",
+  "refs": ["art_01J9ZQ6X9EK3M5N7P9Q1R3S5T7@v2"],
+  "lang": "cs",
+  "body": {
+    "contract": {
+      "id": "ctr_01J9ZQ7F3CK3M5N7P9Q1R3S5T7",
+      "task": "tsk_01J9ZQ7A1BK3M5N7P9Q1R3S5T7",
+      "capability": "cap.bi.design_semantic_model",
+      "capability_version": "1.2.0",
+      "agent": "agt_01J9ZQ7G4DK3M5N7P9Q1R3S5T7",
+      "role": "role.bi.developer@1.0.0",
+      "goal": "Navrhnout sémantický model pro KPI obchodního reportu.",
+      "inputs": ["art_01J9ZQ6X9EK3M5N7P9Q1R3S5T7@v2"],
+      "output_schema": "schemas/semantic_model_design.v1.json",
+      "budget": {"max_usd": 3.0}
+    }
+  }
+}

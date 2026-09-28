@@ -1,0 +1,16 @@
+{
+  "id": "evt_01J9ZQ74A4K3M5N7P9Q1R3S5T7",
+  "ts": "2026-09-29T11:00:00Z",
+  "task": "tsk_01J9ZQ7A1BK3M5N7P9Q1R3S5T7",
+  "actor": {"kind": "system", "id": "ooat-core"},
+  "type": "TASK_CLOSED",
+  "refs": ["art_01J9ZQ6X9EK3M5N7P9Q1R3S5T7@v3"],
+  "lang": "cs",
+  "body": {
+    "state": "CLOSED_ABSTAINED",
+    "summary": "Model navržen bez KPI marže.",
+    "artifacts": ["art_01J9ZQ6X9EK3M5N7P9Q1R3S5T7@v3"],
+    "missing": "Definice KPI marže nebyla dodána do termínu.",
+    "cost": {"contracts_usd": 0.42, "gate_usd": 0.01, "orchestrator_usd": 0.0, "critic_usd": 0.0, "hil_hours": 0.1}
+  }
+}

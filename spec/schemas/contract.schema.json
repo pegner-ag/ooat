@@ -1,0 +1,34 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ooat.invalid/spec/v0.1/contract.schema.json",
+  "title": "OOAT contract",
+  "description": "Instance of a capability contract for one task, assigned to one agent instance (spec sections 2 and 8). Carried in the body of CONTRACT_ISSUED.",
+  "type": "object",
+  "required": ["id", "task", "capability", "capability_version", "agent", "role", "goal", "inputs", "output_schema", "budget"],
+  "additionalProperties": false,
+  "properties": {
+    "id": {"$ref": "common.schema.json#/$defs/contract_id"},
+    "task": {"$ref": "common.schema.json#/$defs/task_id"},
+    "capability": {"$ref": "common.schema.json#/$defs/capability_id"},
+    "capability_version": {"$ref": "common.schema.json#/$defs/semver"},
+    "agent": {"$ref": "common.schema.json#/$defs/agent_id"},
+    "role": {"$ref": "common.schema.json#/$defs/role_ref"},
+    "goal": {"description": "In the task language.", "type": "string", "minLength": 1},
+    "inputs": {"description": "Artifacts passed by reference.", "type": "array", "items": {"$ref": "common.schema.json#/$defs/artifact_ref"}, "uniqueItems": true},
+    "output_schema": {"type": "string", "minLength": 1},
+    "tools": {"type": "array", "items": {"type": "string", "pattern": "^[a-z][a-z0-9_]*$"}, "uniqueItems": true},
+    "sources": {"description": "Permitted sources beyond the inputs.", "type": "array", "items": {"type": "string", "minLength": 1}},
+    "boundaries": {"description": "What the agent must not do.", "type": "array", "items": {"type": "string", "minLength": 1}},
+    "decisions": {"description": "DECISION events that bind this contract.", "type": "array", "items": {"$ref": "common.schema.json#/$defs/event_id"}, "uniqueItems": true},
+    "budget": {
+      "type": "object",
+      "required": ["max_usd"],
+      "additionalProperties": false,
+      "properties": {
+        "max_usd": {"$ref": "common.schema.json#/$defs/usd"},
+        "max_turns": {"type": "integer", "minimum": 1}
+      }
+    },
+    "deadline": {"type": "string", "format": "date-time"}
+  }
+}

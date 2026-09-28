@@ -1,0 +1,23 @@
+{
+  "id": "evt_01J9ZQ9A0AK3M5N7P9Q1R3S5T7",
+  "ts": "2026-09-28T21:30:00Z",
+  "task": "tsk_01J9ZQ7A1BK3M5N7P9Q1R3S5T7",
+  "contract": null,
+  "actor": {"kind": "system", "id": "ooat-core"},
+  "type": "HIL_REQUEST",
+  "refs": ["art_01J9ZQ6X9EK3M5N7P9Q1R3S5T7@v2", "evt_01J9ZQ8M2KK3M5N7P9Q1R3S5T7"],
+  "lang": "cs",
+  "body": {
+    "question": "Blokující námitka ke grainu faktu Prodej po 2 kolech.",
+    "risk_class": "R1",
+    "options": [
+      {"id": "a", "label": "Přidat sklad do grainu", "cost_usd": 1.8, "impact": "+1 den práce agentů, KPI marže přesné"},
+      {"id": "b", "label": "Změnit definici KPI na úroveň produktu", "cost_usd": 0.3, "impact": "Marže bez rozpadu na sklady"}
+    ],
+    "recommended": "a",
+    "default_on_silence": "b",
+    "deadline": "2026-09-29T10:00:00Z",
+    "blocking": true,
+    "evidence": ["art_01J9ZQ6X9EK3M5N7P9Q1R3S5T7@v2", "evt_01J9ZQ8M2KK3M5N7P9Q1R3S5T7"]
+  }
+}

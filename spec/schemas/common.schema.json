@@ -1,0 +1,107 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ooat.invalid/spec/v0.1/common.schema.json",
+  "title": "OOAT common definitions",
+  "description": "Shared identifiers and enumerations referenced by all OOA Spec schemas (spec sections 2, 5, 6, 7, 9).",
+  "$defs": {
+    "ulid": {
+      "description": "Crockford base32 ULID, 26 characters.",
+      "type": "string",
+      "pattern": "^[0-7][0-9A-HJKMNP-TV-Z]{25}$"
+    },
+    "task_id": {"type": "string", "pattern": "^tsk_[0-7][0-9A-HJKMNP-TV-Z]{25}$"},
+    "contract_id": {"type": "string", "pattern": "^ctr_[0-7][0-9A-HJKMNP-TV-Z]{25}$"},
+    "agent_id": {"type": "string", "pattern": "^agt_[0-7][0-9A-HJKMNP-TV-Z]{25}$"},
+    "event_id": {"type": "string", "pattern": "^evt_[0-7][0-9A-HJKMNP-TV-Z]{25}$"},
+    "artifact_ref": {
+      "description": "Versioned artifact reference art_<ulid>@v<n>.",
+      "type": "string",
+      "pattern": "^art_[0-7][0-9A-HJKMNP-TV-Z]{25}@v[1-9][0-9]*$"
+    },
+    "ref": {
+      "description": "A reference from an event: an artifact version or another event.",
+      "anyOf": [{"$ref": "#/$defs/artifact_ref"}, {"$ref": "#/$defs/event_id"}]
+    },
+    "capability_id": {
+      "description": "cap.<domain>.<verb>_<object>.",
+      "type": "string",
+      "pattern": "^cap\\.[a-z][a-z0-9]*\\.[a-z][a-z0-9]*(_[a-z0-9]+)+$"
+    },
+    "role_id": {"type": "string", "pattern": "^role\\.[a-z][a-z0-9]*\\.[a-z][a-z0-9_]*$"},
+    "role_ref": {
+      "description": "Role id pinned to a version, e.g. role.bi.developer@1.0.0.",
+      "type": "string",
+      "pattern": "^role\\.[a-z][a-z0-9]*\\.[a-z][a-z0-9_]*@(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$"
+    },
+    "family_id": {"type": "string", "pattern": "^family\\.[a-z][a-z0-9_-]*$"},
+    "provider_id": {"type": "string", "pattern": "^prv\\.[a-z][a-z0-9_-]*\\.[a-z][a-z0-9_]*$"},
+    "gate_id": {"type": "string", "pattern": "^gate\\.(deterministic|critic|hil)\\.[a-z][a-z0-9_]*$"},
+    "semver": {"type": "string", "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$"},
+    "lang": {
+      "description": "BCP 47 language tag of free-text fields.",
+      "type": "string",
+      "pattern": "^[a-z]{2,3}(-[A-Za-z0-9]{2,8})*$"
+    },
+    "artifact_type": {
+      "description": "Artifact type name used in produces/consumes/can_object_to.",
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]*$"
+    },
+    "lifecycle_status": {"enum": ["draft", "shadow", "active", "deprecated", "retired"]},
+    "impl": {"enum": ["deterministic", "decision", "llm"]},
+    "tier": {"enum": ["local", "economy", "workhorse", "frontier", "decision"]},
+    "topology": {"enum": ["T0", "T1", "T2", "T3", "T4", "T5"]},
+    "risk_class": {"enum": ["R0", "R1", "R2", "R3"]},
+    "data_class": {"enum": ["public", "internal", "client_confidential", "personal", "special_category"]},
+    "value_class": {"enum": ["A", "B", "C"]},
+    "gate_type": {"enum": ["deterministic", "critic", "hil"]},
+    "abstain_outcome": {
+      "enum": ["ABSTAIN_UNKNOWN", "ABSTAIN_INCAPABLE", "ABSTAIN_UNABLE", "ABSTAIN_BUDGET", "ABSTAIN_NOT_PERMITTED"]
+    },
+    "contract_outcome": {
+      "enum": ["DONE", "PARTIAL", "ABSTAIN_UNKNOWN", "ABSTAIN_INCAPABLE", "ABSTAIN_UNABLE", "ABSTAIN_BUDGET", "ABSTAIN_NOT_PERMITTED", "FAILED"]
+    },
+    "probability": {"type": "number", "minimum": 0, "maximum": 1},
+    "usd": {"type": "number", "minimum": 0},
+    "permissions": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "read": {"type": "array", "items": {"$ref": "#/$defs/scope"}, "uniqueItems": true},
+        "write": {"type": "array", "items": {"$ref": "#/$defs/scope"}, "uniqueItems": true},
+        "network": {"type": "boolean"},
+        "code_exec": {"enum": ["none", "sandbox"]}
+      }
+    },
+    "scope": {
+      "description": "Resource scope such as art:* or repo:bi/*.",
+      "type": "string",
+      "pattern": "^[a-z]+:\\S+$"
+    },
+    "budget": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "max_usd_per_contract": {"$ref": "#/$defs/usd"},
+        "max_turns": {"type": "integer", "minimum": 1}
+      }
+    },
+    "gate": {
+      "type": "object",
+      "required": ["on", "type"],
+      "additionalProperties": false,
+      "properties": {
+        "on": {"description": "Trigger, e.g. output or write:prod.", "type": "string", "minLength": 1},
+        "type": {"$ref": "#/$defs/gate_type"},
+        "risk": {"$ref": "#/$defs/risk_class"},
+        "critic_role": {"$ref": "#/$defs/role_id"},
+        "check": {"description": "Deterministic check, e.g. jsonschema or script:checks/x.py.", "type": "string", "minLength": 1}
+      },
+      "allOf": [
+        {"if": {"properties": {"type": {"const": "hil"}}}, "then": {"required": ["risk"]}},
+        {"if": {"properties": {"type": {"const": "critic"}}}, "then": {"required": ["critic_role"]}},
+        {"if": {"properties": {"type": {"const": "deterministic"}}}, "then": {"required": ["check"]}}
+      ]
+    }
+  }
+}

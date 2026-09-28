@@ -1,0 +1,12 @@
+{
+  "id": "evt_01J9ZQ8M2KK3M5N7P9Q1R3S5T7",
+  "ts": "2026-09-28T21:14:03Z",
+  "task": "tsk_01J9ZQ7A1BK3M5N7P9Q1R3S5T7",
+  "contract": "ctr_01J9ZQ7F3CK3M5N7P9Q1R3S5T7",
+  "actor": {"kind": "agent", "id": "agt_01J9ZQ7G4DK3M5N7P9Q1R3S5T7", "role": "role.bi.developer@1.0.0"},
+  "type": "OBJECTION",
+  "refs": ["art_01J9ZQ6X9EK3M5N7P9Q1R3S5T7@v2"],
+  "lang": "cs",
+  "body": {"reason_code": "GRAIN_MISMATCH", "claim": "Fakt Prodej má grain den×produkt, KPI marže vyžaduje den×produkt×sklad.", "proposed_fix": "Přidat sklad do grainu nebo změnit definici KPI.", "severity": "blocking"},
+  "cost": {"adapter": "prv.anthropic.api", "tier": "workhorse", "tokens_in": 6200, "tokens_out": 310, "usd": 0.0, "basis": "exact"}
+}

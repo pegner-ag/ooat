@@ -1,0 +1,19 @@
+{
+  "id": "evt_01J9ZQ71A1K3M5N7P9Q1R3S5T7",
+  "ts": "2026-09-28T20:00:05Z",
+  "task": "tsk_01J9ZQ7A1BK3M5N7P9Q1R3S5T7",
+  "actor": {"kind": "system", "id": "ooat-core"},
+  "type": "TOPOLOGY_DECIDED",
+  "refs": ["evt_01J9ZQ70A0K3M5N7P9Q1R3S5T7"],
+  "body": {
+    "topology": "T4",
+    "rules_applied": [],
+    "parameters": {"v_usd": 400, "c_hil_usd_per_hour": 100, "c_fail_usd": 200},
+    "candidates": [
+      {"topology": "T2", "p_accept": 0.55, "model_usd": 4.0, "hil_hours": 0.5, "p_silent": 0.10, "eu_usd": 146},
+      {"topology": "T3", "p_accept": 0.65, "model_usd": 5.5, "hil_hours": 0.4, "p_silent": 0.05, "eu_usd": 204.5},
+      {"topology": "T4", "p_accept": 0.85, "model_usd": 15.0, "hil_hours": 0.25, "p_silent": 0.04, "eu_usd": 292},
+      {"topology": "T5", "p_accept": 0.87, "model_usd": 30.0, "hil_hours": 0.3, "p_silent": 0.04, "eu_usd": 280}
+    ]
+  }
+}

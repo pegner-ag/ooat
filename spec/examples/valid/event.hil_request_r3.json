@@ -1,0 +1,23 @@
+{
+  "id": "evt_01J9ZQ9B0BK3M5N7P9Q1R3S5T7",
+  "ts": "2026-09-28T22:00:00Z",
+  "task": "tsk_01J9ZQ7A1BK3M5N7P9Q1R3S5T7",
+  "contract": "ctr_01J9ZQ7F3CK3M5N7P9Q1R3S5T7",
+  "actor": {"kind": "system", "id": "ooat-core"},
+  "type": "HIL_REQUEST",
+  "refs": ["art_01J9ZQ6X9EK3M5N7P9Q1R3S5T7@v3"],
+  "lang": "cs",
+  "body": {
+    "question": "Odeslat nabídku klientovi e-mailem?",
+    "risk_class": "R3",
+    "options": [
+      {"id": "send", "label": "Odeslat", "cost_usd": 0.0, "acts": true},
+      {"id": "hold", "label": "Neodesílat", "cost_usd": 0.0, "acts": false}
+    ],
+    "recommended": "send",
+    "default_on_silence": "hold",
+    "deadline": "2026-09-29T10:00:00Z",
+    "blocking": true,
+    "evidence": ["art_01J9ZQ6X9EK3M5N7P9Q1R3S5T7@v3"]
+  }
+}

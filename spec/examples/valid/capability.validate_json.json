@@ -1,0 +1,12 @@
+{
+  "id": "cap.qa.validate_json",
+  "version": "0.1.0",
+  "status": "draft",
+  "summary": "Validates an artifact against its JSON Schema.",
+  "impl": "deterministic",
+  "input_schema": "schemas/artifact_ref.v1.json",
+  "output_schema": "schemas/validation_report.v1.json",
+  "acceptance": [{"id": "unit_tests", "type": "deterministic", "check": "script:checks/validate_json_tests.py"}],
+  "cost_card": {"prior": {"p_accept": 0.99}, "observed": {"n": 0}},
+  "eval_set": "evals/cap.qa.validate_json/"
+}

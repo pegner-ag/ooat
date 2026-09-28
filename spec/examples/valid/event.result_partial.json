@@ -1,0 +1,20 @@
+{
+  "id": "evt_01J9ZQ73A3K3M5N7P9Q1R3S5T7",
+  "ts": "2026-09-28T20:40:00Z",
+  "task": "tsk_01J9ZQ7A1BK3M5N7P9Q1R3S5T7",
+  "contract": "ctr_01J9ZQ7F3CK3M5N7P9Q1R3S5T7",
+  "actor": {"kind": "agent", "id": "agt_01J9ZQ7G4DK3M5N7P9Q1R3S5T7", "role": "role.bi.developer@1.0.0"},
+  "type": "RESULT",
+  "refs": ["art_01J9ZQ6X9EK3M5N7P9Q1R3S5T7@v3"],
+  "lang": "cs",
+  "body": {
+    "outcome": "PARTIAL",
+    "artifacts": ["art_01J9ZQ6X9EK3M5N7P9Q1R3S5T7@v3"],
+    "self_assessment": [
+      {"criterion": "schema_valid", "met": true},
+      {"criterion": "all_kpis_mapped", "met": false, "note": "KPI marže není namapováno."}
+    ],
+    "remaining": "Mapování KPI marže po dodání definice."
+  },
+  "cost": {"adapter": "prv.anthropic.subscription_cli", "tier": "workhorse", "quota_units": 21000, "usd": 0.42, "basis": "shadow"}
+}

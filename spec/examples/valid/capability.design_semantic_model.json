@@ -1,0 +1,33 @@
+{
+  "id": "cap.bi.design_semantic_model",
+  "version": "1.2.0",
+  "status": "active",
+  "summary": "Designs a star-schema semantic model and maps KPIs to measures.",
+  "i18n": {"cs": {"summary": "Navrhne hvězdicový sémantický model a mapování KPI na míry."}},
+  "tags": ["semantic-model", "kpi", "star-schema"],
+  "impl": "llm",
+  "input_schema": "schemas/requirements_spec.v1.json",
+  "output_schema": "schemas/semantic_model_design.v1.json",
+  "acceptance": [
+    {"id": "schema_valid", "type": "deterministic", "check": "jsonschema"},
+    {"id": "all_kpis_mapped", "type": "deterministic", "check": "script:checks/kpi_coverage.py"},
+    {"id": "grain_consistent", "type": "critic", "rubric": "rubrics/star_schema.md"}
+  ],
+  "model_policy": {
+    "tier": "workhorse",
+    "escalate_to": "frontier",
+    "escalate_when": "acceptance_failed >= 2",
+    "max_attempts": 3,
+    "data_classes_allowed": ["public", "internal", "client_confidential"]
+  },
+  "tools": ["read_artifact", "sql_metadata_read"],
+  "cost_card": {
+    "prior": {"tokens_in_p50": 18000, "tokens_out_p50": 4000, "p_accept": 0.7},
+    "observed": {"n": 0, "usd_p50": null, "usd_p90": null, "quota_units_p50": null, "p_accept": null, "p_abstain": null, "p_silent": null}
+  },
+  "abstain_conditions": [
+    "KPI list or KPI definitions are missing",
+    "Source schema is unavailable, even as metadata"
+  ],
+  "eval_set": "evals/cap.bi.design_semantic_model/"
+}

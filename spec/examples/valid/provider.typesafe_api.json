@@ -1,0 +1,26 @@
+{
+  "id": "prv.typesafe.api",
+  "version": "0.1.0",
+  "status": "preview",
+  "vendor": "typesafe",
+  "access": "api",
+  "tiers": {"decision": null},
+  "metering": "exact",
+  "automation_permitted": "operator_confirmed",
+  "concurrency": 1,
+  "data_policy": {"training_on_inputs": false, "retention_days": null, "allowed_data_classes": ["public", "internal"]},
+  "jurisdiction": {
+    "vendor_entity": "TypeSafe AI, Inc.",
+    "vendor_country": "US",
+    "host_entity": "TypeSafe AI, Inc.",
+    "processing_regions": ["us"],
+    "eu_region_available": false,
+    "model_origin_country": "US",
+    "training_on_inputs": false,
+    "retention": null,
+    "zero_retention_available": null,
+    "transfer_notes": "EEA personal data leaves the EEA; operator needs a transfer mechanism.",
+    "source_urls": ["https://typesafe.ai/legal/privacy-policy"],
+    "verified_on": "2026-09-29"
+  }
+}

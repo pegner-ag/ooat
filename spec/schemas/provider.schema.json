@@ -1,0 +1,116 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ooat.invalid/spec/v0.1/provider.schema.json",
+  "title": "OOAT provider adapter manifest",
+  "description": "Declared access to one model source: access type, metering, plan, terms, data policy and jurisdiction (spec sections 6 and 9). Unknown values are null, never guessed.",
+  "type": "object",
+  "required": ["id", "version", "vendor", "access", "tiers", "metering", "automation_permitted", "concurrency", "data_policy", "jurisdiction"],
+  "additionalProperties": false,
+  "properties": {
+    "id": {"$ref": "common.schema.json#/$defs/provider_id"},
+    "version": {"$ref": "common.schema.json#/$defs/semver"},
+    "status": {"description": "Preview adapters may never be the only adapter for a tier.", "enum": ["preview", "stable"]},
+    "vendor": {"type": "string", "pattern": "^[a-z][a-z0-9_-]*$"},
+    "access": {"enum": ["api", "subscription_cli", "subscription_manual", "local"]},
+    "runner": {"description": "Runner used for subscription_cli access.", "type": "string", "minLength": 1},
+    "tiers": {
+      "description": "Tier -> concrete model id; null until the model is chosen.",
+      "type": "object",
+      "minProperties": 1,
+      "propertyNames": {"$ref": "common.schema.json#/$defs/tier"},
+      "additionalProperties": {"type": ["string", "null"], "minLength": 1}
+    },
+    "metering": {"enum": ["exact", "reported", "estimated", "none"]},
+    "plan": {
+      "type": "object",
+      "required": ["fee_usd_month", "quota_window_hours", "units"],
+      "additionalProperties": false,
+      "properties": {
+        "fee_usd_month": {"type": ["number", "null"], "minimum": 0},
+        "quota_window_hours": {"type": ["number", "null"], "exclusiveMinimum": 0},
+        "units": {"enum": ["token_equivalent", "messages", "requests", null]}
+      }
+    },
+    "automation_permitted": {"enum": ["operator_confirmed", "not_permitted", "unknown"]},
+    "concurrency": {"type": "integer", "minimum": 1},
+    "data_policy": {
+      "type": "object",
+      "required": ["training_on_inputs", "retention_days", "allowed_data_classes"],
+      "additionalProperties": false,
+      "properties": {
+        "training_on_inputs": {"type": ["boolean", "null"]},
+        "retention_days": {"type": ["integer", "null"], "minimum": 0},
+        "allowed_data_classes": {
+          "type": "array",
+          "items": {"$ref": "common.schema.json#/$defs/data_class"},
+          "uniqueItems": true
+        }
+      }
+    },
+    "features": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "tool_use": {"type": ["boolean", "null"]},
+        "vision": {"type": ["boolean", "null"]},
+        "context_tokens": {"type": ["integer", "null"], "minimum": 1}
+      }
+    },
+    "jurisdiction": {"$ref": "#/$defs/jurisdiction"}
+  },
+  "allOf": [
+    {
+      "description": "Subscription access needs a plan so the quota shadow price can be computed.",
+      "if": {"properties": {"access": {"enum": ["subscription_cli", "subscription_manual"]}}},
+      "then": {"required": ["plan"]}
+    },
+    {
+      "if": {"properties": {"access": {"const": "subscription_cli"}}},
+      "then": {"required": ["runner"]}
+    },
+    {
+      "description": "Manual relay has no metering and no unattended automation.",
+      "if": {"properties": {"access": {"const": "subscription_manual"}}},
+      "then": {"properties": {"metering": {"const": "none"}, "automation_permitted": {"not": {"const": "operator_confirmed"}}}}
+    },
+    {
+      "description": "personal and client_confidential data only where inputs are not used for training (spec section 9).",
+      "if": {
+        "properties": {
+          "data_policy": {
+            "properties": {
+              "allowed_data_classes": {"contains": {"enum": ["personal", "client_confidential", "special_category"]}}
+            }
+          }
+        }
+      },
+      "then": {"properties": {"data_policy": {"properties": {"training_on_inputs": {"const": false}}}}}
+    }
+  ],
+  "$defs": {
+    "jurisdiction": {
+      "type": "object",
+      "required": [
+        "vendor_entity", "vendor_country", "host_entity", "processing_regions", "eu_region_available",
+        "model_origin_country", "training_on_inputs", "retention", "zero_retention_available",
+        "transfer_notes", "source_urls", "verified_on"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "vendor_entity": {"type": ["string", "null"], "minLength": 1},
+        "vendor_country": {"$ref": "#/$defs/country_or_null"},
+        "host_entity": {"type": ["string", "null"], "minLength": 1},
+        "processing_regions": {"type": ["array", "null"], "items": {"type": "string", "pattern": "^[a-z]{2}(-[a-z0-9-]+)?$"}},
+        "eu_region_available": {"type": ["boolean", "null"]},
+        "model_origin_country": {"$ref": "#/$defs/country_or_null"},
+        "training_on_inputs": {"type": ["boolean", "null"]},
+        "retention": {"description": "Retention as stated by the vendor.", "type": ["string", "null"], "minLength": 1},
+        "zero_retention_available": {"type": ["boolean", "null"]},
+        "transfer_notes": {"type": ["string", "null"], "minLength": 1},
+        "source_urls": {"type": "array", "items": {"type": "string", "format": "uri"}},
+        "verified_on": {"type": ["string", "null"], "format": "date"}
+      }
+    },
+    "country_or_null": {"description": "ISO 3166-1 alpha-2.", "type": ["string", "null"], "pattern": "^[A-Z]{2}$"}
+  }
+}

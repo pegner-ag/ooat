@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ooat.invalid/spec/v0.1/role.schema.json",
+  "title": "OOAT role card",
+  "description": "Named bundle of capabilities with permissions, budget and gates; extends a family and an A2A Agent Card (spec section 5). Narrowing against the family is checked by the catalog linter.",
+  "type": "object",
+  "required": ["id", "extends", "version", "capabilities", "permissions", "budget"],
+  "additionalProperties": false,
+  "properties": {
+    "id": {"$ref": "common.schema.json#/$defs/role_id"},
+    "extends": {"$ref": "common.schema.json#/$defs/family_id"},
+    "version": {"$ref": "common.schema.json#/$defs/semver"},
+    "status": {"$ref": "common.schema.json#/$defs/lifecycle_status"},
+    "a2a": {
+      "type": "object",
+      "required": ["name", "description"],
+      "additionalProperties": false,
+      "properties": {
+        "name": {"type": "string", "minLength": 1},
+        "description": {"type": "string", "minLength": 1},
+        "skills_from": {"const": "capabilities"}
+      }
+    },
+    "capabilities": {
+      "type": "array",
+      "minItems": 1,
+      "items": {"$ref": "common.schema.json#/$defs/capability_id"},
+      "uniqueItems": true
+    },
+    "consumes": {"type": "array", "items": {"$ref": "common.schema.json#/$defs/artifact_type"}, "uniqueItems": true},
+    "produces": {"type": "array", "items": {"$ref": "common.schema.json#/$defs/artifact_type"}, "uniqueItems": true},
+    "can_object_to": {"type": "array", "items": {"$ref": "common.schema.json#/$defs/artifact_type"}, "uniqueItems": true},
+    "permissions": {"$ref": "common.schema.json#/$defs/permissions"},
+    "budget": {
+      "allOf": [{"$ref": "common.schema.json#/$defs/budget"}],
+      "required": ["max_usd_per_contract"]
+    },
+    "gates": {"type": "array", "items": {"$ref": "common.schema.json#/$defs/gate"}}
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "id": "evt_01J9ZQ60A0K3M5N7P9Q1R3S5T7",
+  "ts": "2026-09-28T19:00:00Z",
+  "task": null,
+  "actor": {"kind": "hil", "id": "operator"},
+  "type": "ADAPTER_ACKNOWLEDGED",
+  "refs": [],
+  "body": {
+    "adapter": "prv.typesafe.api",
+    "manifest_version": "0.1.0",
+    "allowed_data_classes": ["public", "internal"],
+    "operator": "Operator"
+  }
+}

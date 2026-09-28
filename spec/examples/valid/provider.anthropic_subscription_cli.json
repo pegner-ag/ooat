@@ -1,0 +1,28 @@
+{
+  "id": "prv.anthropic.subscription_cli",
+  "version": "0.1.0",
+  "vendor": "anthropic",
+  "access": "subscription_cli",
+  "runner": "claude-code-headless",
+  "tiers": {"workhorse": null, "frontier": null},
+  "metering": "reported",
+  "plan": {"fee_usd_month": 100, "quota_window_hours": null, "units": "token_equivalent"},
+  "automation_permitted": "operator_confirmed",
+  "concurrency": 1,
+  "data_policy": {"training_on_inputs": false, "retention_days": null, "allowed_data_classes": ["public", "internal", "client_confidential"]},
+  "features": {"tool_use": true, "vision": true, "context_tokens": null},
+  "jurisdiction": {
+    "vendor_entity": null,
+    "vendor_country": null,
+    "host_entity": null,
+    "processing_regions": null,
+    "eu_region_available": null,
+    "model_origin_country": null,
+    "training_on_inputs": false,
+    "retention": null,
+    "zero_retention_available": null,
+    "transfer_notes": null,
+    "source_urls": [],
+    "verified_on": null
+  }
+}

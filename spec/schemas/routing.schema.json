@@ -1,0 +1,70 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ooat.invalid/spec/v0.1/routing.schema.json",
+  "title": "OOAT routing policy",
+  "description": "Maps tiers to provider adapters, holds dated price lists and the data-class policy (spec sections 6 and 9). catalog/routing.json.",
+  "type": "object",
+  "required": ["version", "tiers", "prices", "data_class_policy"],
+  "additionalProperties": false,
+  "properties": {
+    "version": {"$ref": "common.schema.json#/$defs/semver"},
+    "tiers": {
+      "description": "Tier -> candidate adapters. The router filters and picks by expected cost; order is not a priority.",
+      "type": "object",
+      "minProperties": 1,
+      "propertyNames": {"$ref": "common.schema.json#/$defs/tier"},
+      "additionalProperties": {
+        "type": "array",
+        "minItems": 1,
+        "items": {"$ref": "common.schema.json#/$defs/provider_id"},
+        "uniqueItems": true
+      }
+    },
+    "prices": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["adapter", "model", "usd_per_mtok_in", "usd_per_mtok_out", "valid_from", "source"],
+        "additionalProperties": false,
+        "properties": {
+          "adapter": {"$ref": "common.schema.json#/$defs/provider_id"},
+          "model": {"type": "string", "minLength": 1},
+          "usd_per_mtok_in": {"$ref": "common.schema.json#/$defs/usd"},
+          "usd_per_mtok_cached": {"$ref": "common.schema.json#/$defs/usd"},
+          "usd_per_mtok_out": {"$ref": "common.schema.json#/$defs/usd"},
+          "valid_from": {"type": "string", "format": "date"},
+          "valid_until": {"type": "string", "format": "date"},
+          "source": {"type": "string", "format": "uri"}
+        }
+      }
+    },
+    "data_class_policy": {
+      "description": "Requirements an adapter must meet to receive each data class.",
+      "type": "object",
+      "required": ["public", "internal", "client_confidential", "personal", "special_category"],
+      "propertyNames": {"$ref": "common.schema.json#/$defs/data_class"},
+      "additionalProperties": {
+        "type": "object",
+        "required": ["allowed"],
+        "additionalProperties": false,
+        "properties": {
+          "allowed": {"type": "boolean"},
+          "require_no_training": {"type": "boolean"},
+          "require_known_region": {"type": "boolean"},
+          "require_contract": {"type": "boolean"},
+          "require_verified_redaction": {"type": "boolean"}
+        }
+      }
+    },
+    "critic_other_vendor": {"description": "Prefer a critic from a different vendor than the author for T3+.", "type": "boolean"},
+    "display": {
+      "type": "object",
+      "required": ["currency"],
+      "additionalProperties": false,
+      "properties": {
+        "currency": {"type": "string", "pattern": "^[A-Z]{3}$"},
+        "fx_source": {"type": "string", "format": "uri"}
+      }
+    }
+  }
+}
