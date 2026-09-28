@@ -45,5 +45,5 @@ mutations of valid examples in `tests/test_schemas.py`.
 
 ```sh
 python -m pip install -r requirements-dev.txt
-python -m pytest spec/tests
+python -m pytest
 ```

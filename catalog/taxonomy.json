@@ -1,0 +1,179 @@
+{
+  "version": "0.1.0",
+  "note": "Names and one-line summaries only (F0). impl is the proposed lowest kind that can do the job: deterministic < decision < llm.",
+  "domains": [
+    {
+      "id": "general", "name": "General fallback", "target": 1,
+      "capabilities": [
+        {"id": "cap.general.complete_task", "impl": "llm", "summary": "Completes a task end to end as one general-purpose agent (T2 default) when no specialised capability fits."}
+      ]
+    },
+    {
+      "id": "mgmt", "name": "Management", "target": 8,
+      "capabilities": [
+        {"id": "cap.mgmt.decompose_request", "impl": "llm", "summary": "Splits a request into a DAG of contracts linked by artifact types."},
+        {"id": "cap.mgmt.draft_contract", "impl": "llm", "summary": "Writes one contract: goal, output schema, tools, boundaries, budget and deadline."},
+        {"id": "cap.mgmt.plan_phases", "impl": "llm", "summary": "Produces a phase plan with milestones and exit criteria."},
+        {"id": "cap.mgmt.write_status_report", "impl": "llm", "summary": "Summarises task and contract state from the ledger for a human reader."},
+        {"id": "cap.mgmt.update_risk_register", "impl": "llm", "summary": "Adds or updates risks with likelihood, impact, owner and mitigation."},
+        {"id": "cap.mgmt.synthesise_result", "impl": "llm", "summary": "Combines contract outputs into the final task result, including what is missing."},
+        {"id": "cap.mgmt.classify_task_structure", "impl": "decision", "summary": "Decides whether a task is sequential or decomposable and how many independent branches it has."},
+        {"id": "cap.mgmt.estimate_value_class", "impl": "decision", "summary": "Assigns value class A, B or C to a task from its description and type defaults."}
+      ]
+    },
+    {
+      "id": "account", "name": "Client", "target": 6,
+      "capabilities": [
+        {"id": "cap.account.summarise_requirements", "impl": "llm", "summary": "Turns client material into a structured requirements specification."},
+        {"id": "cap.account.draft_proposal", "impl": "llm", "summary": "Drafts a client proposal from requirements, scope and price."},
+        {"id": "cap.account.draft_client_email", "impl": "llm", "summary": "Drafts a client e-mail; sending is a separate R3 action."},
+        {"id": "cap.account.extract_action_items", "impl": "llm", "summary": "Extracts action items with owners and dates from client communication."},
+        {"id": "cap.account.check_scope_change", "impl": "decision", "summary": "Decides whether a client request falls within the agreed scope."},
+        {"id": "cap.account.prepare_meeting_brief", "impl": "llm", "summary": "Prepares a brief for a client meeting from earlier artifacts and decisions."}
+      ]
+    },
+    {
+      "id": "arch", "name": "Architecture", "target": 8,
+      "capabilities": [
+        {"id": "cap.arch.write_adr", "impl": "llm", "summary": "Writes an architecture decision record with options, decision and consequences."},
+        {"id": "cap.arch.draw_context_diagram", "impl": "llm", "summary": "Produces a system context diagram as diagram-as-code."},
+        {"id": "cap.arch.select_technology", "impl": "llm", "summary": "Compares technology options against stated criteria and recommends one."},
+        {"id": "cap.arch.model_archimate_view", "impl": "llm", "summary": "Models an ArchiMate view for a given viewpoint and scope."},
+        {"id": "cap.arch.define_interface_contract", "impl": "llm", "summary": "Specifies an API or integration interface with schemas and error cases."},
+        {"id": "cap.arch.assess_quality_attributes", "impl": "llm", "summary": "Assesses a design against non-functional requirements such as performance and availability."},
+        {"id": "cap.arch.review_design", "impl": "llm", "summary": "Reviews a design for gaps, risks and inconsistencies against requirements."},
+        {"id": "cap.arch.check_decision_conflict", "impl": "decision", "summary": "Decides whether a design contradicts an existing ADR or DECISION event."}
+      ]
+    },
+    {
+      "id": "data", "name": "Data engineering", "target": 10,
+      "capabilities": [
+        {"id": "cap.data.design_dwh_layer", "impl": "llm", "summary": "Designs a data warehouse layer (staging, core, mart) with grain and keys."},
+        {"id": "cap.data.write_lakehouse_notebook", "impl": "llm", "summary": "Writes a lakehouse notebook that implements a specified transformation."},
+        {"id": "cap.data.define_data_contract", "impl": "llm", "summary": "Defines a data contract: schema, semantics, quality rules and owner."},
+        {"id": "cap.data.generate_dwh_metadata", "impl": "llm", "summary": "Generates metadata for a DWH-automation tool from a model design."},
+        {"id": "cap.data.read_dwh_metadata", "impl": "deterministic", "summary": "Reads schema metadata (tables, columns, keys) from a database without data access."},
+        {"id": "cap.data.profile_dataset", "impl": "deterministic", "summary": "Computes column statistics, null rates and value distributions for a dataset."},
+        {"id": "cap.data.design_ingestion_pipeline", "impl": "llm", "summary": "Designs an ingestion pipeline with sources, schedule, load pattern and error handling."},
+        {"id": "cap.data.write_transformation_sql", "impl": "llm", "summary": "Writes SQL for a specified transformation and its tests."},
+        {"id": "cap.data.map_source_to_target", "impl": "llm", "summary": "Maps source fields to a target model with transformation rules."},
+        {"id": "cap.data.validate_data_contract", "impl": "deterministic", "summary": "Checks a dataset against its data contract and reports violations."}
+      ]
+    },
+    {
+      "id": "bi", "name": "BI and analytics", "target": 8,
+      "capabilities": [
+        {"id": "cap.bi.design_kpi_tree", "impl": "llm", "summary": "Builds a KPI tree from business goals down to measurable indicators."},
+        {"id": "cap.bi.define_kpi", "impl": "llm", "summary": "Writes a KPI definition: formula, grain, filters, owner and target."},
+        {"id": "cap.bi.design_semantic_model", "impl": "llm", "summary": "Designs a star-schema semantic model and maps KPIs to measures."},
+        {"id": "cap.bi.write_measure", "impl": "llm", "summary": "Writes a measure expression for a defined KPI."},
+        {"id": "cap.bi.validate_measure", "impl": "deterministic", "summary": "Runs a measure against test data and compares results with expected values."},
+        {"id": "cap.bi.write_report_spec", "impl": "llm", "summary": "Specifies a report: audience, pages, visuals, filters and measures."},
+        {"id": "cap.bi.review_dashboard", "impl": "llm", "summary": "Reviews a dashboard for clarity, correctness of visuals and KPI coverage."},
+        {"id": "cap.bi.check_kpi_coverage", "impl": "decision", "summary": "Decides whether every required KPI is mapped to a measure in the design."}
+      ]
+    },
+    {
+      "id": "dev", "name": "Software", "target": 12,
+      "capabilities": [
+        {"id": "cap.dev.implement_from_spec", "impl": "llm", "summary": "Implements a feature from a specification in an existing code base."},
+        {"id": "cap.dev.fix_bug", "impl": "llm", "summary": "Finds the root cause of a reported bug and fixes it with a regression test."},
+        {"id": "cap.dev.refactor_code", "impl": "llm", "summary": "Restructures code without changing behaviour, verified by existing tests."},
+        {"id": "cap.dev.write_unit_tests", "impl": "llm", "summary": "Writes unit tests for specified behaviour, including edge cases."},
+        {"id": "cap.dev.write_deployment_script", "impl": "llm", "summary": "Writes a deployment script with verification and rollback steps."},
+        {"id": "cap.dev.write_db_migration", "impl": "llm", "summary": "Writes a reversible database schema migration."},
+        {"id": "cap.dev.write_api_client", "impl": "llm", "summary": "Writes a typed client for a documented API."},
+        {"id": "cap.dev.upgrade_dependency", "impl": "llm", "summary": "Upgrades a dependency and adapts code to breaking changes."},
+        {"id": "cap.dev.analyse_stack_trace", "impl": "llm", "summary": "Explains a stack trace or error log and names the likely cause."},
+        {"id": "cap.dev.document_module", "impl": "llm", "summary": "Writes a module overview: purpose, components and public API."},
+        {"id": "cap.dev.run_tests", "impl": "deterministic", "summary": "Runs a test suite in the sandbox and returns structured results."},
+        {"id": "cap.dev.run_static_checks", "impl": "deterministic", "summary": "Runs linters, type checks and formatters and returns findings."}
+      ]
+    },
+    {
+      "id": "ai", "name": "AI engineering", "target": 8,
+      "capabilities": [
+        {"id": "cap.ai.write_prompt", "impl": "llm", "summary": "Writes a prompt or skill for a capability contract."},
+        {"id": "cap.ai.build_eval_set", "impl": "llm", "summary": "Builds an eval set of 10 to 20 cases, including cases where abstention is correct."},
+        {"id": "cap.ai.write_judge_rubric", "impl": "llm", "summary": "Writes a single-judge rubric with scale and pass threshold."},
+        {"id": "cap.ai.design_rag_pipeline", "impl": "llm", "summary": "Designs a retrieval-augmented generation pipeline: sources, chunking, index and retrieval."},
+        {"id": "cap.ai.select_model", "impl": "llm", "summary": "Recommends a model and tier for a capability from eval results, cost and data policy."},
+        {"id": "cap.ai.run_eval", "impl": "deterministic", "summary": "Runs a capability's eval set and reports acceptance, abstention precision and cost."},
+        {"id": "cap.ai.calibrate_threshold", "impl": "deterministic", "summary": "Computes the autonomy threshold for a decision point from rated history."},
+        {"id": "cap.ai.detect_stall", "impl": "decision", "summary": "Decides whether an agent is repeating itself without progress."}
+      ]
+    },
+    {
+      "id": "qa", "name": "Quality", "target": 8,
+      "capabilities": [
+        {"id": "cap.qa.critique_against_acceptance", "impl": "llm", "summary": "Reviews an output against its acceptance criteria and rubric with evidence."},
+        {"id": "cap.qa.fact_check_sources", "impl": "llm", "summary": "Checks factual claims against cited sources and flags unsupported ones."},
+        {"id": "cap.qa.design_test_scenarios", "impl": "llm", "summary": "Designs test scenarios from requirements, including negative cases."},
+        {"id": "cap.qa.check_acceptance_criterion", "impl": "decision", "summary": "Decides whether one acceptance criterion is met by an output."},
+        {"id": "cap.qa.check_grounding", "impl": "decision", "summary": "Decides whether an output states facts not supported by its inputs."},
+        {"id": "cap.qa.detect_injected_instructions", "impl": "decision", "summary": "Decides whether a text contains instructions addressed to an agent."},
+        {"id": "cap.qa.classify_failure", "impl": "decision", "summary": "Classifies a failed task by MAST category: specification, misalignment or verification."},
+        {"id": "cap.qa.validate_json", "impl": "deterministic", "summary": "Validates an artifact against its JSON Schema."}
+      ]
+    },
+    {
+      "id": "sec", "name": "Security and compliance", "target": 7,
+      "capabilities": [
+        {"id": "cap.sec.build_threat_model", "impl": "llm", "summary": "Builds a threat model with assets, threats, mitigations and residual risk."},
+        {"id": "cap.sec.assess_gdpr", "impl": "llm", "summary": "Assesses a processing activity against GDPR requirements and lists gaps."},
+        {"id": "cap.sec.classify_ai_act_risk", "impl": "llm", "summary": "Proposes an EU AI Act risk classification for an AI system with reasoning."},
+        {"id": "cap.sec.review_permissions", "impl": "llm", "summary": "Reviews granted permissions against least privilege and flags excess."},
+        {"id": "cap.sec.classify_data_class", "impl": "decision", "summary": "Decides the data class of an artifact: public, internal, client confidential, personal or special category."},
+        {"id": "cap.sec.redact_personal_data", "impl": "deterministic", "summary": "Redacts detected personal and special-category entities from text."},
+        {"id": "cap.sec.verify_redaction", "impl": "deterministic", "summary": "Verifies that no detectable personal entity remains after redaction."}
+      ]
+    },
+    {
+      "id": "fin", "name": "Finance", "target": 8,
+      "capabilities": [
+        {"id": "cap.fin.extract_document_data", "impl": "llm", "summary": "Extracts typed fields from invoices, receipts and statements."},
+        {"id": "cap.fin.check_invoice_fields", "impl": "deterministic", "summary": "Checks extracted invoice fields for completeness, totals and tax arithmetic."},
+        {"id": "cap.fin.match_bank_payments", "impl": "deterministic", "summary": "Matches bank transactions to invoices by amount, reference and date."},
+        {"id": "cap.fin.categorise_transaction", "impl": "decision", "summary": "Assigns a transaction to a category from a declared chart of accounts."},
+        {"id": "cap.fin.reconcile_balances", "impl": "deterministic", "summary": "Reconciles account balances between two sources and lists differences."},
+        {"id": "cap.fin.model_cash_flow", "impl": "llm", "summary": "Builds a cash-flow model with stated assumptions and scenarios."},
+        {"id": "cap.fin.calculate_unit_economics", "impl": "llm", "summary": "Calculates unit economics (CAC, LTV, margin) from provided data and states assumptions."},
+        {"id": "cap.fin.draft_invoice", "impl": "llm", "summary": "Drafts an invoice from agreed work; issuing and sending are R3 actions."}
+      ]
+    },
+    {
+      "id": "mkt", "name": "Marketing and sales", "target": 8,
+      "capabilities": [
+        {"id": "cap.mkt.design_landing_funnel", "impl": "llm", "summary": "Designs a landing-page funnel: sections, objections handled and calls to action."},
+        {"id": "cap.mkt.audit_seo", "impl": "llm", "summary": "Audits a page or site for SEO issues and prioritises fixes."},
+        {"id": "cap.mkt.write_copy", "impl": "llm", "summary": "Writes marketing copy for a stated audience, channel and goal."},
+        {"id": "cap.mkt.profile_competitor", "impl": "llm", "summary": "Profiles a competitor: offer, pricing, positioning and sources."},
+        {"id": "cap.mkt.plan_content_calendar", "impl": "llm", "summary": "Plans a content calendar with topics, channels and dates."},
+        {"id": "cap.mkt.draft_social_post", "impl": "llm", "summary": "Drafts a social media post; publishing is a separate R3 action."},
+        {"id": "cap.mkt.analyse_ab_test", "impl": "deterministic", "summary": "Computes A/B test results with significance and confidence intervals."},
+        {"id": "cap.mkt.qualify_lead", "impl": "decision", "summary": "Scores a lead against declared qualification criteria."}
+      ]
+    },
+    {
+      "id": "research", "name": "Research", "target": 6,
+      "capabilities": [
+        {"id": "cap.research.search_web_sources", "impl": "llm", "summary": "Researches a question on the web and returns findings with sources."},
+        {"id": "cap.research.lookup_public_register", "impl": "deterministic", "summary": "Looks up an entity in a public register through its API."},
+        {"id": "cap.research.scan_literature", "impl": "llm", "summary": "Scans papers on a topic and summarises findings with citations."},
+        {"id": "cap.research.compare_vendors", "impl": "llm", "summary": "Compares vendors or products on declared criteria with sources."},
+        {"id": "cap.research.summarise_source", "impl": "llm", "summary": "Summarises one source document, keeping claims traceable to passages."},
+        {"id": "cap.research.rate_source_reliability", "impl": "decision", "summary": "Rates a source's reliability on a declared scale."}
+      ]
+    },
+    {
+      "id": "doc", "name": "Documentation and language", "target": 5,
+      "capabilities": [
+        {"id": "cap.doc.write_tech_doc", "impl": "llm", "summary": "Writes a technical document from artifacts for a stated audience."},
+        {"id": "cap.doc.write_user_guide", "impl": "llm", "summary": "Writes step-by-step user documentation for a feature."},
+        {"id": "cap.doc.translate_text", "impl": "llm", "summary": "Translates text while keeping terminology, format and placeholders."},
+        {"id": "cap.doc.summarise_meeting", "impl": "llm", "summary": "Summarises a meeting transcript into decisions, action items and open questions."},
+        {"id": "cap.doc.edit_for_clarity", "impl": "llm", "summary": "Edits a text for clarity and length without changing its meaning."}
+      ]
+    }
+  ]
+}

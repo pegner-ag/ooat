@@ -1,21 +1,23 @@
-# Catalog taxonomy — 13 families, ~100 capability names
+# Catalog taxonomy — domains, families, ~100 capability names
 
-**Epic:** f0-foundation  **Status:** open
-**Origin:** spec §12 F0, third checklist item
+**Epic:** f0-foundation  **Status:** implemented — waiting for owner review of the capability list
+**Origin:** spec §12 F0, third checklist item; structure per `docs/adr/0004-domains-and-families.md`
 
 ## Goal
-Taxonomy of the starter catalog: 13 family cards and ~102 capability names with one-line summaries, no implementation.
+13 capability domains with ~102 capability names and one-line summaries, plus the abstract role
+families; no implementation.
 
 ## Context
-- Spec §5 "Starter capability domains" (families and target counts), naming `cap.<domain>.<verb>_<object>`.
-- Depends on task-02 (family schema) for the family cards; the name list can start earlier.
+- Spec §5 "Starter capability domains"; ADR 0004 (domains = namespaces, families = kind of work).
 
 ## Acceptance criteria
-- [ ] `catalog/families/*.json` — 13 families (+ `family.base`), valid against the family schema.
-- [ ] `catalog/taxonomy.md` (or JSON) listing every capability: id, one-line English summary, proposed `impl`
-      (`deterministic` / `decision` / `llm`, lowest kind that can do the job).
-- [ ] Counts per family match spec §5 targets (±2).
-- [ ] No capability cards with prompts or cost cards yet.
+- [x] `catalog/families/*.json` — `family.base` + 5 kinds, valid against the family schema; kinds only
+      narrow base permissions and budget (tested).
+- [x] `catalog/taxonomy.json` listing every capability: id, one-line English summary, proposed `impl`.
+- [x] Counts per domain match their `target` in `taxonomy.json` (±2); starter domains use spec §5 targets.
+- [x] `general` domain with the T2 fallback capability `cap.general.complete_task` (103 in total).
+- [x] No capability cards with prompts or cost cards yet.
+- [ ] Owner review of capability names, summaries and proposed `impl`.
 
 ## Out of scope
 The 15 implemented capabilities and 5 roles of F1.

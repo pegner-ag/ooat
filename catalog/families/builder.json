@@ -1,0 +1,13 @@
+{
+  "id": "family.builder",
+  "extends": "family.base",
+  "version": "0.1.0",
+  "status": "draft",
+  "summary": "Produces and changes code, scripts and data pipelines in a sandbox and in repositories.",
+  "rules": [
+    "Run the contract's deterministic checks in the sandbox before returning a result.",
+    "Change only what the contract requires; report unrelated problems instead of fixing them."
+  ],
+  "permissions": {"read": ["art:*", "repo:*"], "write": ["workspace:*", "repo:*"], "network": false, "code_exec": "sandbox"},
+  "budget": {"max_usd_per_contract": 5.0, "max_turns": 40}
+}

@@ -1,0 +1,14 @@
+{
+  "id": "family.reviewer",
+  "extends": "family.base",
+  "version": "0.1.0",
+  "status": "draft",
+  "summary": "Checks other roles' outputs against acceptance criteria and evidence; never edits them.",
+  "rules": [
+    "Never review your own output or output of the same role.",
+    "Judge against the contract's acceptance criteria and rubric only; report each failure with evidence.",
+    "Object only through OBJECTION events with a reason_code; max. 2 rounds per artifact."
+  ],
+  "permissions": {"read": ["art:*", "repo:*"], "write": ["workspace:*"], "network": false, "code_exec": "sandbox"},
+  "budget": {"max_usd_per_contract": 3.0, "max_turns": 20}
+}

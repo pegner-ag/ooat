@@ -3,7 +3,7 @@
 ## Purpose
 OOAT is an open-source framework for multi-agent AI work in which a Topology Gate decides per task whether
 a team is worth its cost. The repository currently contains the specification and the OOA Spec v0.1 JSON Schemas with tests;
-no runtime or catalog exists yet.
+the starter catalog holds role families and capability names only; no runtime exists yet.
 
 ## Technology
 Chosen by decision (see `docs/adr/0001-initial-decisions.md`), not yet used in code:
@@ -16,12 +16,15 @@ Chosen by decision (see `docs/adr/0001-initial-decisions.md`), not yet used in c
 - `spec/ooat-specification.md` — normative design, draft v0.1 (sections 1–14)
 - `spec/manifesto.md` — rationale for non-technical readers
 - `spec/schemas/`, `spec/examples/`, `spec/tests/` — OOA Spec v0.1 JSON Schemas, examples, pytest (see `spec/README.md`)
-- `catalog/`, `core/`, `sdk/`, `adapters/`, `dashboard/`, `evals/` — empty
+- `catalog/families/` — `family.base` and 5 abstract families (analyst, builder, reviewer, communicator, orchestrator)
+- `catalog/taxonomy.json` — 13 starter domains + `general` fallback; 103 capability names with summary, proposed `impl` and per-domain target
+- `catalog/tests/` — schema, family-chain and taxonomy checks
+- `core/`, `sdk/`, `adapters/`, `dashboard/`, `evals/` — empty
 - `docs/adr/` — decision records
 - `tasks/` — open work (To-be), one folder per task
 
 ## Configuration
-None yet. Dev dependencies: `requirements-dev.txt`; run `python -m pytest spec/tests`.
+None yet. Dev dependencies: `requirements-dev.txt`; run `python -m pytest` (paths in `pytest.ini`).
 
 ## Security invariants
 - No secrets in the repository.

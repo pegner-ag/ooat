@@ -1,0 +1,17 @@
+{
+  "id": "family.communicator",
+  "extends": "family.base",
+  "version": "0.1.0",
+  "status": "draft",
+  "summary": "Prepares client-facing and external communication; every output and every send waits for a human.",
+  "rules": [
+    "Draft only; sending, publishing or posting is a separate R3 action approved by a named person.",
+    "Do not read untrusted content in the same contract that prepares an external action; work from a structured extract."
+  ],
+  "permissions": {"read": ["art:*"], "write": ["workspace:*"], "network": false, "code_exec": "none"},
+  "budget": {"max_usd_per_contract": 2.0, "max_turns": 15},
+  "gates": [
+    {"on": "output", "type": "hil", "risk": "R2"},
+    {"on": "send:external", "type": "hil", "risk": "R3"}
+  ]
+}
