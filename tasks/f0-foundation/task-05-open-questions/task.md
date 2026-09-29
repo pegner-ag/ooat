@@ -8,7 +8,6 @@
 - Operator checks the terms of the Anthropic (USD 100) and OpenAI (USD 20) plans for headless automated use,
   then sets `automation_permitted: operator_confirmed` per adapter (ADR 0005).
 - Meta Model API access from an EU account — when available, add the Muse Spark adapter.
-- GitHub location for the public repository (ADR 0006: `github.com/ooat` is taken) — see `tasks/launch/`.
 
 ## Acceptance criteria
 - [ ] Each item resolved and recorded in an ADR or the relevant task.

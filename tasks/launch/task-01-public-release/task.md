@@ -14,11 +14,12 @@ Publish the repository so that newcomers understand OOAT in one minute, can cont
 
 ## Acceptance criteria
 ### At F0 (quiet public repo)
-- [ ] Owner chooses GitHub location (`pegner-ag/ooat` or a new org such as `ooat-dev`).
+- [x] Public repository https://github.com/pegner-ag/ooat (owner's choice, 2026-09-29).
 - [ ] README: one-sentence pitch, the "is a team worth it?" diagram, status badge, links to manifesto and spec.
 - [ ] `CONTRIBUTING.md`, `CODE_OF_CONDUCT.md`, issue and pull-request templates, `SECURITY.md`.
 - [ ] CI running `pytest` on pull requests; Opus 5.5 review on pull requests (ADR 0007).
-- [ ] GitHub topics (multi-agent, llm, ai-agents, agent-framework, cost-optimization), description, social preview image.
+- [x] GitHub description and topics.
+- [ ] Social preview image.
 - [ ] Package names `ooat` reserved on PyPI and npm with a minimal placeholder release.
 
 ### At F1 (announcement)

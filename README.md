@@ -11,7 +11,8 @@ action waiting for a named human.
 
 ## Status
 
-Specification stage (draft v0.1). No runnable code yet.
+Specification stage (draft v0.1): JSON Schemas and the starter catalog taxonomy exist; no runnable runtime yet.
+Decision records are in `docs/adr/`.
 
 ## Repository layout
 

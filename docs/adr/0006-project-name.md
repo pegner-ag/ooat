@@ -19,5 +19,5 @@ were not searched.
 ## Consequences
 
 - Package names `ooat` (PyPI, npm) are used as planned.
-- The GitHub home is not `github.com/ooat`; the location is chosen when the repository goes public.
+- The public repository is https://github.com/pegner-ag/ooat.
 - Schema `$id` host stays `ooat.invalid` until a domain is chosen.
