@@ -1,0 +1,23 @@
+name: Spec feedback
+description: A problem, gap or contradiction in the specification or manifesto
+labels: ["spec"]
+body:
+  - type: input
+    id: section
+    attributes:
+      label: Section
+      description: Section number or heading, e.g. "4. Topology Gate, Step A"
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What is wrong, missing or inconsistent? Evidence and sources are welcome.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed change
+      description: Suggested wording or design. Mention any ADR in docs/adr/ this would change.

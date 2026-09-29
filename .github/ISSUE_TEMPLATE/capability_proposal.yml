@@ -1,0 +1,45 @@
+name: Capability proposal
+description: Propose a new capability for the catalog
+labels: ["catalog"]
+body:
+  - type: input
+    id: id
+    attributes:
+      label: Capability id
+      placeholder: cap.<domain>.<verb>_<object>
+    validations:
+      required: true
+  - type: input
+    id: summary
+    attributes:
+      label: One-line summary (English)
+    validations:
+      required: true
+  - type: dropdown
+    id: impl
+    attributes:
+      label: Implementation kind
+      description: The lowest kind that can do the job.
+      options:
+        - deterministic (code)
+        - decision (typed choice, score or truth value)
+        - llm (free text or code)
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: How is a correct output checked? Prefer checks code can run.
+    validations:
+      required: true
+  - type: textarea
+    id: abstain
+    attributes:
+      label: When should it abstain?
+      description: Inputs or situations where "I don't know" is the correct answer.
+  - type: textarea
+    id: demand
+    attributes:
+      label: Real demand
+      description: Which real tasks need this? The catalog grows from demand, not from plans.

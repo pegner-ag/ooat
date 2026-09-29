@@ -16,10 +16,13 @@ Publish the repository so that newcomers understand OOAT in one minute, can cont
 ### At F0 (quiet public repo)
 - [x] Public repository https://github.com/pegner-ag/ooat (owner's choice, 2026-09-29).
 - [ ] README: one-sentence pitch, the "is a team worth it?" diagram, status badge, links to manifesto and spec.
-- [ ] `CONTRIBUTING.md`, `CODE_OF_CONDUCT.md`, issue and pull-request templates, `SECURITY.md`.
-- [ ] CI running `pytest` on pull requests; Opus 5.5 review on pull requests (ADR 0007).
-- [x] GitHub description and topics.
-- [ ] Social preview image.
+- [x] `CONTRIBUTING.md`, `CODE_OF_CONDUCT.md` (Contributor Covenant 2.1), issue and pull-request templates, `SECURITY.md` with private vulnerability reporting enabled.
+- [x] CI running `pytest` (`.github/workflows/tests.yml`); Opus 5.5 review workflows (`claude-review.yml`, `claude.yml`).
+- [ ] Owner installs the Claude GitHub App and sets `CLAUDE_CODE_OAUTH_TOKEN` or `ANTHROPIC_API_KEY` (review workflows fail until then).
+- [ ] Code of Conduct contact: replace the GitHub-profile pointer with a dedicated contact address if the owner wants one.
+- [x] GitHub description, topics and issue labels (`spec`, `catalog`, `adapter`).
+- [x] Social preview image `docs/assets/social-preview.png` (also README header).
+- [ ] Owner uploads it in GitHub Settings → Social preview (no API for this).
 - [ ] Package names `ooat` reserved on PyPI and npm with a minimal placeholder release.
 
 ### At F1 (announcement)

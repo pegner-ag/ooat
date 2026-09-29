@@ -20,7 +20,9 @@ Chosen by decision (see `docs/adr/0001-initial-decisions.md`), not yet used in c
 - `catalog/taxonomy.json` — 13 starter domains + `general` fallback; 103 capability names with summary, proposed `impl` and per-domain target
 - `catalog/tests/` — schema, family-chain and taxonomy checks
 - `core/`, `sdk/`, `adapters/`, `dashboard/`, `evals/` — empty
-- `docs/adr/` — decision records
+- `docs/adr/` — decision records; `docs/assets/` — images (social preview)
+- `.github/` — CI (`tests.yml`: pytest on 3.12 and 3.13), Claude review workflows (`claude-review.yml` automatic on same-repo PRs, `claude.yml` on `@claude` comments; comment-only, advisory per ADR 0007), issue and PR templates
+- `CONTRIBUTING.md`, `CODE_OF_CONDUCT.md`, `SECURITY.md` — contribution rules, Contributor Covenant 2.1, private vulnerability reporting
 - `tasks/` — open work (To-be), one folder per task
 
 ## Configuration

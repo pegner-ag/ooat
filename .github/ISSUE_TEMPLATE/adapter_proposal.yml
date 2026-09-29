@@ -1,0 +1,34 @@
+name: Adapter proposal
+description: Propose a provider, notifier or store adapter
+labels: ["adapter"]
+body:
+  - type: input
+    id: provider
+    attributes:
+      label: Vendor and product
+    validations:
+      required: true
+  - type: dropdown
+    id: access
+    attributes:
+      label: Access type
+      options:
+        - api
+        - subscription_cli
+        - subscription_manual
+        - local
+        - notifier / store / other
+    validations:
+      required: true
+  - type: textarea
+    id: terms
+    attributes:
+      label: Terms for automated use
+      description: Link to the provider's terms. Unknown is an acceptable answer; guessing is not.
+    validations:
+      required: true
+  - type: textarea
+    id: jurisdiction
+    attributes:
+      label: Jurisdiction and data policy
+      description: Vendor entity and country, processing regions, training on inputs, retention — each with a source URL.
