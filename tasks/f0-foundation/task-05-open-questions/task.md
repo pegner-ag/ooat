@@ -1,17 +1,14 @@
-# Open questions Q7–Q12 (owner decisions)
+# Open questions and follow-ups (owner)
 
-**Epic:** f0-foundation  **Status:** open — waiting for the owner
-**Origin:** spec §13 "Open questions"
+**Epic:** f0-foundation  **Status:** open — follow-ups only
+**Origin:** spec §13 "Open questions"; answers recorded in ADR 0005 (Q7, Q8), 0006 (Q10), 0007 (Q11)
 
-## Goal
-Get owner answers and record each as an ADR in `docs/adr/`.
-
-## Questions
-- **Q7** Access: Jev early access? Meta Model API from an EU account? (decides F1 `decision` tier and Muse Spark adapter)
-- **Q8** First F1 adapters — proposal: Anthropic API (`workhorse`, `frontier`) + Jev (`decision`) + one subscription CLI already paid for.
-- **Q10** Is "OOAT" free as project / PyPI / npm name? — can be checked by an agent, owner decides.
-- **Q11** Maintainers and governance model.
-- **Q12** The 5 seed tasks — see task-04.
+## Remaining
+- **Q12** The 5 seed tasks — owner works on task-04.
+- Operator checks the terms of the Anthropic (USD 100) and OpenAI (USD 20) plans for headless automated use,
+  then sets `automation_permitted: operator_confirmed` per adapter (ADR 0005).
+- Meta Model API access from an EU account — when available, add the Muse Spark adapter.
+- GitHub location for the public repository (ADR 0006: `github.com/ooat` is taken) — see `tasks/launch/`.
 
 ## Acceptance criteria
-- [ ] Each answered question has an ADR (`docs/adr/000N-<topic>.md`) and is removed from this list.
+- [ ] Each item resolved and recorded in an ADR or the relevant task.

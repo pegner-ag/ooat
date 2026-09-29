@@ -25,7 +25,7 @@ Non-technical rationale: `spec/manifesto.md`.
 - Provider manifests: unknown values stay `null`, never guessed. Never work around provider terms.
 - Irreversible (R3) actions always require a named human approver — no code path may bypass this.
 - `cost_card.observed` is written only by the runtime from the ledger, never by hand.
-- No public repo, remote, package publish (PyPI/npm) or name choice without the owner (open Q10). Licence: Apache 2.0 (ADR 0002).
+- No public repo, remote, package publish (PyPI/npm) without the owner. Name OOAT (ADR 0006), licence Apache 2.0 (ADR 0002), governance ADR 0007.
 - Stack: Python 3.12+ (FastAPI, Pydantic v2, SQLite→Postgres), TypeScript dashboard, JSON Schema 2020-12.
 
 ## Known Entities & Gotchas

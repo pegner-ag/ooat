@@ -16,4 +16,4 @@
 | D10 | Agent runtime | Claude Agent SDK as F1 default; NOOA as F4 pilot adapter. |
 | D11 | Jev / Muse | Jev = engine of the `decision` tier; Muse Spark = `workhorse` candidate via Meta Model API; Muse app is not an adapter. |
 
-Open questions Q7, Q8, Q10–Q12 are tracked in `tasks/f0-foundation/task-05-open-questions/`.
+Later decisions: ADR 0002 (licence), 0005 (Q7, Q8), 0006 (Q10), 0007 (Q11). Q12 is tracked in `tasks/f0-foundation/task-04-seed-calibration-tasks/`.
