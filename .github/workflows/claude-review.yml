@@ -5,8 +5,9 @@ name: Claude review
 # Automatic on pull requests from branches of this repository. Pull requests from forks get no secrets,
 # so the maintainer asks for a review by commenting "@claude" instead (claude.yml).
 #
-# Requires the Claude GitHub App on the repository and one of the secrets CLAUDE_CODE_OAUTH_TOKEN
-# (subscription, see ADR 0005 on automation terms) or ANTHROPIC_API_KEY.
+# Requires the Claude GitHub App on the repository and the secret CLAUDE_CODE_OAUTH_TOKEN (subscription
+# first, ADR 0005). To switch to a metered API, replace it with anthropic_api_key: ANTHROPIC_API_KEY.
+# The installer's claude-code-review.yml was removed: it duplicated this review on every pull request.
 
 on:
   pull_request:
@@ -29,7 +30,6 @@ jobs:
       - uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           use_sticky_comment: true
           prompt: |
             REPO: ${{ github.repository }}

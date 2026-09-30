@@ -18,7 +18,7 @@ Publish the repository so that newcomers understand OOAT in one minute, can cont
 - [ ] README: one-sentence pitch, the "is a team worth it?" diagram, status badge, links to manifesto and spec.
 - [x] `CONTRIBUTING.md`, `CODE_OF_CONDUCT.md` (Contributor Covenant 2.1), issue and pull-request templates, `SECURITY.md` with private vulnerability reporting enabled.
 - [x] CI running `pytest` (`.github/workflows/tests.yml`); Opus 5.5 review workflows (`claude-review.yml`, `claude.yml`).
-- [ ] Owner installs the Claude GitHub App and sets `CLAUDE_CODE_OAUTH_TOKEN` or `ANTHROPIC_API_KEY` (review workflows fail until then).
+- [x] Claude GitHub App installed, `CLAUDE_CODE_OAUTH_TOKEN` set (2026-09-29).
 - [ ] Code of Conduct contact: replace the GitHub-profile pointer with a dedicated contact address if the owner wants one.
 - [x] GitHub description, topics and issue labels (`spec`, `catalog`, `adapter`).
 - [x] Social preview image `docs/assets/social-preview.png` (also README header).
