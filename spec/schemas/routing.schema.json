@@ -4,12 +4,12 @@
   "title": "OOAT routing policy",
   "description": "Maps tiers to provider adapters, holds dated price lists and the data-class policy (spec sections 6 and 9). catalog/routing.json.",
   "type": "object",
-  "required": ["version", "tiers", "prices", "data_class_policy"],
+  "required": ["version", "prices", "data_class_policy"],
   "additionalProperties": false,
   "properties": {
     "version": {"$ref": "common.schema.json#/$defs/semver"},
     "tiers": {
-      "description": "Tier -> candidate adapters. The router filters and picks by expected cost; order is not a priority.",
+      "description": "Optional allow-list: tier -> adapters that may serve it. A tier without an entry accepts every acknowledged connector whose manifest maps it (ADR 0010). Order is not a priority.",
       "type": "object",
       "minProperties": 1,
       "propertyNames": {"$ref": "common.schema.json#/$defs/tier"},

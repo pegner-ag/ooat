@@ -115,6 +115,19 @@ INVALID = [
     ("event_non_utc_timestamp", "event", "event.abstain.json", _set(["ts"], "2026-09-28T21:20:00+02:00")),
     ("event_gate_rule_out_of_range", "event", "event.topology_decided.json",
      _set(["body", "rules_applied"], ["A11"])),
+    # ADR 0010
+    ("provider_operator_confirmed_is_no_longer_a_term", "provider", "provider.typesafe_api.json",
+     _set(["automation_permitted"], "operator_confirmed")),
+    ("event_acknowledgement_without_automation_answer", "event", "event.adapter_acknowledged.json",
+     _delete(["body", "automation_confirmed"])),
+    ("event_acknowledgement_with_bad_fingerprint", "event", "event.adapter_acknowledged.json",
+     _set(["body", "jurisdiction_sha256"], "not-a-digest")),
+    ("event_adapter_disabled_by_system", "event", "event.adapter_disabled.json",
+     _set(["actor"], {"kind": "system", "id": "ooat-gateway"})),
+    ("event_adapter_disabled_without_reason", "event", "event.adapter_disabled.json",
+     _delete(["body", "reason"])),
+    ("event_negative_estimate", "event", "event.result_partial.json",
+     _set(["cost", "estimated_usd"], -1)),
 ]
 
 

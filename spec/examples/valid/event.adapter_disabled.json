@@ -1,0 +1,16 @@
+{
+  "id": "evt_01J9ZQ61A1K3M5N7P9Q1R3S5T7",
+  "ts": "2026-10-01T09:00:00Z",
+  "task": null,
+  "actor": {
+    "kind": "hil",
+    "id": "operator"
+  },
+  "type": "ADAPTER_DISABLED",
+  "refs": [],
+  "body": {
+    "adapter": "prv.typesafe.api",
+    "operator": "Operator",
+    "reason": "Early access ended."
+  }
+}
