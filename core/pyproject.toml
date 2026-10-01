@@ -1,0 +1,15 @@
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+[project]
+name = "ooat-core"
+version = "0.1.0.dev0"
+description = "OOAT reference runtime: ledger, contracts and Topology Gate."
+readme = "description.md"
+requires-python = ">=3.12"
+license = "Apache-2.0"
+dependencies = ["jsonschema>=4.23", "referencing>=0.30", "rfc3339-validator>=0.1.4"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/ooat_core"]
