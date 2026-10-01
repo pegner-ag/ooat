@@ -31,7 +31,7 @@
         "units": {"enum": ["token_equivalent", "messages", "requests", null]}
       }
     },
-    "automation_permitted": {"enum": ["operator_confirmed", "not_permitted", "unknown"]},
+    "automation_permitted": {"description": "Published provider terms for unattended use; the operator confirmation lives in ADAPTER_ACKNOWLEDGED (ADR 0010).", "enum": ["permitted", "not_permitted", "unknown"]},
     "concurrency": {"type": "integer", "minimum": 1},
     "data_policy": {
       "type": "object",
@@ -71,7 +71,7 @@
     {
       "description": "Manual relay has no metering and no unattended automation.",
       "if": {"properties": {"access": {"const": "subscription_manual"}}},
-      "then": {"properties": {"metering": {"const": "none"}, "automation_permitted": {"not": {"const": "operator_confirmed"}}}}
+      "then": {"properties": {"metering": {"const": "none"}, "automation_permitted": {"not": {"const": "permitted"}}}}
     },
     {
       "description": "personal and client_confidential data only where inputs are not used for training (spec section 9).",

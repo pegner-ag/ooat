@@ -6,7 +6,7 @@
   "access": "api",
   "tiers": {"decision": null},
   "metering": "exact",
-  "automation_permitted": "operator_confirmed",
+  "automation_permitted": "unknown",
   "concurrency": 1,
   "data_policy": {"training_on_inputs": false, "retention_days": null, "allowed_data_classes": ["public", "internal"]},
   "jurisdiction": {
