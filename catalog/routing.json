@@ -27,6 +27,22 @@
       "usd_per_mtok_out": 20,
       "valid_from": "2026-10-01",
       "source": "https://platform.claude.com/docs/en/about-claude/pricing"
+    },
+    {
+      "adapter": "prv.typesafe.api",
+      "model": "jev-latest",
+      "usd_per_mtok_in": 0.042,
+      "usd_per_mtok_out": 0,
+      "valid_from": "2026-10-01",
+      "source": "https://docs.typesafe.ai/models.md"
+    },
+    {
+      "adapter": "prv.typesafe.api",
+      "model": "jev-1.13.0",
+      "usd_per_mtok_in": 0.042,
+      "usd_per_mtok_out": 0,
+      "valid_from": "2026-10-01",
+      "source": "https://docs.typesafe.ai/models.md"
     }
   ],
   "data_class_policy": {
