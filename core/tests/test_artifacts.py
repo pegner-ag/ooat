@@ -84,3 +84,24 @@ def test_concurrent_puts_of_the_same_content(tmp_path):
     assert set(digests) == {hashlib.sha256(content).hexdigest()}
     assert blobs.get(digests[0]) == content
     assert not list(tmp_path.rglob("*.partial"))
+
+
+def test_transient_sharing_violation_is_retried(tmp_path, monkeypatch):
+    """Windows refuses reads for a moment while another writer replaces the same blob."""
+    from pathlib import Path as _Path
+
+    blobs = BlobStore(tmp_path)
+    digest = blobs.put(b"data")
+    real_read = _Path.read_bytes
+    failures = {"left": 1}
+
+    def flaky_read(self):
+        if failures["left"]:
+            failures["left"] -= 1
+            raise PermissionError(13, "The process cannot access the file")
+        return real_read(self)
+
+    monkeypatch.setattr(_Path, "read_bytes", flaky_read)
+    assert blobs.get(digest) == b"data"
+    failures["left"] = 1
+    assert blobs.put(b"data") == digest

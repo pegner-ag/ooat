@@ -2,10 +2,24 @@
 
 import hashlib
 import os
+import time
 import uuid
 from pathlib import Path
 
 _HEX = frozenset("0123456789abcdef")
+_READ_ATTEMPTS = 8  # about 1.3 s in total with the backoff below
+
+
+def _read(path: Path) -> bytes:
+    """Read a blob; on Windows a file being replaced by another writer refuses reads for a moment, so retry."""
+    for attempt in range(_READ_ATTEMPTS):
+        try:
+            return path.read_bytes()
+        except PermissionError:
+            if attempt == _READ_ATTEMPTS - 1:
+                raise
+            time.sleep(0.01 * 2**attempt)
+    raise AssertionError("unreachable")
 
 
 class BlobStore:
@@ -36,10 +50,10 @@ class BlobStore:
 
     @staticmethod
     def _intact(path: Path, digest: str) -> bool:
-        return hashlib.sha256(path.read_bytes()).hexdigest() == digest
+        return hashlib.sha256(_read(path)).hexdigest() == digest
 
     def get(self, digest: str) -> bytes:
-        content = self._path(digest).read_bytes()
+        content = _read(self._path(digest))
         if hashlib.sha256(content).hexdigest() != digest:
             raise ValueError(f"blob {digest} does not match its digest")
         return content
