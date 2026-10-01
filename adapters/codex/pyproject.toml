@@ -1,0 +1,18 @@
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+[project]
+name = "ooat-adapter-codex"
+version = "0.1.0"
+description = "OOAT model connector for OpenAI Codex CLI (codex exec) on a ChatGPT plan."
+readme = "description.md"
+requires-python = ">=3.12"
+license = "Apache-2.0"
+dependencies = ["ooat-core"]
+
+[project.entry-points."ooat.connectors"]
+codex = "ooat_adapter_codex:CodexConnector"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/ooat_adapter_codex"]
