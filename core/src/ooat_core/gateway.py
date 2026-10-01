@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
 from .config import Config
+from .connector_admin import acknowledgements
 from .connectors import ConnectorError, ModelConnector, ModelRequest, ModelResponse, jurisdiction_stale
 from .connectors.registry import Registry
 from .ledger import DATA_CLASSES, Ledger, new_event
@@ -134,11 +135,11 @@ class Gateway:
         if request.data_class not in DATA_CLASSES:
             raise ValueError(f"unknown data class: {request.data_class}")
         events = self._ledger.events(types=_STATE_EVENTS)
-        acknowledgements, cooldowns = self._acknowledgements(events), self._cooldowns(events)
+        acknowledged, cooldowns = acknowledgements(events), self._cooldowns(events)
         candidates, trace, cooling = [], [], set()
         for connector_id in self._registry.ids():
             connector = self._registry.get(connector_id)
-            reason = self._exclusion(connector, request, acknowledgements.get(connector_id), cooldowns)
+            reason = self._exclusion(connector, request, acknowledged.get(connector_id), cooldowns)
             if reason is None:
                 reason, candidate = self._priced(connector, request)
                 if candidate is not None:
@@ -214,16 +215,6 @@ class Gateway:
         tokens_out = request.expected_output_tokens or request.max_output_tokens
         estimate = Estimate(connector_id, model, tokens_in, tokens_out, price.usd(tokens_in, 0, tokens_out), "prior")
         return None, _Candidate(estimate, connector, price)
-
-    @staticmethod
-    def _acknowledgements(events: list[dict]) -> dict[str, dict]:
-        state: dict[str, dict | None] = {}
-        for event in events:
-            if event["type"] == "ADAPTER_ACKNOWLEDGED":
-                state[event["body"]["adapter"]] = event["body"]
-            elif event["type"] == "ADAPTER_DISABLED":
-                state[event["body"]["adapter"]] = None
-        return {connector_id: body for connector_id, body in state.items() if body is not None}
 
     def _cooldowns(self, events: list[dict]) -> dict[str, str]:
         latest = {e["body"]["adapter"]: e["body"] for e in events if e["type"] == "QUOTA_WARNING"}
