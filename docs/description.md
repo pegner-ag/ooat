@@ -4,13 +4,15 @@
 OOAT is an open-source framework for multi-agent AI work in which a Topology Gate decides per task whether
 a team is worth its cost. The repository currently contains the specification and the OOA Spec v0.1 JSON Schemas with tests;
 the starter catalog holds role families and capability names only; `ooat-core` has the ledger foundation
-and the provider gateway core (no concrete connectors, Gate, workers or API yet).
+and the provider gateway with model and decision connectors (no Gate, workers or API yet).
 
 ## Technology
 In use:
 - Core runtime: Python 3.12+ (`core/`), JSON Schema 2020-12 validation (`jsonschema`)
 - Ledger backend: SQLite, selected by URL (ADR 0008)
 - Model connectors as separate packages in `adapters/`: Claude Code CLI, Codex CLI, Anthropic Messages API
+- Decision connector `adapters/typesafe-jev`: TypeSafe System One API (Jev), with the economy text tier as
+  fallback (ADR 0011)
 
 Chosen by decision (`docs/adr/`), not yet used in code:
 - FastAPI and Pydantic v2 for the API
@@ -25,7 +27,8 @@ Chosen by decision (`docs/adr/`), not yet used in code:
 - `catalog/taxonomy.json` — 13 starter domains + `general` fallback; 103 capability names with summary, proposed `impl` and per-domain target
 - `catalog/tests/` — schema, family-chain and taxonomy checks
 - `core/` — `ooat-core` package: ledger, artifact storage, state projections, provider gateway core (see `core/description.md`)
-- `adapters/` — connector packages `ooat-adapter-claude-code`, `ooat-adapter-codex`, `ooat-adapter-anthropic-api`
+- `adapters/` — connector packages `ooat-adapter-claude-code`, `ooat-adapter-codex`, `ooat-adapter-anthropic-api`,
+  `ooat-adapter-typesafe-jev`
   (each with `description.md`), `integration_tests/` (gateway with the real connectors, no network)
 - `catalog/routing.json` — reference routing policy: Anthropic list prices with source and date, data-class policy
 - `sdk/`, `dashboard/`, `evals/` — empty
@@ -39,7 +42,8 @@ Chosen by decision (`docs/adr/`), not yet used in code:
 variable names). Connector enablement is ledger state (`ADAPTER_ACKNOWLEDGED`, `ADAPTER_DISABLED`, ADR 0010),
 written by `ooat connectors enable | disable` after the operator has read the connection consequences card.
 Prices and the data-class policy: `catalog/routing.json`. Dev dependencies: `requirements-dev.txt`, then
-`pip install -e core -e adapters/claude-code -e adapters/codex -e adapters/anthropic-api`; run `python -m pytest`
+`pip install -e core -e adapters/claude-code -e adapters/codex -e adapters/anthropic-api -e adapters/typesafe-jev`;
+run `python -m pytest`
 (paths in `pytest.ini`). Tests that spend quota or credit run only with `OOAT_LIVE=1`.
 
 ## Security invariants
