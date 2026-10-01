@@ -19,6 +19,18 @@ action waiting for a named human.
 Specification stage (draft v0.1): JSON Schemas and the starter catalog taxonomy exist; no runnable runtime yet.
 Decision records are in `docs/adr/`.
 
+## First steps
+
+```sh
+python -m pip install -e core -e adapters/claude-code -e adapters/codex -e adapters/anthropic-api
+ooat connectors list                      # installed connectors and their state
+ooat connectors show prv.anthropic.api    # connection consequences card
+ooat connectors enable prv.anthropic.api --operator "Your Name"
+```
+
+Settings live in `ooat.toml` (ledger URL, per-tier pins, connector settings; secrets only as environment
+variable names); prices and the data-class policy in `catalog/routing.json`.
+
 ## Repository layout
 
 | Folder | Content |
