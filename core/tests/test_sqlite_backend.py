@@ -3,7 +3,7 @@ import sqlite3
 import pytest
 
 from ooat_core.backends import LedgerIntegrityError
-from ooat_core.backends.sqlite import SqliteBackend
+from ooat_core.backends.sqlite import SCHEMA_VERSION, SqliteBackend
 
 EVENT = {"id": "evt_1", "ts": "2026-10-01T00:00:00Z", "task_id": "tsk_1", "actor_kind": "hil",
          "actor_id": "operator", "type": "TASK_SUBMITTED", "refs": "[]", "body": "{}"}
@@ -57,3 +57,22 @@ def test_orphan_artifact_is_rejected_without_the_foreign_key_pragma(tmp_path):
     with pytest.raises(sqlite3.DatabaseError, match="producing event"):
         raw.execute("INSERT INTO artifact VALUES ('art_9', 1, 'summary', 'public', 0, 'x', 'blob:x', 'evt_missing')")
     raw.close()
+
+
+def test_new_ledger_records_its_schema_version(tmp_path):
+    path = tmp_path / "ledger.sqlite"
+    SqliteBackend(path).close()
+    raw = sqlite3.connect(path)
+    assert raw.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
+    raw.close()
+
+
+def test_ledger_written_by_newer_code_is_refused(tmp_path):
+    path = tmp_path / "ledger.sqlite"
+    SqliteBackend(path).close()
+    raw = sqlite3.connect(path)
+    raw.execute(f"PRAGMA user_version = {SCHEMA_VERSION + 1}")
+    raw.commit()
+    raw.close()
+    with pytest.raises(ValueError, match="newer"):
+        SqliteBackend(path)

@@ -15,6 +15,8 @@ _ARTIFACT_REF = re.compile(r"^(art_[0-7][0-9A-HJKMNP-TV-Z]{25})@v([1-9][0-9]*)$"
 def ulid(timestamp_ms: int | None = None) -> str:
     """26-character Crockford base32 ULID: 48-bit millisecond timestamp + 80 random bits."""
     ms = int(time.time() * 1000) if timestamp_ms is None else timestamp_ms
+    if not 0 <= ms < 2**48:
+        raise ValueError(f"ULID timestamp out of 48-bit range: {ms}")
     value = (ms << 80) | int.from_bytes(os.urandom(10), "big")
     return "".join(_CROCKFORD[(value >> shift) & 31] for shift in range(125, -1, -5))
 

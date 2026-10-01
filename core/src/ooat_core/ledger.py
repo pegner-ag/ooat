@@ -13,6 +13,10 @@ from .backends import LedgerBackend, open_backend
 from .ids import is_artifact_ref, new_id, parse_artifact_ref
 from .validation import SpecValidationError, validate
 
+_SQL_INT_MAX = 2**63 - 1
+_COST_INTEGERS = ("tokens_in", "tokens_cached", "tokens_out")
+_HEX = frozenset("0123456789abcdef")
+
 # The envelope's cost keys differ from the spec's column names for usd and basis.
 _COST_COLUMNS = {
     "adapter": "adapter", "tier": "tier", "tokens_in": "tokens_in", "tokens_cached": "tokens_cached",
@@ -117,7 +121,11 @@ class Ledger:
             json.dumps(event, allow_nan=False)
         except ValueError:
             raise SpecValidationError("event", ["numbers must be finite (no NaN or Infinity)"]) from None
+        too_large = [key for key in _COST_INTEGERS if event.get("cost", {}).get(key, 0) > _SQL_INT_MAX]
+        if too_large:
+            raise SpecValidationError("event", [f"$.cost.{key}: exceeds a 64-bit integer" for key in too_large])
         artifacts = list(artifacts)
+        self._check_staged(artifacts)
         staged_refs = {a.ref for a in artifacts}
         unreferenced = sorted(staged_refs - set(event["refs"]))
         if unreferenced:
@@ -137,8 +145,30 @@ class Ledger:
         self.backend.insert(_event_row(event), artifact_rows)
         return event
 
+    def _check_staged(self, artifacts: list[StagedArtifact]) -> None:
+        """Staged records must be what ArtifactStore produces: real digest, blob URI, next version without gaps."""
+        expected: dict[str, int] = {}
+        for artifact in artifacts:
+            if not artifact.type:
+                raise ValueError(f"{artifact.ref}: artifact type is empty")
+            if len(artifact.sha256) != 64 or not set(artifact.sha256) <= _HEX:
+                raise ValueError(f"{artifact.ref}: not a SHA-256 hex digest")
+            if artifact.uri != f"blob:{artifact.sha256}":
+                raise ValueError(f"{artifact.ref}: uri must be blob:<sha256>")
+            artifact_id, version = parse_artifact_ref(artifact.ref)
+            next_version = expected.get(artifact_id) or self.next_artifact_version(artifact_id)
+            if version != next_version:
+                raise ValueError(f"{artifact.ref}: expected version {next_version}")
+            expected[artifact_id] = version + 1
+
     def events(self, task: str | None = None, types: Iterable[str] = ()) -> list[dict]:
-        """Events in append order, optionally filtered by task and event types."""
+        """Events in append order, optionally filtered by task and event types.
+
+        Optional envelope keys stored as null (e.g. "contract": null) are omitted, and quota_units come back
+        as float; read events compare equal to what was appended but are not byte-identical JSON.
+        """
+        if isinstance(types, str):
+            raise TypeError("types must be a list of event types, not a string")
         return [_row_event(row) for row in self.backend.select_events(task, list(types))]
 
     def artifact(self, ref: str) -> dict | None:

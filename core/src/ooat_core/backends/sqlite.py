@@ -5,6 +5,9 @@ from pathlib import Path
 
 from . import LedgerIntegrityError
 
+# Bumped with every DDL change; a ledger written by newer code is never opened by older code.
+SCHEMA_VERSION = 1
+
 # Spec §7 event table plus seq (portable append order) and the artifact table.
 # task_id is nullable because ADAPTER_ACKNOWLEDGED has no task (ADR 0003).
 _DDL = """
@@ -73,7 +76,12 @@ class SqliteBackend:
         self._db = sqlite3.connect(str(path))
         self._db.row_factory = sqlite3.Row
         self._db.execute("PRAGMA foreign_keys = ON")
+        (version,) = self._db.execute("PRAGMA user_version").fetchone()
+        if version > SCHEMA_VERSION:
+            self._db.close()
+            raise ValueError(f"ledger schema version {version} is newer than this code ({SCHEMA_VERSION})")
         self._db.executescript(_DDL)
+        self._db.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
 
     def insert(self, event_row: dict, artifact_rows: list[dict]) -> None:
         try:

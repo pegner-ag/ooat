@@ -7,10 +7,15 @@ F1 covers topologies T0–T2; PLANNED and REVIEW arrive with T3+.
 from collections.abc import Iterable
 
 
-def task_state(events: Iterable[dict]) -> str | None:
-    """Lifecycle state of one task from its events in ledger order; None before TASK_SUBMITTED."""
+def task_state(events: Iterable[dict], task: str | None = None) -> str | None:
+    """Lifecycle state of one task from its events in ledger order; None before TASK_SUBMITTED.
+
+    Pass `task` when `events` may contain other tasks' events.
+    """
     state, open_requests = None, set()
     for event in events:
+        if task is not None and event.get("task") != task:
+            continue
         kind, body = event["type"], event["body"]
         if kind == "TASK_SUBMITTED":
             state = "SUBMITTED"
@@ -25,6 +30,8 @@ def task_state(events: Iterable[dict]) -> str | None:
             open_requests.discard(body["request"])
         elif kind == "TASK_CLOSED":
             return body["state"]
+    if state is None:
+        return None
     if open_requests and state != "CLARIFYING":
         return "HIL_WAIT"
     return state

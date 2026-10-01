@@ -1,3 +1,5 @@
+import dataclasses
+
 import pytest
 
 from ooat_core.backends import LedgerIntegrityError
@@ -96,8 +98,10 @@ def test_non_finite_numbers_are_rejected(ledger):
 def test_event_and_artifacts_are_written_atomically(ledger):
     task, contract, ref = new_id("tsk"), new_id("ctr"), new_id("art") + "@v1"
     first = ledger.append(result(task, contract, [ref]), [staged(ref)])
-    with pytest.raises(LedgerIntegrityError):  # the same artifact version again
-        ledger.append(result(task, contract, [ref]), [staged(ref)])
+    second = new_id("art") + "@v1"
+    rejected_by_database = dataclasses.replace(staged(second), data_class="secret")  # CHECK fails after the event row
+    with pytest.raises(LedgerIntegrityError):
+        ledger.append(result(task, contract, [second]), [rejected_by_database])
     assert [e["id"] for e in ledger.events()] == [first["id"]]
 
 
@@ -121,3 +125,47 @@ def test_unknown_or_planned_backends():
     for url in ("postgresql://host/ooat", "mssql://host/ooat"):
         with pytest.raises(NotImplementedError):
             Ledger.open(url)
+
+    with pytest.raises(ValueError, match="query"):
+        Ledger.open("sqlite:///ledger.sqlite?mode=ro")
+
+
+def test_oversized_integers_are_rejected(ledger):
+    ref = new_id("art") + "@v1"
+    event = result(new_id("tsk"), new_id("ctr"), [ref])
+    event["cost"]["tokens_in"] = 2**70
+    with pytest.raises(SpecValidationError, match="tokens_in"):
+        ledger.append(event, [staged(ref)])
+    assert ledger.events() == []
+
+
+def test_event_types_filter_must_not_be_a_string(ledger):
+    with pytest.raises(TypeError):
+        ledger.events(types="RESULT")
+
+
+@pytest.mark.parametrize("field, value", [
+    ("sha256", "not-a-digest"),
+    ("uri", "file:///etc/passwd"),
+    ("type", ""),
+])
+def test_malformed_staged_artifact_is_rejected(ledger, field, value):
+    ref = new_id("art") + "@v1"
+    bad = dataclasses.replace(staged(ref), **{field: value})
+    with pytest.raises(ValueError):
+        ledger.append(result(new_id("tsk"), new_id("ctr"), [ref]), [bad])
+    assert ledger.events() == []
+
+
+def test_artifact_version_gap_is_rejected(ledger):
+    ref = new_id("art") + "@v7"
+    with pytest.raises(ValueError, match="version"):
+        ledger.append(result(new_id("tsk"), new_id("ctr"), [ref]), [staged(ref)])
+    assert ledger.events() == []
+
+
+def test_two_versions_of_one_artifact_in_one_event(ledger):
+    art = new_id("art")
+    refs = [f"{art}@v1", f"{art}@v2"]
+    ledger.append(result(new_id("tsk"), new_id("ctr"), refs), [staged(r) for r in refs])
+    assert ledger.next_artifact_version(art) == 3

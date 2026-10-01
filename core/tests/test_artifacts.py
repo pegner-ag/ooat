@@ -64,3 +64,11 @@ def test_tampered_blob_is_detected(tmp_path):
 def test_path_traversal_digest_is_rejected(tmp_path):
     with pytest.raises(ValueError):
         BlobStore(tmp_path).get("../" + "a" * 61)
+
+
+def test_put_repairs_a_damaged_blob(tmp_path):
+    blobs = BlobStore(tmp_path)
+    digest = blobs.put(b"original")
+    (tmp_path / digest[:2] / digest).write_bytes(b"damaged")
+    assert blobs.put(b"original") == digest
+    assert blobs.get(digest) == b"original"

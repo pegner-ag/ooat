@@ -32,3 +32,9 @@ def test_parse_artifact_ref():
     for bad in (art, f"{art}@v0", "art_short@v1"):
         with pytest.raises(ValueError):
             parse_artifact_ref(bad)
+
+
+@pytest.mark.parametrize("timestamp_ms", [-1, 2**48])
+def test_ulid_rejects_timestamps_outside_48_bits(timestamp_ms):
+    with pytest.raises(ValueError):
+        ulid(timestamp_ms)
