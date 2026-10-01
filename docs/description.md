@@ -8,7 +8,7 @@ the starter catalog holds role families and capability names only; no runtime ex
 ## Technology
 Chosen by decision (see `docs/adr/0001-initial-decisions.md`), not yet used in code:
 - Core runtime: Python 3.12+, FastAPI, Pydantic v2
-- Store: SQLite (Solo profile), Postgres (Team profile)
+- Store: pluggable ledger backend by URL — SQLite (Solo), PostgreSQL (Team), SQL Server optional (ADR 0008)
 - Dashboard and TS SDK: TypeScript
 - Schemas: JSON Schema 2020-12
 
