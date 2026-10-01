@@ -20,8 +20,8 @@ MANIFEST = {
     "data_policy": {"training_on_inputs": None, "retention_days": None, "allowed_data_classes": ["public", "internal"]},
     "features": {"tool_use": None, "vision": None, "context_tokens": None},  # unsourced facts stay null
     "jurisdiction": {
-        "vendor_entity": "Anthropic, PBC",
-        "vendor_country": "US",
+        "vendor_entity": None,
+        "vendor_country": None,
         "host_entity": None,
         "processing_regions": None,
         "eu_region_available": None,
@@ -40,6 +40,13 @@ ISOLATION = ["--setting-sources", "", "--strict-mcp-config", "--disable-slash-co
              "--no-session-persistence"]
 _QUOTA = re.compile(r"usage limit|rate limit|limit reached|too many requests", re.IGNORECASE)
 _LOGIN = re.compile(r"not logged in|/login|authenticat|invalid api key", re.IGNORECASE)
+_MODEL_ID = re.compile(r"^[A-Za-z0-9._:/\[\]-]+$")
+
+
+def _checked_model(model: str) -> str:
+    if not _MODEL_ID.match(model):
+        raise ConnectorError("UNAVAILABLE", "model id contains characters that are not allowed")
+    return model
 
 
 class ClaudeCodeConnector:
@@ -56,10 +63,12 @@ class ClaudeCodeConnector:
         return Detection(True, f"{self._executable} found at {path}; uses its existing login")
 
     def complete(self, request: ModelRequest, secrets) -> ModelResponse:
-        model = request.model or self.manifest["tiers"][request.tier]
+        model = _checked_model(request.model or self.manifest["tiers"][request.tier])
+        # System text goes in a file and the prompt through stdin: no caller text in argv (see connectors/cli.py).
         args = [self._executable, "-p", "--output-format", "json", "--model", model,
-                "--system-prompt", request.system or DEFAULT_SYSTEM, *ISOLATION]
-        result = run_cli(args, request.prompt, request.timeout_s)
+                "--system-prompt-file", "system.txt", *ISOLATION]
+        result = run_cli(args, request.prompt, request.timeout_s,
+                         files={"system.txt": request.system or DEFAULT_SYSTEM})
         return parse_result(result.stdout, result.stderr, model)
 
 
@@ -76,8 +85,14 @@ def parse_result(stdout: str, stderr: str, requested_model: str) -> ModelRespons
             raise ConnectorError("QUOTA_EXHAUSTED", message)
         raise ConnectorError("API_ERROR", message)
     usage = data.get("usage") or {}
-    models = list(data.get("modelUsage") or {})
-    model = models[0].split("[")[0] if models else requested_model  # "claude-opus-5-5[1m]" -> "claude-opus-5-5"
+    model_usage = data.get("modelUsage") or {}
+    if model_usage:
+        name, details = next(iter(model_usage.items()))
+        model = (details or {}).get("canonicalModel") or name.split("[")[0]  # "claude-opus-5-5[1m]"
+    else:
+        model = requested_model
+    # Usage is reported as one aggregate; with several models it cannot be priced exactly.
+    metering = "reported" if len(model_usage) <= 1 else "estimated"
     return ModelResponse(
         text=str(data.get("result", "")),
         model=model,
@@ -85,5 +100,5 @@ def parse_result(stdout: str, stderr: str, requested_model: str) -> ModelRespons
         tokens_cached=usage.get("cache_read_input_tokens", 0),
         tokens_out=usage.get("output_tokens"),
         quota_units=None,
-        metering="reported",
+        metering=metering,
     )

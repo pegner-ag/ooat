@@ -87,3 +87,15 @@ def test_secret_pasted_as_a_value_is_rejected_without_echoing_it():
 def test_config_shapes_are_checked(data):
     with pytest.raises(ValueError):
         parse_config(data)
+
+
+def test_secret_with_a_trailing_newline_is_stripped():
+    secrets = SecretResolver(parse_config({"connectors": {"prv.a.api": {"secret_env": "A_KEY"}}}), {"A_KEY": "sk-1\r\n"})
+    assert secrets.get("prv.a.api") == "sk-1"
+
+
+def test_secret_with_inner_control_characters_is_refused_without_echoing_it():
+    secrets = SecretResolver(parse_config({"connectors": {"prv.a.api": {"secret_env": "A_KEY"}}}), {"A_KEY": "sk-1\nX"})
+    with pytest.raises(ConnectorError) as info:
+        secrets.get("prv.a.api")
+    assert info.value.code == "UNAVAILABLE" and "sk-1" not in info.value.message and "A_KEY" in info.value.message

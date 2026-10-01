@@ -22,7 +22,7 @@ MANIFEST = {
     "features": {"tool_use": None, "vision": None, "context_tokens": None},  # unsourced facts stay null
     "jurisdiction": {
         "vendor_entity": None,
-        "vendor_country": "US",
+        "vendor_country": None,
         "host_entity": None,
         "processing_regions": None,
         "eu_region_available": None,
@@ -38,9 +38,17 @@ MANIFEST = {
 # No shell tool (the agent cannot run commands or read local files), read-only sandbox as a second line, no session
 # files, no repository rules, no plugins or apps; the prompt comes from stdin ("-").
 ISOLATION = ["--json", "--ephemeral", "--skip-git-repo-check", "--disable", "shell_tool", "--sandbox", "read-only",
-             "--ignore-rules", "--disable", "plugins", "--disable", "apps"]
-_QUOTA = re.compile(r"usage limit|rate limit|limit reached|too many requests|429", re.IGNORECASE)
-_LOGIN = re.compile(r"log ?in|logged out|unauthori[sz]ed|401|authentication", re.IGNORECASE)
+             "--ignore-rules", "--disable", "plugins", "--disable", "apps", "--disable", "image_generation",
+             "-c", "mcp_servers={}"]  # the operator's MCP servers are never offered to the agent
+_QUOTA = re.compile(r"usage limit|rate limit|limit reached|too many requests|\b429\b", re.IGNORECASE)
+_LOGIN = re.compile(r"\blog ?in\b|logged out|unauthori[sz]ed|\b401\b|authentication", re.IGNORECASE)
+_MODEL_ID = re.compile(r"^[A-Za-z0-9._:/\[\]-]+$")
+
+
+def _checked_model(model: str) -> str:
+    if not _MODEL_ID.match(model):
+        raise ConnectorError("UNAVAILABLE", "model id contains characters that are not allowed")
+    return model
 
 
 class CodexConnector:
@@ -60,6 +68,7 @@ class CodexConnector:
         model = request.model or self.manifest["tiers"].get(request.tier)
         if model is None:
             raise ConnectorError("UNAVAILABLE", f"no model configured for tier {request.tier}")
+        model = _checked_model(model)
         prompt = f"{request.system}\n\n{request.prompt}" if request.system else request.prompt  # no system flag
         result = run_cli([self._executable, "exec", *ISOLATION, "-m", model, "-"], prompt, request.timeout_s)
         return parse_events(result.stdout, result.stderr, model)
@@ -75,7 +84,7 @@ def _failure(message: str) -> ConnectorError:
 
 
 def parse_events(stdout: str, stderr: str, model: str) -> ModelResponse:
-    messages, usage = [], None
+    messages, usage, errors = [], None, []
     for line in stdout.splitlines():
         try:
             event = json.loads(line)
@@ -88,10 +97,10 @@ def parse_events(stdout: str, stderr: str, model: str) -> ModelResponse:
             usage = event.get("usage") or {}
         elif kind == "turn.failed":
             raise _failure(str((event.get("error") or {}).get("message", "codex turn failed")))
-        elif kind == "error":  # a top-level error event; item-level "error" items are warnings, not failures
-            raise _failure(str(event.get("message", "codex reported an error")))
+        elif kind == "error":  # may be transient (e.g. a reconnect); it fails the call only without a completed turn
+            errors.append(str(event.get("message", "codex reported an error")))
     if usage is None:
-        raise _failure(f"codex ended without a completed turn: {stderr[-300:]}")
+        raise _failure(errors[-1] if errors else f"codex ended without a completed turn: {stderr[-300:]}")
     cached = usage.get("cached_input_tokens", 0)
     return ModelResponse(
         text=messages[-1] if messages else "",

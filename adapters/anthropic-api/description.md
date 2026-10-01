@@ -9,11 +9,12 @@ subscription is out of quota (ADR 0005) and the F1 metered-API adapter.
   the environment variable named by `secret_env` in `ooat.toml` and is sent only in the `x-api-key` header.
 - Usage: `tokens_in` = `input_tokens` + `cache_creation_input_tokens`, `tokens_cached` = `cache_read_input_tokens`,
   `tokens_out` = `output_tokens`; metering `exact`.
-- Errors: 401/403 → `UNAVAILABLE`, 429 → `QUOTA_EXHAUSTED` (with `retry-after` as reset time), timeout →
-  `TIMEOUT`, unreachable → `UNAVAILABLE`, others → `API_ERROR`.
+- Errors: 401/403 and 529 (overloaded) → `UNAVAILABLE`, 429 → `QUOTA_EXHAUSTED` (with `retry-after` as reset
+  time), timeout → `TIMEOUT`, unreachable or an unusable key value → `UNAVAILABLE`, others → `API_ERROR`.
 
 ## Manifest facts
-Commercial API terms: no training on inputs; personal data still needs the operator to verify the jurisdiction
+Commercial API terms: no training on inputs. Vendor and host entity are `null` (they depend on the operator's
+region); personal data still needs the operator to verify the jurisdiction
 (`verified_on` is `null` until then) and the routing policy's requirements.
 
 ## Public API

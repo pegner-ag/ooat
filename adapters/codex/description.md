@@ -7,9 +7,10 @@ existing login.
 ## How a call runs
 - Prompt (system text first, then the request) on stdin, in an empty temporary directory with an allow-listed
   environment, `--disable shell_tool` (the agent cannot run commands or read local files; recorded in
-  `tests/fixtures/no_shell.jsonl`), read-only sandbox as a second line, `--ephemeral`, `--ignore-rules`, plugins
-  and apps disabled.
-- Codex still loads the user's skill descriptions: a measured "OK" call carried about 17,000 input tokens. Fewer
+  `tests/fixtures/no_shell.jsonl`), read-only sandbox as a second line, `--ephemeral`, `--ignore-rules`, plugins, apps and image generation
+  disabled, `-c mcp_servers={}` (the operator's MCP servers are never offered to the agent). Model ids are checked
+  before they enter argv.
+- Codex still loads the user's skill descriptions: a measured "OK" call carried about 14,000 input tokens. Fewer
   installed skills mean cheaper calls.
 - The model per tier comes from `ooat.toml` (`models`); the manifest names none, so the connector is unused until
   the operator sets one and adds its price to `routing.json`.

@@ -55,7 +55,7 @@ def test_call_needs_a_configured_model():
 def test_call_isolates_the_cli_and_sends_system_and_prompt_on_stdin(monkeypatch):
     seen = {}
 
-    def fake_run(args, stdin, timeout_s):
+    def fake_run(args, stdin, timeout_s, files=None):
         seen.update(args=args, stdin=stdin)
         return CliResult(0, fixture("success.jsonl"), "")
 
@@ -69,7 +69,8 @@ def test_call_isolates_the_cli_and_sends_system_and_prompt_on_stdin(monkeypatch)
     for flag in ("--json", "--ephemeral", "--ignore-rules", "--skip-git-repo-check"):
         assert flag in args
     disabled = {args[i + 1] for i, arg in enumerate(args) if arg == "--disable"}
-    assert {"shell_tool", "plugins", "apps"} <= disabled
+    assert {"shell_tool", "plugins", "apps", "image_generation"} <= disabled
+    assert "mcp_servers={}" in args  # the operator's MCP servers are not offered to the agent
     assert seen["stdin"] == "Be brief.\n\nReply with OK."
 
 
@@ -87,3 +88,15 @@ def test_recorded_call_without_shell_tool_cannot_run_commands():
     response = parse_events(fixture("no_shell.jsonl"), "", "gpt-test")
     assert response.text == "NO-SHELL"
     assert response.tokens_out == 57  # reasoning_output_tokens (48) are part of output_tokens
+
+
+def test_transient_top_level_error_before_a_completed_turn_is_not_a_failure():
+    stream = '{"type":"error","message":"Reconnecting... 1/5"}\n' + fixture("success.jsonl")
+    assert parse_events(stream, "", "gpt-test").text == "OK"
+
+
+def test_model_id_with_shell_characters_is_refused():
+    with pytest.raises(ConnectorError) as info:
+        CodexConnector().complete(ModelRequest(tier="workhorse", prompt="x", data_class="internal",
+                                               model="gpt & calc"), None)
+    assert info.value.code == "UNAVAILABLE"

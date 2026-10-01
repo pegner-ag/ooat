@@ -34,7 +34,8 @@ def setup():
     for connector in connectors:
         ledger.append(new_event("ADAPTER_ACKNOWLEDGED", task=None, actor={"kind": "hil", "id": "operator"}, body={
             "adapter": connector.manifest["id"], "manifest_version": connector.manifest["version"],
-            "allowed_data_classes": ["public", "internal"], "operator": "Operator", "automation_confirmed": True,
+            "allowed_data_classes": ["public", "internal", "client_confidential", "personal"], "operator": "Operator",
+            "automation_confirmed": True,
             "jurisdiction_sha256": jurisdiction_fingerprint(connector.manifest)}))
     config = parse_config({"connectors": {"prv.anthropic.api": {"secret_env": "ANTHROPIC_API_KEY"}}})
     gateway = Gateway(ledger, Registry(connectors), load_routing(ROOT / "catalog" / "routing.json"), config,
@@ -63,7 +64,8 @@ def test_codex_waits_for_a_configured_model_and_price(setup):
 
 def test_call_runs_the_cli_once_and_meters_a_shadow_price(setup, monkeypatch):
     calls = []
-    monkeypatch.setattr(claude_code, "run_cli", lambda args, stdin, timeout: calls.append(args) or CliResult(0, RECORDED, ""))
+    monkeypatch.setattr(claude_code, "run_cli",
+                        lambda args, stdin, timeout, files=None: calls.append(args) or CliResult(0, RECORDED, ""))
     result = setup.call(request())
     assert len(calls) == 1 and calls[0][calls[0].index("--model") + 1] == "claude-haiku-4-5-20251001"
     assert result.cost["adapter"] == "prv.anthropic.subscription_cli" and result.cost["basis"] == "shadow"
@@ -74,3 +76,5 @@ def test_reference_policy_refuses_client_data_until_contracts_can_be_verified(se
     with pytest.raises(GatewayError) as info:
         setup.estimate(request("client_confidential"))
     assert info.value.code == "NOT_PERMITTED"
+    # The API connector is acknowledged for the class and does not train on inputs: the policy itself refuses it.
+    assert "prv.anthropic.api: client_confidential requires a known processing region" in info.value.trace

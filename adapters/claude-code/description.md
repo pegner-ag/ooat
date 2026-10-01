@@ -5,8 +5,9 @@ Model connector `prv.anthropic.subscription_cli`: runs Claude Code headless (`cl
 the operator's Claude subscription and its existing login.
 
 ## How a call runs
-- Prompt on stdin, in an empty temporary directory, with `--system-prompt`, `--setting-sources ""`,
-  `--strict-mcp-config`, `--disable-slash-commands`, `--tools ""` and `--no-session-persistence`. This keeps the
+- Prompt on stdin and system text in `system.txt` (`--system-prompt-file`), never in argv; an empty temporary
+  directory with an allow-listed environment; `--setting-sources ""`, `--strict-mcp-config`,
+  `--disable-slash-commands`, `--tools ""` and `--no-session-persistence`. This keeps the
   context to the request itself: a measured "OK" call carried about 500 tokens instead of about 50,000 with the
   user's default settings and memory.
 - `--model` is the model the gateway routed (`claude-haiku-4-5-20251001`, `claude-sonnet-5-5`, `claude-opus-5-5`).
@@ -15,8 +16,8 @@ the operator's Claude subscription and its existing login.
 - Errors: "Not logged in" → `UNAVAILABLE`; usage or rate limits → `QUOTA_EXHAUSTED`; other errors → `API_ERROR`.
 
 ## Manifest facts
-Vendor entity and country are stated with sources; training on inputs, retention and processing region of
-consumer plans are `null` (they depend on the operator's plan and settings) and `verified_on` is `null` until the
+Vendor entity and country are `null` (EEA operators contract with a different entity than US ones); training on
+inputs, retention and processing region of consumer plans are `null` (they depend on the operator's plan and settings) and `verified_on` is `null` until the
 operator verifies them, so personal data stays refused (ADR 0010). `automation_permitted` is `unknown`: the
 operator confirms the plan's terms when acknowledging.
 

@@ -21,16 +21,16 @@ MANIFEST = {
                     "allowed_data_classes": ["public", "internal", "client_confidential", "personal"]},
     "features": {"tool_use": None, "vision": None, "context_tokens": None},  # differs per model; unsourced stays null
     "jurisdiction": {
-        "vendor_entity": "Anthropic, PBC",
-        "vendor_country": "US",
-        "host_entity": "Anthropic, PBC",
+        "vendor_entity": None,
+        "vendor_country": None,
+        "host_entity": None,
         "processing_regions": None,
         "eu_region_available": None,
         "model_origin_country": "US",
         "training_on_inputs": False,
         "retention": None,
         "zero_retention_available": None,
-        "transfer_notes": "EEA personal data leaves the EEA; the operator needs a transfer mechanism.",
+        "transfer_notes": None,
         "source_urls": ["https://www.anthropic.com/legal/commercial-terms", "https://www.anthropic.com/legal/privacy"],
         "verified_on": None,
     },
@@ -72,6 +72,8 @@ class AnthropicApiConnector:
             raise ConnectorError("TIMEOUT", f"no answer within {request.timeout_s:g} s") from None
         except urllib.error.URLError as error:
             raise ConnectorError("UNAVAILABLE", f"cannot reach the API: {error.reason}") from None
+        except ValueError:  # e.g. an invalid header value; its message would quote the key, so it is dropped
+            raise ConnectorError("UNAVAILABLE", "the request could not be built (check the API key value)") from None
         return parse_message(data)
 
     def _http_error(self, error: urllib.error.HTTPError) -> ConnectorError:
@@ -80,7 +82,7 @@ class AnthropicApiConnector:
         except (ValueError, AttributeError, OSError):
             detail = ""
         message = f"HTTP {error.code}: {detail}"[:500]
-        if error.code in (401, 403):
+        if error.code in (401, 403, 529):  # 529: overloaded, nothing ran
             return ConnectorError("UNAVAILABLE", message)
         if error.code == 429:
             retry_after = (error.headers or {}).get("retry-after")
@@ -97,7 +99,7 @@ def parse_message(data: dict) -> ModelResponse:
     return ModelResponse(
         text=text,
         model=str(data.get("model", "")),
-        tokens_in=usage.get("input_tokens", 0) + (usage.get("cache_creation_input_tokens") or 0),
+        tokens_in=(usage.get("input_tokens") or 0) + (usage.get("cache_creation_input_tokens") or 0),
         tokens_cached=usage.get("cache_read_input_tokens") or 0,
         tokens_out=usage.get("output_tokens"),
         quota_units=None,

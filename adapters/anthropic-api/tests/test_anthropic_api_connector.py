@@ -77,7 +77,9 @@ def test_request_shape_and_parsed_response():
 
 @pytest.mark.parametrize("error, code", [
     (http_error(401, "invalid x-api-key"), "UNAVAILABLE"),
-    (http_error(529, "overloaded"), "API_ERROR"),
+    (http_error(529, "overloaded"), "UNAVAILABLE"),
+    (http_error(500, "internal error"), "API_ERROR"),
+    (ValueError("Invalid header value b'sk-ant-test-0123456789\\n'"), "UNAVAILABLE"),
     (urllib.error.URLError("name resolution failed"), "UNAVAILABLE"),
     (socket.timeout("timed out"), "TIMEOUT"),
 ])
@@ -113,3 +115,8 @@ def test_live_minimal_call():
         ModelRequest(tier="economy", prompt="Reply with the single word OK.", data_class="public",
                      max_output_tokens=10, timeout_s=60), secrets)
     assert "OK" in response.text and response.tokens_out
+
+
+def test_null_usage_counts_are_read_as_zero():
+    data = dict(MESSAGE, usage={"input_tokens": None, "output_tokens": 3})
+    assert parse_message(data).tokens_in == 0

@@ -54,8 +54,8 @@ def test_unreadable_output_is_an_api_error():
 def test_call_isolates_the_cli_and_uses_the_routed_model(monkeypatch):
     seen = {}
 
-    def fake_run(args, stdin, timeout_s):
-        seen.update(args=args, stdin=stdin, timeout=timeout_s)
+    def fake_run(args, stdin, timeout_s, files=None):
+        seen.update(args=args, stdin=stdin, timeout=timeout_s, files=files)
         return CliResult(0, fixture("success.json"), "")
 
     monkeypatch.setattr(adapter, "run_cli", fake_run)
@@ -63,7 +63,9 @@ def test_call_isolates_the_cli_and_uses_the_routed_model(monkeypatch):
     args = seen["args"]
     assert args[:4] == ["claude", "-p", "--output-format", "json"]
     assert args[args.index("--model") + 1] == "claude-haiku-4-5-20251001"
-    assert args[args.index("--system-prompt") + 1] == "Be brief."
+    assert args[args.index("--system-prompt-file") + 1] == "system.txt"
+    assert seen["files"] == {"system.txt": "Be brief."}
+    assert "Be brief." not in args and "--system-prompt" not in args  # caller text never reaches argv
     for flag in ("--setting-sources", "--strict-mcp-config", "--disable-slash-commands", "--tools",
                  "--no-session-persistence"):
         assert flag in args
@@ -78,3 +80,19 @@ def test_live_minimal_call():
         ModelRequest(tier="economy", prompt="Reply with the single word OK.", data_class="public",
                      model="claude-haiku-4-5-20251001", timeout_s=120), None)
     assert "OK" in response.text and response.tokens_out and response.tokens_in < 5000
+
+
+def test_model_id_with_shell_characters_is_refused(monkeypatch):
+    monkeypatch.setattr(adapter, "run_cli", lambda *a, **k: pytest.fail("must not run"))
+    with pytest.raises(ConnectorError) as info:
+        ClaudeCodeConnector().complete(request(model='x" & calc & "'), None)
+    assert info.value.code == "UNAVAILABLE"
+
+
+def test_canonical_model_is_reported_and_mixed_models_are_estimated():
+    import json
+
+    data = json.loads(fixture("success.json"))
+    assert parse_result(json.dumps(data), "", "x").model == "claude-opus-5-5"
+    data["modelUsage"]["claude-haiku-4-5-20251001"] = {"canonicalModel": "claude-haiku-4-5-20251001"}
+    assert parse_result(json.dumps(data), "", "x").metering == "estimated"
