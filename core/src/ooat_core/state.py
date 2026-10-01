@@ -12,7 +12,7 @@ def task_state(events: Iterable[dict], task: str | None = None) -> str | None:
 
     Pass `task` when `events` may contain other tasks' events.
     """
-    state, open_requests = None, set()
+    state, open_requests, questions = None, set(), set()
     for event in events:
         if task is not None and event.get("task") != task:
             continue
@@ -24,10 +24,17 @@ def task_state(events: Iterable[dict], task: str | None = None) -> str | None:
             state = "CLARIFYING" if clarifying else "GATED"
         elif kind == "CONTRACT_ISSUED":
             state = "RUNNING"
-        elif kind == "HIL_REQUEST" and body["blocking"]:
-            open_requests.add(event["id"])
+        elif kind == "HIL_REQUEST":
+            if body["blocking"]:
+                open_requests.add(event["id"])
+            if state == "CLARIFYING":
+                questions.add(event["id"])
         elif kind == "HIL_RESPONSE":
             open_requests.discard(body["request"])
+            if state == "CLARIFYING" and body["request"] in questions:
+                questions.discard(body["request"])
+                if not questions:  # every clarifying question answered: back to the Gate (ADR 0009)
+                    state = "SUBMITTED"
         elif kind == "TASK_CLOSED":
             return body["state"]
     if state is None:

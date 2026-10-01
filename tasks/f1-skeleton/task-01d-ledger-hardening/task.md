@@ -20,4 +20,4 @@ Close the smaller robustness gaps found in review before the ledger holds real d
 - [x] `PRAGMA user_version` (or equivalent) for future DDL migrations.
 
 ## Owner question
-Moved to `tasks/f1-skeleton/README.md` (CLARIFYING exit).
+Answered: ADR 0009 (CLARIFYING returns to SUBMITTED once every clarifying question is answered).

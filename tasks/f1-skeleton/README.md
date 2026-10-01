@@ -32,9 +32,6 @@ F0 is still open (seed tasks, task-04). Execution of F1 sub-project 01 started o
 
 ## Owner questions
 
-- After `HIL_RESPONSE` to a clarification, does the task return to `SUBMITTED` for re-gating, or stay
-  `CLARIFYING` until a new `TOPOLOGY_DECIDED`? (spec §8 is silent; current code: stays `CLARIFYING`) — needed by 04.
-
 ### Before 05
 
 - Notifier channel for HIL (Telegram bot, e-mail, Slack, …).

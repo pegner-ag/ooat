@@ -32,6 +32,11 @@ def response(request_id):
     ([SUBMITTED], "SUBMITTED"),
     ([SUBMITTED, CLARIFY], "CLARIFYING"),
     ([SUBMITTED, CLARIFY, request("evt_q")], "CLARIFYING"),
+    # ADR 0009: once every clarifying question is answered, the task is back in SUBMITTED for re-gating
+    ([SUBMITTED, CLARIFY, request("evt_q"), response("evt_q")], "SUBMITTED"),
+    ([SUBMITTED, CLARIFY, request("evt_q"), request("evt_r"), response("evt_q")], "CLARIFYING"),
+    ([SUBMITTED, CLARIFY, request("evt_q"), request("evt_r"), response("evt_q"), response("evt_r")], "SUBMITTED"),
+    ([SUBMITTED, CLARIFY, request("evt_q"), response("evt_q"), GATED_T2], "GATED"),
     ([SUBMITTED, GATED_T2], "GATED"),
     ([SUBMITTED, GATED_T2, ISSUED], "RUNNING"),
     ([SUBMITTED, GATED_T2, ISSUED, request("evt_q")], "HIL_WAIT"),
