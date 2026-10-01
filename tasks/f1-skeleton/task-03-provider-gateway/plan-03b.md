@@ -16,7 +16,10 @@
 - Connector packages depend on `ooat-core` and the standard library only.
 - Manifests never guess: unknown facts are `null`; stated facts carry `source_urls`; `verified_on` stays `null` until the operator verifies (personal data refused until then, ADR 0010).
 - Subscription manifests say `automation_permitted: "unknown"`; the operator confirms the plan's terms when acknowledging.
-- Prompts go to CLIs through stdin, never the command line; CLIs run in an empty temporary directory.
+- Prompts go to CLIs through stdin, never the command line; CLIs run in an empty temporary directory with an allow-listed environment: no API keys or other secrets reach a child process (a CLI that saw `ANTHROPIC_API_KEY` would bill the API instead of the subscription).
+- Codex runs with `--disable shell_tool`: the agent cannot run commands or read local files.
+- Manifest `features` stay `null` unless sourced and true for every model the connector serves.
+- When the provider reports a model other than the routed one, the cost uses that model's price, or `basis: estimated` if it has none.
 - Secrets reach a connector only through the `SecretSource` it is given; no secret in any message, fixture or log.
 - Token convention: `tokens_in` excludes cache reads and includes cache writes; `tokens_cached` is cache reads.
 - Prices come from the provider's published list with `source` and `valid_from`; nothing is guessed.
@@ -24,11 +27,12 @@
 
 ## Review Focus
 
-1. A prompt with non-ASCII text (Czech) must reach the CLI unchanged on Windows — `test_stdin_reaches_the_process_and_stdout_comes_back` (Task 1).
-2. A CLI that is not installed must yield `UNAVAILABLE`, not a crash, and `detect()` must say so offline — `test_missing_executable_is_unavailable` (Task 1), `test_conformance` (Tasks 2–4).
-3. Codex warning items of type `error` (e.g. shortened skill descriptions) must not fail a successful call — `test_recorded_success_is_parsed_and_warnings_ignored` (Task 3).
-4. An API error must never echo the API key — `test_transport_errors_are_typed_and_carry_no_key` (Task 4).
-5. With the real catalog prices, the subscription must win over the API at equal list price, and client-confidential data must be refused while contracts cannot be verified — `test_subscription_wins_over_the_api_at_the_same_list_price`, `test_reference_policy_refuses_client_data_until_contracts_can_be_verified` (Task 5).
+1. A secret in the operator's environment (API keys, bot tokens) must never reach a CLI child process — `test_child_process_never_sees_secrets` (Task 1).
+2. A prompt with non-ASCII text (Czech) must reach the CLI unchanged on Windows — `test_stdin_reaches_the_process_and_stdout_comes_back` (Task 1).
+3. A CLI that is not installed must yield `UNAVAILABLE`, not a crash, and `detect()` must say so offline — `test_missing_executable_is_unavailable` (Task 1), `test_conformance` (Tasks 2–4).
+4. Codex warning items of type `error` (e.g. shortened skill descriptions) must not fail a successful call — `test_recorded_success_is_parsed_and_warnings_ignored` (Task 3).
+5. An API error must never echo the API key — `test_transport_errors_are_typed_and_carry_no_key` (Task 4).
+6. With the real catalog prices, the subscription must win over the API at equal list price, and client-confidential data must be refused while contracts cannot be verified — `test_subscription_wins_over_the_api_at_the_same_list_price`, `test_reference_policy_refuses_client_data_until_contracts_can_be_verified` (Task 5).
 
 ---
 
@@ -60,7 +64,7 @@ How to apply a "replace" step: the old text occurs exactly once; replace it with
 
 **Interfaces:**
 - Consumes: `ConnectorError`, `Detection`, `jurisdiction_fingerprint` (03a); `validate`; `FakeConnector` (`core/tests/connector_fakes.py`).
-- Produces: `ModelRequest.model: str | None = None` (set by the gateway to the routed model); `CliResult(returncode, stdout, stderr)`; `find_executable(name) -> str | None`; `run_cli(args: list[str], stdin: str, timeout_s: float) -> CliResult` (`ConnectorError` `UNAVAILABLE` / `TIMEOUT`); `check_connector(connector) -> None` (`AssertionError` or `SpecValidationError`).
+- Produces: `ModelRequest.model: str | None = None` (set by the gateway to the routed model); the gateway prices the cost with the model the provider reports (else `basis: estimated`); `CliResult(returncode, stdout, stderr)`; `find_executable(name) -> str | None`; `child_environment(environ=None) -> dict[str, str]` (allow-list); `run_cli(args: list[str], stdin: str, timeout_s: float) -> CliResult` (`ConnectorError` `UNAVAILABLE` / `TIMEOUT`); `check_connector(connector) -> None` (`AssertionError` or `SpecValidationError`); `FakeConnector(..., reported_model=None)` in `core/tests/connector_fakes.py`.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -112,6 +116,15 @@ def test_conformance_rejects_an_invalid_manifest():
     del connector.manifest["jurisdiction"]
     with pytest.raises(Exception):
         check_connector(connector)
+
+
+
+def test_child_process_never_sees_secrets(monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-should-not-leak")
+    monkeypatch.setenv("OOAT_SOMETHING_TOKEN", "t0ken")
+    code = "import os; print(sorted(k for k in os.environ if 'API_KEY' in k or 'TOKEN' in k)); print('PATH' in os.environ)"
+    lines = cli.run_cli(python(code), "", 30).stdout.splitlines()
+    assert lines == ["[]", "True"]
 ```
 
 In `core/tests/test_gateway.py`, replace:
@@ -135,11 +148,67 @@ def test_connector_receives_the_routed_model():
 # Review Focus ---
 ```
 
+In `core/tests/connector_fakes.py`, replace:
+
+```python
+    def __init__(self, manifest=None, text="Hotovo.", usage=(1000, 0, 200), error=None, secret_seen=None):
+        self.manifest = manifest or fake_manifest()
+```
+
+with:
+
+```python
+    def __init__(self, manifest=None, text="Hotovo.", usage=(1000, 0, 200), error=None, secret_seen=None,
+                 reported_model=None):
+        self.manifest = manifest or fake_manifest()
+        self.reported_model = reported_model  # a model other than the routed one, as a CLI may run
+```
+
+In `core/tests/connector_fakes.py`, replace:
+
+```python
+        model = self.manifest["tiers"][request.tier]
+```
+
+with:
+
+```python
+        model = self.reported_model or request.model or self.manifest["tiers"][request.tier]
+```
+
+In `core/tests/test_gateway.py`, replace:
+
+```python
+# Review Focus ---
+```
+
+with:
+
+```python
+def test_cost_follows_the_model_that_actually_ran():
+    connector = FakeConnector(SUBSCRIPTION, reported_model="premium-model")
+    setup = Setup(connector)
+    setup.acknowledge(connector)
+    result = setup.gateway.call(setup.request())
+    assert result.cost["usd"] == pytest.approx((1000 * 15 + 200 * 75) / 1_000_000)
+    assert result.cost["basis"] == "shadow"
+
+
+def test_unpriced_model_that_actually_ran_is_marked_estimated():
+    connector = FakeConnector(API, reported_model="mystery-model")
+    setup = Setup(connector)
+    setup.acknowledge(connector)
+    assert setup.gateway.call(setup.request()).cost["basis"] == "estimated"
+
+
+# Review Focus ---
+```
+
 
 - [ ] **Step 2: Run tests to verify they fail**
 
 Run: `python -m pytest core/tests -q`
-Expected: FAIL — `test_connector_cli.py` cannot import `ooat_core.connectors.cli`; `test_connector_receives_the_routed_model` fails (`ModelRequest` has no `model`).
+Expected: FAIL — `test_connector_cli.py` cannot import `ooat_core.connectors.cli`; `test_connector_receives_the_routed_model` fails (`ModelRequest` has no `model`); `test_cost_follows_the_model_that_actually_ran` and `test_unpriced_model_that_actually_ran_is_marked_estimated` fail (cost uses the routed price).
 
 - [ ] **Step 3: Implement** — `core/src/ooat_core/connectors/cli.py`:
 
@@ -147,15 +216,36 @@ Expected: FAIL — `test_connector_cli.py` cannot import `ooat_core.connectors.c
 """Running a vendor CLI as a connector backend (vendor-neutral helper for subscription_cli connectors).
 
 The prompt goes through stdin (not visible in process lists, no command-line length limit), the process runs in an
-empty temporary directory (no project files or instructions are picked up), and failures become ConnectorErrors.
+empty temporary directory (no project files or instructions are picked up) with an allow-listed environment (no
+secrets), and failures become ConnectorErrors.
 """
 
+import os
 import shutil
 import subprocess
 import tempfile
 from dataclasses import dataclass
 
 from . import ConnectorError
+
+
+# Variables a CLI needs to find itself, its own login and the network. Everything else, notably API keys and any
+# secret_env the gateway knows, stays out of the child: secrets reach connectors only through their SecretSource,
+# and a CLI that saw ANTHROPIC_API_KEY would bill the API instead of the subscription.
+_ALLOWED = frozenset({
+    "PATH", "PATHEXT", "SYSTEMROOT", "SYSTEMDRIVE", "WINDIR", "COMSPEC", "TEMP", "TMP", "TMPDIR", "HOME",
+    "USERPROFILE", "HOMEDRIVE", "HOMEPATH", "APPDATA", "LOCALAPPDATA", "PROGRAMDATA", "PROGRAMFILES",
+    "PROGRAMFILES(X86)", "USERNAME", "USER", "LOGNAME", "LANG", "LANGUAGE", "TERM", "NUMBER_OF_PROCESSORS",
+    "PROCESSOR_ARCHITECTURE", "OS", "HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "SSL_CERT_FILE", "NODE_EXTRA_CA_CERTS",
+    "CODEX_HOME", "CLAUDE_CONFIG_DIR",
+})
+_ALLOWED_PREFIXES = ("LC_", "XDG_")
+
+
+def child_environment(environ=None) -> dict[str, str]:
+    environ = os.environ if environ is None else environ
+    return {name: value for name, value in environ.items()
+            if name.upper() in _ALLOWED or name.upper().startswith(_ALLOWED_PREFIXES)}
 
 
 @dataclass(frozen=True)
@@ -177,7 +267,8 @@ def run_cli(args: list[str], stdin: str, timeout_s: float) -> CliResult:
     with tempfile.TemporaryDirectory(prefix="ooat-cli-") as workdir:
         try:
             completed = subprocess.run([executable, *args[1:]], input=stdin, capture_output=True, text=True,
-                                       encoding="utf-8", errors="replace", timeout=timeout_s, cwd=workdir)
+                                       encoding="utf-8", errors="replace", timeout=timeout_s, cwd=workdir,
+                                       env=child_environment())
         except subprocess.TimeoutExpired:
             raise ConnectorError("TIMEOUT", f"{args[0]} did not finish within {timeout_s:g} s") from None
         except OSError as error:
@@ -231,6 +322,38 @@ with:
 ```python
             routed = dataclasses.replace(request, model=candidate.estimate.model)
             response = candidate.connector.complete(routed, _OwnSecret(self._secrets, connector_id))
+```
+
+In `core/src/ooat_core/gateway.py`, replace:
+
+```python
+            basis = "exact" if manifest["access"] == "api" else "shadow"
+```
+
+with:
+
+```python
+            basis = "exact" if manifest["access"] == "api" else "shadow"
+        price = candidate.price
+        if response.model != estimate.model:  # the provider ran another model than the one routed
+            actual = self._routing.price(manifest["id"], response.model, self._clock().date(),
+                                         fallback=manifest["access"] != "api")
+            if actual is None:
+                basis = "estimated"  # no known price for the model that ran; the routed price stands in
+            else:
+                price = actual
+```
+
+In `core/src/ooat_core/gateway.py`, replace:
+
+```python
+"usd": candidate.price.usd(tokens_in, tokens_cached, tokens_out), "basis": basis,
+```
+
+with:
+
+```python
+"usd": price.usd(tokens_in, tokens_cached, tokens_out), "basis": basis,
 ```
 
 
@@ -682,7 +805,7 @@ MANIFEST = {
     "automation_permitted": "unknown",
     "concurrency": 1,
     "data_policy": {"training_on_inputs": None, "retention_days": None, "allowed_data_classes": ["public", "internal"]},
-    "features": {"tool_use": True, "vision": True, "context_tokens": None},
+    "features": {"tool_use": None, "vision": None, "context_tokens": None},  # unsourced facts stay null
     "jurisdiction": {
         "vendor_entity": "Anthropic, PBC",
         "vendor_country": "US",
@@ -771,7 +894,7 @@ git commit -m "adapters: Claude Code connector (headless, isolated, subscription
 
 **Files:**
 - Create: `adapters/codex/pyproject.toml`, `adapters/codex/description.md`, `adapters/codex/src/ooat_adapter_codex/__init__.py`
-- Create: `adapters/codex/tests/fixtures/success.jsonl` (recorded), `usage_limit_synthetic.jsonl`, `logged_out_synthetic.jsonl`, `README.md`
+- Create: `adapters/codex/tests/fixtures/success.jsonl` and `no_shell.jsonl` (recorded), `usage_limit_synthetic.jsonl`, `logged_out_synthetic.jsonl`, `README.md`
 - Test: `adapters/codex/tests/test_codex_connector.py`
 
 **Interfaces:**
@@ -813,8 +936,10 @@ Model connector `prv.openai.subscription_cli`: runs `codex exec --json` on the o
 existing login.
 
 ## How a call runs
-- Prompt (system text first, then the request) on stdin, in an empty temporary directory, read-only sandbox,
-  `--ephemeral`, `--ignore-rules`, plugins and apps disabled.
+- Prompt (system text first, then the request) on stdin, in an empty temporary directory with an allow-listed
+  environment, `--disable shell_tool` (the agent cannot run commands or read local files; recorded in
+  `tests/fixtures/no_shell.jsonl`), read-only sandbox as a second line, `--ephemeral`, `--ignore-rules`, plugins
+  and apps disabled.
 - Codex still loads the user's skill descriptions: a measured "OK" call carried about 17,000 input tokens. Fewer
   installed skills mean cheaper calls.
 - The model per tier comes from `ooat.toml` (`models`); the manifest names none, so the connector is unused until
@@ -844,6 +969,16 @@ existing login.
 {"type":"turn.completed","usage":{"input_tokens":16762,"cached_input_tokens":2432,"cache_write_input_tokens":0,"output_tokens":5,"reasoning_output_tokens":0}}
 ```
 
+`adapters/codex/tests/fixtures/no_shell.jsonl` (recorded with `--disable shell_tool`, asked to run a command):
+
+```json
+{"type":"thread.started","thread_id":"01a0f76b-b1dc-7683-9113-42b05f54a9df"}
+{"type":"turn.started"}
+{"type":"item.completed","item":{"id":"item_0","type":"error","message":"Skill descriptions were shortened to fit the skills context budget. Codex can still see every skill, but some descriptions are shorter. Disable unused skills or plugins to leave more room for the rest."}}
+{"type":"item.completed","item":{"id":"item_1","type":"agent_message","text":"NO-SHELL"}}
+{"type":"turn.completed","usage":{"input_tokens":14483,"cached_input_tokens":7552,"cache_write_input_tokens":0,"output_tokens":57,"reasoning_output_tokens":48}}
+```
+
 `adapters/codex/tests/fixtures/usage_limit_synthetic.jsonl`:
 
 ```json
@@ -863,7 +998,8 @@ existing login.
 `adapters/codex/tests/fixtures/README.md`:
 
 ```markdown
-`success.jsonl` is a recorded `codex exec --json` run (codex-cli 0.153.4, 2026-10-01).
+`success.jsonl` is a recorded `codex exec --json` run (codex-cli 0.153.4, 2026-10-01). `no_shell.jsonl` is a
+recorded run with `--disable shell_tool`, asked to run a shell command.
 Files named `*_synthetic.jsonl` are hand-written error events in the documented event shapes; replace them
 with recordings when such errors are observed.
 ```
@@ -941,6 +1077,8 @@ def test_call_isolates_the_cli_and_sends_system_and_prompt_on_stdin(monkeypatch)
     assert args[args.index("--sandbox") + 1] == "read-only"
     for flag in ("--json", "--ephemeral", "--ignore-rules", "--skip-git-repo-check"):
         assert flag in args
+    disabled = {args[i + 1] for i, arg in enumerate(args) if arg == "--disable"}
+    assert {"shell_tool", "plugins", "apps"} <= disabled
     assert seen["stdin"] == "Be brief.\n\nReply with OK."
 
 
@@ -951,6 +1089,13 @@ def test_live_minimal_call():
         ModelRequest(tier="workhorse", prompt="Reply with the single word OK.", data_class="public",
                      model=os.environ["OOAT_CODEX_MODEL"], timeout_s=180), None)
     assert "OK" in response.text and response.tokens_out
+
+
+
+def test_recorded_call_without_shell_tool_cannot_run_commands():
+    response = parse_events(fixture("no_shell.jsonl"), "", "gpt-test")
+    assert response.text == "NO-SHELL"
+    assert response.tokens_out == 57  # reasoning_output_tokens (48) are part of output_tokens
 ```
 
 Install: `python -m pip install -e adapters/codex`
@@ -984,7 +1129,7 @@ MANIFEST = {
     "automation_permitted": "unknown",
     "concurrency": 1,
     "data_policy": {"training_on_inputs": None, "retention_days": None, "allowed_data_classes": ["public", "internal"]},
-    "features": {"tool_use": True, "vision": True, "context_tokens": None},
+    "features": {"tool_use": None, "vision": None, "context_tokens": None},  # unsourced facts stay null
     "jurisdiction": {
         "vendor_entity": None,
         "vendor_country": "US",
@@ -1000,9 +1145,10 @@ MANIFEST = {
         "verified_on": None,
     },
 }
-# Read-only sandbox, no session files, no repository rules, no plugins or apps; the prompt comes from stdin ("-").
-ISOLATION = ["--json", "--ephemeral", "--skip-git-repo-check", "--sandbox", "read-only", "--ignore-rules",
-             "--disable", "plugins", "--disable", "apps"]
+# No shell tool (the agent cannot run commands or read local files), read-only sandbox as a second line, no session
+# files, no repository rules, no plugins or apps; the prompt comes from stdin ("-").
+ISOLATION = ["--json", "--ephemeral", "--skip-git-repo-check", "--disable", "shell_tool", "--sandbox", "read-only",
+             "--ignore-rules", "--disable", "plugins", "--disable", "apps"]
 _QUOTA = re.compile(r"usage limit|rate limit|limit reached|too many requests|429", re.IGNORECASE)
 _LOGIN = re.compile(r"log ?in|logged out|unauthori[sz]ed|401|authentication", re.IGNORECASE)
 
@@ -1071,7 +1217,7 @@ def parse_events(stdout: str, stderr: str, model: str) -> ModelResponse:
 - [ ] **Step 4: Run tests to verify they pass**
 
 Run: `python -m pytest adapters/codex -q`
-Expected: 8 passed, 1 skipped (live; needs `OOAT_LIVE=1` and `OOAT_CODEX_MODEL`).
+Expected: 9 passed, 1 skipped (live; needs `OOAT_LIVE=1` and `OOAT_CODEX_MODEL`).
 
 - [ ] **Step 5: Commit**
 
@@ -1299,7 +1445,7 @@ MANIFEST = {
     "concurrency": 4,
     "data_policy": {"training_on_inputs": False, "retention_days": None,
                     "allowed_data_classes": ["public", "internal", "client_confidential", "personal"]},
-    "features": {"tool_use": True, "vision": True, "context_tokens": 1000000},
+    "features": {"tool_use": None, "vision": None, "context_tokens": None},  # differs per model; unsourced stays null
     "jurisdiction": {
         "vendor_entity": "Anthropic, PBC",
         "vendor_country": "US",
