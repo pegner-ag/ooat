@@ -3,14 +3,18 @@
 ## Purpose
 OOAT is an open-source framework for multi-agent AI work in which a Topology Gate decides per task whether
 a team is worth its cost. The repository currently contains the specification and the OOA Spec v0.1 JSON Schemas with tests;
-the starter catalog holds role families and capability names only; no runtime exists yet.
+the starter catalog holds role families and capability names only; `ooat-core` has the ledger foundation
+(no Gate, gateway, workers or API yet).
 
 ## Technology
-Chosen by decision (see `docs/adr/0001-initial-decisions.md`), not yet used in code:
-- Core runtime: Python 3.12+, FastAPI, Pydantic v2
-- Store: pluggable ledger backend by URL — SQLite (Solo), PostgreSQL (Team), SQL Server optional (ADR 0008)
+In use:
+- Core runtime: Python 3.12+ (`core/`), JSON Schema 2020-12 validation (`jsonschema`)
+- Ledger backend: SQLite, selected by URL (ADR 0008)
+
+Chosen by decision (`docs/adr/`), not yet used in code:
+- FastAPI and Pydantic v2 for the API
+- PostgreSQL (Team) and optional SQL Server ledger backends (ADR 0008)
 - Dashboard and TS SDK: TypeScript
-- Schemas: JSON Schema 2020-12
 
 ## Project structure
 - `spec/ooat-specification.md` — normative design, draft v0.1 (sections 1–14)
@@ -19,7 +23,8 @@ Chosen by decision (see `docs/adr/0001-initial-decisions.md`), not yet used in c
 - `catalog/families/` — `family.base` and 5 abstract families (analyst, builder, reviewer, communicator, orchestrator)
 - `catalog/taxonomy.json` — 13 starter domains + `general` fallback; 103 capability names with summary, proposed `impl` and per-domain target
 - `catalog/tests/` — schema, family-chain and taxonomy checks
-- `core/`, `sdk/`, `adapters/`, `dashboard/`, `evals/` — empty
+- `core/` — `ooat-core` package: ledger, artifact storage, state projections (see `core/description.md`)
+- `sdk/`, `adapters/`, `dashboard/`, `evals/` — empty
 - `docs/adr/` — decision records; `docs/assets/` — images (social preview)
 - `.github/` — CI (`tests.yml`: pytest on 3.12 and 3.13), Claude review workflows (`claude-review.yml` automatic on same-repo PRs, `claude.yml` on `@claude` mentions; Opus 5.5, comment-only, advisory per ADR 0007; auth via `CLAUDE_CODE_OAUTH_TOKEN`), issue and PR templates
 - `CONTRIBUTING.md`, `CODE_OF_CONDUCT.md`, `SECURITY.md` — contribution rules, Contributor Covenant 2.1, private vulnerability reporting
