@@ -240,3 +240,15 @@ def test_request_is_answered_only_once(ledger):
     ledger.append(new_event("HIL_RESPONSE", task=task, actor=HIL, body=answer))
     with pytest.raises(SpecValidationError, match="already answered"):
         ledger.append(new_event("HIL_RESPONSE", task=task, actor=HIL, body={**answer, "choice": "send"}))
+
+
+def test_database_rejects_a_second_response_even_past_the_ledger_check(ledger):
+    # Two processes can both pass Ledger's "already answered" check; the backend must still refuse the second.
+    task = new_id("tsk")
+    request = ledger.append(hil_request(task, "R3", "hold"))
+    first = new_event("HIL_RESPONSE", task=task, actor=HIL, body={"request": request["id"], "choice": "send"})
+    second = new_event("HIL_RESPONSE", task=task, actor=HIL, body={"request": request["id"], "choice": "hold"})
+    ledger.backend.insert(_event_row(first), [])
+    with pytest.raises(LedgerIntegrityError):
+        ledger.backend.insert(_event_row(second), [])
+    assert [e["id"] for e in ledger.events(types=["HIL_RESPONSE"])] == [first["id"]]

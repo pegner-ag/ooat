@@ -36,6 +36,9 @@ CREATE TABLE IF NOT EXISTS event (
 );
 CREATE INDEX IF NOT EXISTS event_task_seq ON event (task_id, seq);
 CREATE INDEX IF NOT EXISTS event_type_seq ON event (type, seq);
+-- One answer per HIL request, also when two processes pass Ledger's check at the same time (spec §9).
+CREATE UNIQUE INDEX IF NOT EXISTS event_one_response ON event (json_extract(body, '$.request'))
+  WHERE type = 'HIL_RESPONSE';
 CREATE TABLE IF NOT EXISTS artifact (
   id                TEXT NOT NULL,
   version           INTEGER NOT NULL CHECK (version >= 1),
