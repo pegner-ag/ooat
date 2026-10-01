@@ -8,10 +8,10 @@ import dataclasses
 import math
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone
 
 from .config import Config
-from .connectors import ConnectorError, ModelConnector, ModelRequest, ModelResponse, jurisdiction_fingerprint
+from .connectors import ConnectorError, ModelConnector, ModelRequest, ModelResponse, jurisdiction_stale
 from .connectors.registry import Registry
 from .ledger import DATA_CLASSES, Ledger, new_event
 from .routing import Price, RoutingPolicy
@@ -187,7 +187,7 @@ class Gateway:
             return f"{data_class} requires verified redaction, not available yet"
         if policy.get("require_contract"):  # manifests cannot state a processing agreement yet: fail closed
             return f"{data_class} requires a provider contract, which cannot be verified yet"
-        if data_class in _PERSONAL_OR_HIGHER and self._stale(manifest, acknowledgement):
+        if data_class in _PERSONAL_OR_HIGHER and jurisdiction_stale(manifest, acknowledgement, self._clock().date()):
             return "jurisdiction changed or not verified within 12 months; acknowledge again for personal data"
         if manifest["automation_permitted"] == "not_permitted":
             return "provider terms do not permit automated use"
@@ -196,12 +196,6 @@ class Gateway:
         if connector_id in cooldowns:
             return f"quota cool-down until {cooldowns[connector_id]}"
         return None
-
-    def _stale(self, manifest: dict, acknowledgement: dict) -> bool:
-        verified_on = manifest["jurisdiction"]["verified_on"]
-        if verified_on is None or (self._clock().date() - date.fromisoformat(verified_on)).days > 365:
-            return True
-        return jurisdiction_fingerprint(manifest) != acknowledgement.get("jurisdiction_sha256")
 
     def _models(self, connector_id: str) -> dict:
         return self._config.connectors.get(connector_id, {}).get("models", {})
