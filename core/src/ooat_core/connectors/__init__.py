@@ -31,6 +31,7 @@ class ModelRequest:
     task: str | None = None
     contract: str | None = None
     timeout_s: float = 600
+    model: str | None = None  # set by the gateway to the routed model; connectors must use it
 
 
 @dataclass(frozen=True)

@@ -315,6 +315,31 @@ def test_connector_errors_are_typed_and_secrets_never_leave_the_gateway():
     assert "sk-fake-123456" not in json.dumps(setup.ledger.events())
 
 
+# Routed model ------------------------------------------------------------------------------------------------
+
+def test_connector_receives_the_routed_model():
+    manifest = fake_manifest("prv.cli.subscription_cli", "subscription_cli", tiers={"workhorse": None})
+    setup = ready(manifest, settings={"prv.cli.subscription_cli": {"models": {"workhorse": "fake-model"}}})
+    setup.gateway.call(setup.request())
+    assert setup.connectors[0].calls[0].model == "fake-model"
+
+
+def test_cost_follows_the_model_that_actually_ran():
+    connector = FakeConnector(SUBSCRIPTION, reported_model="premium-model")
+    setup = Setup(connector)
+    setup.acknowledge(connector)
+    result = setup.gateway.call(setup.request())
+    assert result.cost["usd"] == pytest.approx((1000 * 15 + 200 * 75) / 1_000_000)
+    assert result.cost["basis"] == "shadow"
+
+
+def test_unpriced_model_that_actually_ran_is_marked_estimated():
+    connector = FakeConnector(API, reported_model="mystery-model")
+    setup = Setup(connector)
+    setup.acknowledge(connector)
+    assert setup.gateway.call(setup.request()).cost["basis"] == "estimated"
+
+
 # Review Focus -------------------------------------------------------------------------------------------------
 
 def test_pinned_connector_in_cool_down_reports_quota_not_permission():
