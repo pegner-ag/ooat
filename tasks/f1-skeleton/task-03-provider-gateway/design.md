@@ -152,8 +152,8 @@ Prices come from `catalog/routing.json` (`prices`, with `valid_from` and `source
    routing data-class policy; `special_category` is always refused in F1 (no verified redaction yet).
 3. Automation: a connector is used only if its manifest's `automation_permitted` is not `not_permitted`
    **and** the acknowledgement has `automation_confirmed: true`. An acknowledgement never overrides a manifest
-   that forbids automation (no way around provider terms). In F1 every gateway call is unattended;
-   human-relayed use (`subscription_manual`) comes with HIL in 05.
+   that forbids automation (no way around provider terms). In F1 every gateway call is unattended, so
+   `subscription_manual` connectors are never routed; human-relayed use comes with HIL in 05.
 4. A pin for the tier selects that connector; if the pin fails steps 1–3, the call fails with the reason
    (no silent fallback).
 5. Otherwise the lowest estimated cost wins; ties prefer `subscription_cli`, then `local`, then `api`
@@ -164,7 +164,11 @@ for the tier (needs evals: 02 and 06), and running a T3+ critic on a different v
 
 **Budget**: if the request names a contract, remaining budget = `max_usd` of its `CONTRACT_ISSUED` minus the
 `usd` of its events. The call is refused with `BUDGET` when the estimate exceeds the remainder; a
-`BUDGET_WARNING` (level `contract`) is appended once when spending passes 80 %.
+`BUDGET_WARNING` (level `contract`) is appended once when spending passes 80 %. A failed call that reached the
+provider (`API_ERROR`, `TIMEOUT`) is charged its estimate (basis `estimated`), so a contract that keeps failing
+is stopped by its budget; a call that never ran (`UNAVAILABLE`, `QUOTA_EXHAUSTED`) costs nothing. The
+budget counts the costs callers have appended to the ledger, so every caller appends the returned cost record.
+The monthly system budget and the task budget (spec §6 budgets table) are enforced by the Gate in 04.
 
 **Quota**: `QUOTA_EXHAUSTED` from a connector puts it in cool-down until `resets_at`, else
 `plan.quota_window_hours`, else 1 hour, and appends `QUOTA_WARNING` (utilisation 1.0, `window_resets_at`).

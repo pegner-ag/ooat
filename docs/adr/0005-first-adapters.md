@@ -18,6 +18,9 @@
 
 ## Conditions
 
+> Amended by ADR 0010: the operator's confirmation of automated use is recorded in `ADAPTER_ACKNOWLEDGED`
+> (`automation_confirmed`); manifests state the provider's terms (`permitted | not_permitted | unknown`).
+
 - Every subscription adapter starts with `automation_permitted: unknown`. It runs unattended only after the
   operator has checked that plan's terms and set `operator_confirmed`; until then it is limited to
   `subscription_manual` with HIL (spec §6). OOAT does not work around provider terms.

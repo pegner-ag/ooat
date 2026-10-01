@@ -1177,7 +1177,8 @@ git commit -m "core: record estimated_usd in the ledger (schema version 2 with m
   - `Gateway(ledger, registry, routing, config=Config(), secrets=None, clock=...)` with `.estimate(request) -> Estimate` (no provider call) and `.call(request) -> GatewayResult` (`ValueError` without `request.task` or with an unknown data class).
   - `Estimate(connector, model, tokens_in, tokens_out, usd, basis)`; `GatewayResult(response, cost, estimate)`.
   - `GatewayError(code, message, trace=None, cost=None)`; codes `NOT_PERMITTED`, `BUDGET`, `QUOTA_EXHAUSTED`, `UNAVAILABLE`, `API_ERROR`, `TIMEOUT`.
-  - Cost record keys: `adapter`, `tier`, `tokens_in`, `tokens_cached`, `tokens_out`, `quota_units` (when reported), `usd`, `basis` (`exact` | `shadow` | `estimated`), `price_ver`, `estimated_usd`. Failed calls: `usd: 0.0`, `basis: estimated`.
+  - Cost record keys: `adapter`, `tier`, `tokens_in`, `tokens_cached`, `tokens_out`, `quota_units` (when reported), `usd`, `basis` (`exact` | `shadow` | `estimated`), `price_ver`, `estimated_usd`. Failed calls: `basis: estimated`; `usd` is the estimate when the call reached the provider (`API_ERROR`, `TIMEOUT`, unexpected exception), else `0.0`.
+  - `subscription_manual` connectors are never routed (they need a human, sub-project 05).
   - Ledger events written by the gateway (actor `system` / `ooat-gateway`): `QUOTA_WARNING` (utilisation 1.0, `window_resets_at`), `BUDGET_WARNING` (level `contract`, once per contract at 80 %).
 
 - [ ] **Step 1: Write the failing test** — `core/tests/test_gateway.py`:
@@ -1533,6 +1534,34 @@ def test_budget_exactly_equal_to_the_estimate_is_allowed():
     estimate = setup.gateway.estimate(setup.request())
     contract = setup.issue_contract(max_usd=estimate.usd)
     assert setup.gateway.call(setup.request(contract=contract)).cost["adapter"] == "prv.fake.api"
+
+
+
+def test_manual_relay_is_never_used_unattended():
+    manual = fake_manifest("prv.fake.subscription_manual", "subscription_manual")
+    manual["metering"] = "none"
+    setup = ready(manual)
+    with pytest.raises(GatewayError) as info:
+        setup.gateway.estimate(setup.request())
+    assert "manual relay" in info.value.trace[0]
+
+
+def test_failed_calls_count_against_the_budget():
+    setup = ready(API)
+    setup.connectors[0].error = ConnectorError("API_ERROR", "500 from provider")
+    estimate = setup.gateway.estimate(setup.request())
+    contract = setup.issue_contract(max_usd=estimate.usd * 2.5)
+    for _ in range(2):
+        with pytest.raises(GatewayError) as info:
+            setup.gateway.call(setup.request(contract=contract))
+        assert info.value.cost["usd"] == estimate.usd and info.value.cost["basis"] == "estimated"
+        setup.ledger.append(new_event("RESULT", task=setup.task, contract=contract,
+                                      actor={"kind": "agent", "id": new_id("agt"), "role": "role.general.worker@0.1.0"},
+                                      body={"outcome": "FAILED", "error": {"code": "API_ERROR", "message": "500"}},
+                                      cost=info.value.cost))
+    with pytest.raises(GatewayError) as info:
+        setup.gateway.call(setup.request(contract=contract))
+    assert info.value.code == "BUDGET"
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
@@ -1633,11 +1662,12 @@ class Gateway:
         except ConnectorError as error:
             if error.code == "QUOTA_EXHAUSTED":
                 self._cool_down(request, candidate.connector, error.resets_at)
+            ran = error.code in ("API_ERROR", "TIMEOUT")  # the provider may have consumed tokens
             raise GatewayError(error.code, self._secrets.redact(error.message),
-                               cost=self._failure_cost(request, candidate)) from None
+                               cost=self._failure_cost(request, candidate, ran)) from None
         except Exception as error:  # a connector bug must surface as a typed, redacted failure
             raise GatewayError("API_ERROR", self._secrets.redact(f"{connector_id}: {type(error).__name__}: {error}"),
-                               cost=self._failure_cost(request, candidate)) from None
+                               cost=self._failure_cost(request, candidate, True)) from None
         cost = self._cost(request, candidate, response)
         self._warn_budget(request, cost["usd"])
         return GatewayResult(response, cost, candidate.estimate)
@@ -1680,6 +1710,8 @@ class Gateway:
             return f"does not serve tier {request.tier}"
         if not self._routing.allows(request.tier, connector_id):
             return f"not listed for tier {request.tier} in routing.json"
+        if manifest["access"] == "subscription_manual":
+            return "manual relay needs a human in the loop (sub-project 05)"
         if acknowledgement is None:
             return "not acknowledged by the operator (or disabled)"
         if data_class == "special_category":
@@ -1799,10 +1831,12 @@ class Gateway:
                 "price_ver": self._routing.version, "estimated_usd": estimate.usd}
         return {key: value for key, value in cost.items() if value is not None}
 
-    def _failure_cost(self, request: ModelRequest, candidate: _Candidate) -> dict:
-        """A failed call's usage is unknown: no charge is invented, the estimate is kept for calibration."""
-        return {"adapter": candidate.connector.manifest["id"], "tier": request.tier, "usd": 0.0,
-                "basis": "estimated", "price_ver": self._routing.version, "estimated_usd": candidate.estimate.usd}
+    def _failure_cost(self, request: ModelRequest, candidate: _Candidate, ran: bool) -> dict:
+        """Usage of a failed call is unknown. A call that reached the provider is charged its estimate, so the
+        contract budget stops a contract that keeps failing; a call that never ran costs nothing."""
+        return {"adapter": candidate.connector.manifest["id"], "tier": request.tier,
+                "usd": candidate.estimate.usd if ran else 0.0, "basis": "estimated",
+                "price_ver": self._routing.version, "estimated_usd": candidate.estimate.usd}
 ```
 
 - [ ] **Step 4: Run tests to verify they pass**
@@ -1822,7 +1856,7 @@ git commit -m "core: provider gateway (estimate, routing, budgets, quota, meteri
 ### Task 7: Documentation
 
 **Files:**
-- Modify: `core/description.md`, `docs/description.md`, `tasks/f1-skeleton/README.md`
+- Modify: `core/description.md`, `docs/description.md`, `spec/README.md`, `tasks/f1-skeleton/README.md`
 
 **Interfaces:**
 - Consumes: Tasks 1–6.
@@ -1929,6 +1963,32 @@ with:
 Plans: 03a gateway core + connector contract (done), 03b connectors (Claude Code CLI, Codex CLI, Anthropic API), 03c `ooat connectors` + consequences card | 01 | 03b next |
 ```
 
+In `spec/README.md`, replace:
+
+```markdown
+- Subscription adapters need a `plan`; manual relay cannot be `operator_confirmed` or metered.
+```
+
+with:
+
+```markdown
+- Subscription adapters need a `plan`; manual relay cannot be `permitted` for automation or metered.
+- `automation_permitted` states the provider's terms (`permitted | not_permitted | unknown`); the operator's
+  confirmation is `automation_confirmed` in `ADAPTER_ACKNOWLEDGED` (ADR 0010).
+```
+
+In `spec/README.md`, replace:
+
+```markdown
+only humans emit `HIL_RESPONSE`, `TASK_RATED`, `DEFECT_FOUND`, `ADAPTER_ACKNOWLEDGED`.
+```
+
+with:
+
+```markdown
+only humans emit `HIL_RESPONSE`, `TASK_RATED`, `DEFECT_FOUND`, `ADAPTER_ACKNOWLEDGED`, `ADAPTER_DISABLED`.
+```
+
 
 - [ ] **Step 2: Run all tests**
 
@@ -1938,6 +1998,6 @@ Expected: PASS
 - [ ] **Step 3: Commit**
 
 ```bash
-git add core/description.md docs/description.md tasks/f1-skeleton/README.md
+git add core/description.md docs/description.md spec/README.md tasks/f1-skeleton/README.md
 git commit -m "docs: describe the provider gateway core"
 ```

@@ -17,13 +17,17 @@
 3. **Automation rule (amends spec §6 and ADR 0005).** The manifest field `automation_permitted` now states the
    provider's terms as published: `permitted`, `not_permitted` or `unknown` (the value `operator_confirmed`
    is replaced by `permitted`; the operator's confirmation lives in the acknowledgement). Unattended use requires `automation_permitted != not_permitted` **and** an acknowledgement with
-   `automation_confirmed: true`; an acknowledgement never overrides `not_permitted`.
+   `automation_confirmed: true`; an acknowledgement never overrides `not_permitted`. Manual relay
+   (`subscription_manual`) is never used unattended; it needs a human in the loop (sub-project 05).
 4. **Staleness (spec §9 rule 2).** A changed `jurisdiction` block (fingerprint mismatch) or a `verified_on` that
    is `null` or older than 12 months refuses `personal` and `special_category` until re-acknowledged; other
    classes stay available.
 5. **Error codes.** `RESULT.error.code` gains `UNAVAILABLE` (connector not reachable, CLI missing or logged out);
    provider-side failures use the existing `API_ERROR`.
-6. Connectors are discovered through the Python entry-point group `ooat.connectors`; one mechanism serves model
+6. **Routing tiers become optional.** `tiers` in `routing.json` is an optional allow-list: a listed tier accepts
+   only the listed connectors, an unlisted tier accepts every acknowledged connector whose manifest maps it, so
+   installing and acknowledging a connector is enough to use it.
+7. Connectors are discovered through the Python entry-point group `ooat.connectors`; one mechanism serves model
    connectors now and tool connectors later.
 
 ## Consequences
