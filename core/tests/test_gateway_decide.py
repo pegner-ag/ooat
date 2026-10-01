@@ -151,6 +151,17 @@ def test_unfit_answers_are_an_api_error_that_is_still_charged():
     assert info.value.cost["usd"] > 0 and info.value.cost["tier"] == "decision"
 
 
+@pytest.mark.parametrize("answers", [
+    lambda request: {"a5": DecisionAnswer("choice", ["two"], 0.8)},  # an unhashable option
+    lambda request: None,  # the connector cannot even build its response
+])
+def test_malformed_answers_are_a_typed_charged_error_that_falls_back(answers):
+    setup = Setup(FakeDecisionConnector(answers=answers))
+    with pytest.raises(GatewayError) as info:
+        setup.gateway.decide(setup.request(questions={"a5": BRANCHES}))
+    assert info.value.code == "API_ERROR" and info.value.cost["adapter"] == "prv.fakejev.api"
+
+
 def test_personal_data_never_reaches_a_decision_connector_that_does_not_allow_it():
     jev = FakeDecisionConnector(answers=jev_answers)
     setup = Setup(jev)
@@ -233,6 +244,21 @@ def test_a_budget_refusal_does_not_fall_back_to_a_dearer_engine():
     with pytest.raises(GatewayError, match="BUDGET"):
         setup.gateway.decide(setup.request(contract=contract))
     assert jev.calls == [] and text_model.calls == []
+
+
+def test_a_budget_refusal_on_the_fallback_is_reported_as_budget():
+    jev, text_model = FakeDecisionConnector(error=ConnectorError("UNAVAILABLE", "HTTP 529")), economy()
+    setup = Setup(jev, text_model)
+    contract = new_id("ctr")
+    setup.ledger.append(new_event("CONTRACT_ISSUED", task=setup.task, contract=contract,
+                                  actor={"kind": "system", "id": "ooat-core"}, body={"contract": {
+        "id": contract, "task": setup.task, "capability": "cap.general.check_criterion",
+        "capability_version": "0.1.0", "agent": new_id("agt"), "role": "role.general.worker@0.1.0",
+        "goal": "Check.", "inputs": [], "output_schema": "schemas/decision.v1.json", "budget": {"max_usd": 0.00001}}}))
+    with pytest.raises(GatewayError) as info:
+        setup.gateway.decide(setup.request(contract=contract))
+    assert info.value.code == "BUDGET" and info.value.fallback_from.code == "UNAVAILABLE"
+    assert text_model.calls == []
 
 
 def test_an_unreadable_fallback_reply_is_a_charged_api_error_that_names_the_first_failure():

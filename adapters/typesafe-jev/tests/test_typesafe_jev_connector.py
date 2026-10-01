@@ -70,13 +70,15 @@ def test_request_shape_and_parsed_reply():
     sent = {}
 
     def opener(req, timeout):
-        sent.update(url=req.full_url, headers=dict(req.header_items()), body=json.loads(req.data), timeout=timeout)
+        sent.update(url=req.full_url, headers=dict(req.header_items()), body=json.loads(req.data), timeout=timeout,
+                    raw=req.data)
         return Reply(json.dumps(REPLY).encode())
 
     response = JevConnector(opener).decide(request(model="jev-latest", timeout_s=20), Secrets())
     assert sent["url"] == "https://api.typesafe.ai/v1/systemone" and sent["timeout"] == 20
     assert sent["headers"]["Authorization"] == f"Bearer {KEY}"
     assert sent["body"]["model"] == "jev-latest" and sent["body"]["state"] == "Napiš shrnutí smlouvy pro jednatele."
+    assert "Napiš shrnutí".encode("utf-8") in sent["raw"]  # UTF-8 on the wire, not ASCII escapes
     assert sent["body"]["questions"] == {
         "q0": {"type": "noul", "instructions": CHECKABLE.instructions},
         "q1": {"type": "choice", "instructions": BRANCHES.instructions, "criteria": BRANCHES.criteria},

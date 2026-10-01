@@ -175,6 +175,9 @@ class Gateway:
         try:
             result = self._decide_on_text_model(request, expanded)
         except GatewayError as error:
+            if error.code == "BUDGET":  # the caller must see the budget, not the decision tier's failure
+                error.fallback_from = failure
+                raise
             if error.cost is None:  # nothing ran on the text tier
                 raise GatewayError(failure.code, f"{failure.message}; fallback: {error.message}",
                                    failure.trace + error.trace, failure.cost) from None
@@ -191,6 +194,9 @@ class Gateway:
             answers = checked_answers(expanded.questions, response.answers)
         except ValueError as error:  # the provider answered, so the call is charged
             raise GatewayError("API_ERROR", self._secrets.redact(f"unusable answer: {error}"), cost=cost) from None
+        except Exception as error:  # an answer object of the wrong shape must still be typed and charged
+            raise GatewayError("API_ERROR", self._secrets.redact(f"unusable answer: {type(error).__name__}"),
+                               cost=cost) from None
         self._warn_budget(request, cost["usd"])
         return DecisionResult(merged_answers(request.questions, answers), candidate.connector.manifest["id"],
                               response.model, cost, candidate.estimate)
@@ -201,6 +207,9 @@ class Gateway:
             answers = checked_answers(expanded.questions, parse_fallback(result.response.text, expanded.questions))
         except ValueError as error:  # the model answered, so the call is charged
             raise GatewayError("API_ERROR", self._secrets.redact(f"unusable fallback answer: {error}"),
+                               cost=result.cost) from None
+        except Exception as error:  # an answer object of the wrong shape must still be typed and charged
+            raise GatewayError("API_ERROR", self._secrets.redact(f"unusable fallback answer: {type(error).__name__}"),
                                cost=result.cost) from None
         return DecisionResult(merged_answers(request.questions, answers), result.cost["adapter"],
                               result.response.model, result.cost, result.estimate)

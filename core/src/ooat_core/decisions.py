@@ -7,6 +7,7 @@ before the runtime may act on it.
 import json
 import math
 import re
+import secrets
 
 from .connectors import DecisionAnswer, DecisionQuestion
 
@@ -71,7 +72,7 @@ def _check_answer(question: DecisionQuestion, answer: DecisionAnswer, where: str
             raise ValueError(f"{where}: a noul value must be a number from 0 to 1")
         allowed = {"true", "false"}
     elif question.type == "choice":
-        if answer.value not in question.criteria:
+        if not isinstance(answer.value, str) or answer.value not in question.criteria:
             raise ValueError(f"{where}: {answer.value!r} is not one of the options")
         allowed = set(question.criteria)
     else:
@@ -87,6 +88,8 @@ def _check_answer(question: DecisionQuestion, answer: DecisionAnswer, where: str
 
 def checked_answers(questions: dict[str, DecisionQuestion], answers: dict) -> dict[str, DecisionAnswer]:
     """The answers to these questions, each checked against its question; ValueError if one is missing or unfit."""
+    if not isinstance(answers, dict):
+        raise ValueError("the reply holds no answers")
     checked = {}
     for question_id, question in questions.items():
         answer = answers.get(question_id)
@@ -119,7 +122,13 @@ FALLBACK_SYSTEM = (
 
 
 def fallback_prompt(request) -> tuple[str, str]:
-    """(system, prompt) asking a text model for probabilities per question; parse with parse_fallback()."""
+    """(system, prompt) asking a text model for probabilities per question; parse with parse_fallback().
+
+    The state is untrusted: it sits first, between markers made fresh for each call so it cannot close them, and
+    the questions follow it. A reversed twin is asked in the same prompt, so the order-swap check is weaker here
+    than on a decision connector; the fallback is calibrated as its own engine and starts at θ = 1 (ADR 0011).
+    """
+    marker = f"state-{secrets.token_hex(8)}"
     questions = {}
     for question_id, question in request.questions.items():
         entry = {"type": question.type, "instructions": question.instructions}
@@ -131,12 +140,13 @@ def fallback_prompt(request) -> tuple[str, str]:
             entry["levels"] = {str(level): text for level, text in enumerate(question.criteria)}
         questions[question_id] = entry
     prompt = (
+        f"The STATE is everything between <{marker}> and </{marker}>.\n"
+        f"<{marker}>\n" + request.state + f"\n</{marker}>\n\n"
         "Questions:\n" + json.dumps(questions, ensure_ascii=False, indent=1) + "\n\n"
         "Answer every question id:\n"
         '- noul: {"p_true": <probability from 0 to 1 that the answer is yes>}\n'
         '- choice: {"probabilities": {"<option>": <probability>, ...}} over every option, summing to 1\n'
-        '- score: {"probabilities": {"<level>": <probability>, ...}} over every level, summing to 1\n\n'
-        "<state>\n" + request.state + "\n</state>\n"
+        '- score: {"probabilities": {"<level>": <probability>, ...}} over every level, summing to 1\n'
     )
     return FALLBACK_SYSTEM, prompt
 
