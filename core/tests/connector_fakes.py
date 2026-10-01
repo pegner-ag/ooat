@@ -30,8 +30,10 @@ def fake_manifest(connector_id="prv.fake.api", access="api", tiers=None, version
 class FakeConnector:
     kind = "model"
 
-    def __init__(self, manifest=None, text="Hotovo.", usage=(1000, 0, 200), error=None, secret_seen=None):
+    def __init__(self, manifest=None, text="Hotovo.", usage=(1000, 0, 200), error=None, secret_seen=None,
+                 reported_model=None):
         self.manifest = manifest or fake_manifest()
+        self.reported_model = reported_model  # a model other than the routed one, as a CLI may run
         self.text, self.usage, self.error = text, usage, error
         self.calls = []
         self.secret_seen = secret_seen  # connector id whose secret is requested on each call
@@ -46,7 +48,7 @@ class FakeConnector:
         if self.error:
             raise self.error
         tokens_in, tokens_cached, tokens_out = self.usage
-        model = self.manifest["tiers"][request.tier]
+        model = self.reported_model or request.model or self.manifest["tiers"][request.tier]
         metering = "exact" if self.manifest["access"] == "api" else "reported"
         return ModelResponse(self.text, model, tokens_in, tokens_cached, tokens_out, None, metering)
 

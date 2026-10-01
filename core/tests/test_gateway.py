@@ -11,7 +11,7 @@ from ooat_core.gateway import Gateway, GatewayError
 from ooat_core.ids import new_id
 from ooat_core.ledger import Ledger, new_event
 from ooat_core.routing import RoutingPolicy
-from ooat_core.secrets import SecretResolver
+from ooat_core.credentials_env import SecretResolver
 
 NOW = datetime(2026, 10, 1, 12, 0, tzinfo=timezone.utc)
 HIL = {"kind": "hil", "id": "operator"}
@@ -313,6 +313,31 @@ def test_connector_errors_are_typed_and_secrets_never_leave_the_gateway():
         setup.gateway.call(setup.request())
     assert info.value.code == "API_ERROR" and "sk-fake-123456" not in str(info.value)
     assert "sk-fake-123456" not in json.dumps(setup.ledger.events())
+
+
+# Routed model ------------------------------------------------------------------------------------------------
+
+def test_connector_receives_the_routed_model():
+    manifest = fake_manifest("prv.cli.subscription_cli", "subscription_cli", tiers={"workhorse": None})
+    setup = ready(manifest, settings={"prv.cli.subscription_cli": {"models": {"workhorse": "fake-model"}}})
+    setup.gateway.call(setup.request())
+    assert setup.connectors[0].calls[0].model == "fake-model"
+
+
+def test_cost_follows_the_model_that_actually_ran():
+    connector = FakeConnector(SUBSCRIPTION, reported_model="premium-model")
+    setup = Setup(connector)
+    setup.acknowledge(connector)
+    result = setup.gateway.call(setup.request())
+    assert result.cost["usd"] == pytest.approx((1000 * 15 + 200 * 75) / 1_000_000)
+    assert result.cost["basis"] == "shadow"
+
+
+def test_unpriced_model_that_actually_ran_is_marked_estimated():
+    connector = FakeConnector(API, reported_model="mystery-model")
+    setup = Setup(connector)
+    setup.acknowledge(connector)
+    assert setup.gateway.call(setup.request()).cost["basis"] == "estimated"
 
 
 # Review Focus -------------------------------------------------------------------------------------------------

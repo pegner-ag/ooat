@@ -22,9 +22,12 @@ class SecretResolver:
         name = self._config.connectors.get(connector_id, {}).get("secret_env")
         if not name:
             raise ConnectorError("UNAVAILABLE", f"{connector_id}: no secret_env configured")
-        value = self._environ.get(name)
+        value = (self._environ.get(name) or "").strip()  # a key copied from a file often ends with a newline
         if not value:
             raise ConnectorError("UNAVAILABLE", f"{connector_id}: environment variable {name} is not set")
+        if any(character.isspace() or ord(character) < 32 for character in value):
+            raise ConnectorError("UNAVAILABLE", f"{connector_id}: environment variable {name} contains whitespace "
+                                                f"or control characters")
         return value
 
     def redact(self, text: str) -> str:

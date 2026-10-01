@@ -15,7 +15,7 @@ from .connectors import ConnectorError, ModelConnector, ModelRequest, ModelRespo
 from .connectors.registry import Registry
 from .ledger import DATA_CLASSES, Ledger, new_event
 from .routing import Price, RoutingPolicy
-from .secrets import SecretResolver
+from .credentials_env import SecretResolver
 
 ACTOR = {"kind": "system", "id": "ooat-gateway"}
 # Already-paid capacity first when estimated costs tie (ADR 0005).
@@ -112,7 +112,8 @@ class Gateway:
         self._check_budget(request, candidate.estimate)
         connector_id = candidate.connector.manifest["id"]
         try:
-            response = candidate.connector.complete(request, _OwnSecret(self._secrets, connector_id))
+            routed = dataclasses.replace(request, model=candidate.estimate.model)
+            response = candidate.connector.complete(routed, _OwnSecret(self._secrets, connector_id))
         except ConnectorError as error:
             if error.code == "QUOTA_EXHAUSTED":
                 self._cool_down(request, candidate.connector, error.resets_at)
@@ -300,9 +301,17 @@ class Gateway:
             basis = "estimated"
         else:
             basis = "exact" if manifest["access"] == "api" else "shadow"
+        price = candidate.price
+        if response.model != estimate.model:  # the provider ran another model than the one routed
+            actual = self._routing.price(manifest["id"], response.model, self._clock().date(),
+                                         fallback=manifest["access"] != "api")
+            if actual is None:
+                basis = "estimated"  # no known price for the model that ran; the routed price stands in
+            else:
+                price = actual
         cost = {"adapter": manifest["id"], "tier": request.tier, "tokens_in": tokens_in,
                 "tokens_cached": tokens_cached, "tokens_out": tokens_out, "quota_units": response.quota_units,
-                "usd": candidate.price.usd(tokens_in, tokens_cached, tokens_out), "basis": basis,
+                "usd": price.usd(tokens_in, tokens_cached, tokens_out), "basis": basis,
                 "price_ver": self._routing.version, "estimated_usd": estimate.usd}
         return {key: value for key, value in cost.items() if value is not None}
 

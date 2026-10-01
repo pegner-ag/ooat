@@ -18,10 +18,14 @@ metering). Concrete connectors, Gate, workers and API are not implemented yet.
   and lists broken ones without using them
 - `config.py` — `load_config()` for `ooat.toml`: ledger URL, per-tier pins, connector settings; no secrets,
   no enablement
-- `secrets.py` — `SecretResolver`: values from named environment variables, `redact()`
+- `credentials_env.py` — `SecretResolver`: values from named environment variables, `redact()`
 - `routing.py` — `RoutingPolicy` from `routing.json`: dated prices, optional tier allow-list, data-class policy
 - `gateway.py` — `Gateway.estimate()` / `.call()`: data-class guard, acknowledgement and automation rules from
-  the ledger, quota cool-down, pins, cheapest connector, contract budget, cost record with `estimated_usd`
+  the ledger, quota cool-down, pins, cheapest connector, contract budget, cost record with `estimated_usd`;
+  passes the routed model to the connector in `ModelRequest.model`
+- `connectors/cli.py` — `run_cli()`: vendor CLI with the prompt on stdin, in an empty temporary directory,
+  typed `UNAVAILABLE` / `TIMEOUT` failures
+- `connectors/conformance.py` — `check_connector()`: the contract every connector package tests
 
 Schemas are read from `spec/schemas/` in the repository, so the package works from a checkout or an editable
 install (`pip install -e core`); packaging the schemas into the wheel is release work.

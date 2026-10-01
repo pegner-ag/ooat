@@ -1,0 +1,61 @@
+{
+  "version": "0.1.0",
+  "prices": [
+    {
+      "adapter": "prv.anthropic.api",
+      "model": "claude-haiku-4-5-20251001",
+      "usd_per_mtok_in": 1,
+      "usd_per_mtok_cached": 0.1,
+      "usd_per_mtok_out": 5,
+      "valid_from": "2026-10-01",
+      "source": "https://platform.claude.com/docs/en/about-claude/pricing"
+    },
+    {
+      "adapter": "prv.anthropic.api",
+      "model": "claude-sonnet-5-5",
+      "usd_per_mtok_in": 2,
+      "usd_per_mtok_cached": 0.2,
+      "usd_per_mtok_out": 10,
+      "valid_from": "2026-10-01",
+      "source": "https://platform.claude.com/docs/en/about-claude/pricing"
+    },
+    {
+      "adapter": "prv.anthropic.api",
+      "model": "claude-opus-5-5",
+      "usd_per_mtok_in": 4,
+      "usd_per_mtok_cached": 0.2,
+      "usd_per_mtok_out": 20,
+      "valid_from": "2026-10-01",
+      "source": "https://platform.claude.com/docs/en/about-claude/pricing"
+    }
+  ],
+  "data_class_policy": {
+    "public": {
+      "allowed": true
+    },
+    "internal": {
+      "allowed": true
+    },
+    "client_confidential": {
+      "allowed": true,
+      "require_no_training": true,
+      "require_known_region": true,
+      "require_contract": true
+    },
+    "personal": {
+      "allowed": true,
+      "require_no_training": true,
+      "require_known_region": true,
+      "require_contract": true
+    },
+    "special_category": {
+      "allowed": true,
+      "require_verified_redaction": true
+    }
+  },
+  "critic_other_vendor": true,
+  "display": {
+    "currency": "CZK",
+    "fx_source": "https://www.cnb.cz/"
+  }
+}
