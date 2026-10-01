@@ -16,6 +16,7 @@ from .validation import SpecValidationError, validate
 _SQL_INT_MAX = 2**63 - 1
 _COST_INTEGERS = ("tokens_in", "tokens_cached", "tokens_out")
 _HEX = frozenset("0123456789abcdef")
+DATA_CLASSES = frozenset({"public", "internal", "client_confidential", "personal", "special_category"})
 
 # The envelope's cost keys differ from the spec's column names for usd and basis.
 _COST_COLUMNS = {
@@ -124,6 +125,7 @@ class Ledger:
         too_large = [key for key in _COST_INTEGERS if event.get("cost", {}).get(key, 0) > _SQL_INT_MAX]
         if too_large:
             raise SpecValidationError("event", [f"$.cost.{key}: exceeds a 64-bit integer" for key in too_large])
+        self._check_hil(event)
         artifacts = list(artifacts)
         self._check_staged(artifacts)
         staged_refs = {a.ref for a in artifacts}
@@ -145,12 +147,36 @@ class Ledger:
         self.backend.insert(_event_row(event), artifact_rows)
         return event
 
+    def _check_hil(self, event: dict) -> None:
+        """Cross-field HIL rules JSON Schema cannot express (spec §9, ADR 0003 #4)."""
+        body, errors = event["body"], []
+        if event["type"] == "HIL_REQUEST":
+            options = {option["id"]: option for option in body["options"]}
+            for key in ("recommended", "default_on_silence"):
+                if body[key] not in options:
+                    errors.append(f"$.body.{key}: {body[key]!r} is not one of the options")
+            default = options.get(body["default_on_silence"])
+            # An R3 action is irreversible: when nobody answers, nothing may happen.
+            if body.get("risk_class") == "R3" and default is not None and default.get("acts") is not False:
+                errors.append("$.body.default_on_silence: an R3 request must default to the option with acts: false")
+        elif event["type"] == "HIL_RESPONSE":
+            requests = {e["id"]: e for e in self.events(task=event["task"], types=["HIL_REQUEST"])}
+            request = requests.get(body["request"])
+            if request is None:
+                errors.append(f"$.body.request: no HIL_REQUEST {body['request']} in this task")
+            elif "choice" in body and body["choice"] not in {o["id"] for o in request["body"]["options"]}:
+                errors.append(f"$.body.choice: {body['choice']!r} is not an option of {body['request']}")
+        if errors:
+            raise SpecValidationError("event", errors)
+
     def _check_staged(self, artifacts: list[StagedArtifact]) -> None:
         """Staged records must be what ArtifactStore produces: real digest, blob URI, next version without gaps."""
         expected: dict[str, int] = {}
         for artifact in artifacts:
             if not artifact.type:
                 raise ValueError(f"{artifact.ref}: artifact type is empty")
+            if artifact.data_class not in DATA_CLASSES:
+                raise ValueError(f"{artifact.ref}: unknown data class {artifact.data_class!r}")
             if len(artifact.sha256) != 64 or not set(artifact.sha256) <= _HEX:
                 raise ValueError(f"{artifact.ref}: not a SHA-256 hex digest")
             if artifact.uri != f"blob:{artifact.sha256}":

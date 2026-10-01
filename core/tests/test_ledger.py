@@ -4,7 +4,7 @@ import pytest
 
 from ooat_core.backends import LedgerIntegrityError
 from ooat_core.ids import new_id
-from ooat_core.ledger import Ledger, StagedArtifact, new_event
+from ooat_core.ledger import Ledger, StagedArtifact, _event_row, new_event
 from ooat_core.validation import SpecValidationError
 
 HIL = {"kind": "hil", "id": "operator"}
@@ -95,14 +95,20 @@ def test_non_finite_numbers_are_rejected(ledger):
     assert ledger.events() == []
 
 
-def test_event_and_artifacts_are_written_atomically(ledger):
-    task, contract, ref = new_id("tsk"), new_id("ctr"), new_id("art") + "@v1"
-    first = ledger.append(result(task, contract, [ref]), [staged(ref)])
-    second = new_id("art") + "@v1"
-    rejected_by_database = dataclasses.replace(staged(second), data_class="secret")  # CHECK fails after the event row
-    with pytest.raises(LedgerIntegrityError):
-        ledger.append(result(task, contract, [second]), [rejected_by_database])
-    assert [e["id"] for e in ledger.events()] == [first["id"]]
+def test_unknown_data_class_is_rejected_before_writing(ledger):
+    ref = new_id("art") + "@v1"
+    bad = dataclasses.replace(staged(ref), data_class="secret")
+    with pytest.raises(ValueError, match="data class"):
+        ledger.append(result(new_id("tsk"), new_id("ctr"), [ref]), [bad])
+    assert ledger.events() == []
+
+
+def test_backend_insert_is_atomic(ledger):
+    orphan = {"id": new_id("art"), "version": 1, "type": "summary", "data_class": "public", "untrusted": 0,
+              "sha256": "0" * 64, "uri": "blob:" + "0" * 64, "produced_by_event": new_id("evt")}
+    with pytest.raises(LedgerIntegrityError):  # the event row is written first, then the orphan fails
+        ledger.backend.insert(_event_row(submitted(new_id("tsk"))), [orphan])
+    assert ledger.events() == []
 
 
 def test_reopened_ledger_keeps_events_in_order(tmp_path):
@@ -169,3 +175,48 @@ def test_two_versions_of_one_artifact_in_one_event(ledger):
     refs = [f"{art}@v1", f"{art}@v2"]
     ledger.append(result(new_id("tsk"), new_id("ctr"), refs), [staged(r) for r in refs])
     assert ledger.next_artifact_version(art) == 3
+
+
+SEND = {"id": "send", "label": "Odeslat", "cost_usd": 0.0, "acts": True}
+HOLD = {"id": "hold", "label": "Neodesílat", "cost_usd": 0.0, "acts": False}
+
+
+def hil_request(task, risk, default, options=(SEND, HOLD)):
+    return new_event("HIL_REQUEST", task=task, actor={"kind": "system", "id": "ooat-core"}, body={
+        "question": "Odeslat nabídku klientovi?", "risk_class": risk, "options": list(options),
+        "recommended": options[0]["id"], "default_on_silence": default,
+        "deadline": "2026-10-02T10:00:00Z", "blocking": True, "evidence": []})
+
+
+def test_r3_request_must_default_to_not_acting(ledger):
+    with pytest.raises(SpecValidationError, match="default_on_silence"):
+        ledger.append(hil_request(new_id("tsk"), "R3", "send"))
+    assert ledger.events() == []
+    ledger.append(hil_request(new_id("tsk"), "R3", "hold"))
+
+
+def test_request_must_name_its_own_options(ledger):
+    with pytest.raises(SpecValidationError, match="default_on_silence"):
+        ledger.append(hil_request(new_id("tsk"), "R1", "maybe"))
+    bad = hil_request(new_id("tsk"), "R1", "hold")
+    bad["body"]["recommended"] = "other"
+    with pytest.raises(SpecValidationError, match="recommended"):
+        ledger.append(bad)
+    assert ledger.events() == []
+
+
+def test_response_must_answer_an_open_request_of_its_task(ledger):
+    task = new_id("tsk")
+    request = ledger.append(hil_request(task, "R1", "hold"))
+
+    def response(request_id, choice, on_task=task):
+        return new_event("HIL_RESPONSE", task=on_task, actor=HIL, body={"request": request_id, "choice": choice})
+
+    with pytest.raises(SpecValidationError, match="request"):
+        ledger.append(response(new_id("evt"), "send"))
+    with pytest.raises(SpecValidationError, match="request"):
+        ledger.append(response(request["id"], "send", on_task=new_id("tsk")))
+    with pytest.raises(SpecValidationError, match="choice"):
+        ledger.append(response(request["id"], "maybe"))
+    ledger.append(response(request["id"], "hold"))
+    assert [e["type"] for e in ledger.events(task=task)] == ["HIL_REQUEST", "HIL_RESPONSE"]

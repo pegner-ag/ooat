@@ -1,3 +1,6 @@
+import hashlib
+from concurrent.futures import ThreadPoolExecutor
+
 import pytest
 
 from ooat_core.artifacts import ArtifactStore
@@ -72,3 +75,12 @@ def test_put_repairs_a_damaged_blob(tmp_path):
     (tmp_path / digest[:2] / digest).write_bytes(b"damaged")
     assert blobs.put(b"original") == digest
     assert blobs.get(digest) == b"original"
+
+
+def test_concurrent_puts_of_the_same_content(tmp_path):
+    blobs, content = BlobStore(tmp_path), b"x" * 2_000_000
+    with ThreadPoolExecutor(8) as pool:
+        digests = list(pool.map(lambda _: blobs.put(content), range(32)))
+    assert set(digests) == {hashlib.sha256(content).hexdigest()}
+    assert blobs.get(digests[0]) == content
+    assert not list(tmp_path.rglob("*.partial"))

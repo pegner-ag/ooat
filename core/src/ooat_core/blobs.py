@@ -2,6 +2,7 @@
 
 import hashlib
 import os
+import uuid
 from pathlib import Path
 
 _HEX = frozenset("0123456789abcdef")
@@ -18,12 +19,19 @@ class BlobStore:
         if path.exists() and self._intact(path, digest):
             return digest
         path.parent.mkdir(parents=True, exist_ok=True)
-        partial = path.with_suffix(".partial")
+        # One temporary file per writer: concurrent puts of the same content must not share it.
+        partial = path.with_name(f"{digest}.{uuid.uuid4().hex}.partial")
         with open(partial, "wb") as file:
             file.write(content)
             file.flush()
             os.fsync(file.fileno())  # the ledger may commit a reference right after this returns
-        partial.replace(path)  # readers never see a half-written blob; a damaged blob is replaced
+        try:
+            partial.replace(path)  # readers never see a half-written blob; a damaged blob is replaced
+        except PermissionError:
+            # Windows refuses to replace a file another writer is replacing or reading at the same moment.
+            partial.unlink(missing_ok=True)
+            if not (path.exists() and self._intact(path, digest)):
+                raise
         return digest
 
     @staticmethod

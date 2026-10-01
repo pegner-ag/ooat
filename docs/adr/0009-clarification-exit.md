@@ -17,3 +17,9 @@ While any clarifying question is still open, the task stays `CLARIFYING`.
 - If the answer is still not enough, the Gate asks again (rule A1, max. 3 clarifying questions).
 
 Implemented in `core/src/ooat_core/state.py` (`task_state`).
+
+## Consequences
+
+- Spec §8 (`CLARIFYING` row of the task lifecycle) is amended by this ADR; the spec text is aligned in its next
+  revision.
+- Decided by the owner on 2026-10-01.

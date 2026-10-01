@@ -6,9 +6,7 @@ so no artifact exists without provenance (spec §2).
 
 from .blobs import BlobStore
 from .ids import new_id
-from .ledger import Ledger, StagedArtifact
-
-DATA_CLASSES = frozenset({"public", "internal", "client_confidential", "personal", "special_category"})
+from .ledger import DATA_CLASSES, Ledger, StagedArtifact
 
 
 class ArtifactStore:
