@@ -72,10 +72,10 @@ class Detection:
 class ModelRequest:
     tier: str                       # local | economy | workhorse | frontier
     prompt: str
+    data_class: str                 # required: the gateway never guesses a class (spec §9)
     system: str = ""
     max_output_tokens: int = 4000
     expected_output_tokens: int | None = None   # from the capability cost card, for estimates
-    data_class: str = "internal"
     task: str | None = None
     contract: str | None = None
     timeout_s: float = 600
@@ -91,8 +91,10 @@ class ModelResponse:
     metering: Literal["exact", "reported", "estimated"]
 ```
 
-- A connector raises `ConnectorError(code, message)` with `code` in `QUOTA_EXHAUSTED`, `UNAVAILABLE`,
-  `PROVIDER_ERROR`, `TIMEOUT`; `QUOTA_EXHAUSTED` may carry `resets_at`.
+- A connector raises `ConnectorError(code, message)` with `code` in `QUOTA_EXHAUSTED`, `UNAVAILABLE`
+  (CLI missing, not logged in, endpoint unreachable), `API_ERROR` (the provider answered with an error) or
+  `TIMEOUT`; `QUOTA_EXHAUSTED` may carry `resets_at`. These are the `RESULT.error.code` values of the event
+  schema; `UNAVAILABLE` is added to it in 03a (ADR 0010).
 - In sub-project 03 CLI connectors run without tools (pure completion). Agent tools arrive with the runtime (04).
 - The registry validates each manifest at discovery; an invalid or duplicate connector is listed as broken and
   never used, and does not stop the others from loading.
@@ -102,11 +104,16 @@ class ModelResponse:
 **Enablement lives in the ledger** (ADR 0010), so it is audited and cannot be faked by editing a file:
 
 - `ADAPTER_ACKNOWLEDGED` — operator, manifest version, allowed data classes, `automation_confirmed`
-  (the operator checked that the plan's terms allow unattended use).
-- `ADAPTER_DISABLED` — operator, reason.
-- A connector is usable only if its latest state event is an acknowledgement of the **current** manifest
-  version and the manifest's `jurisdiction.verified_on` is not older than 12 months (spec §9 rule 2; older
-  means `personal` and higher classes are blocked until re-acknowledged).
+  (the operator checked that the plan's terms allow unattended use) and `jurisdiction_sha256` (fingerprint of
+  the manifest's `jurisdiction` block at acknowledgement).
+- `ADAPTER_DISABLED` — operator, reason. Written only by a human (`actor.kind = hil`), never by the gateway;
+  a connector with a broken manifest is simply unusable and listed as broken.
+- A connector is **enabled** when its latest state event is `ADAPTER_ACKNOWLEDGED`.
+- Staleness, exactly as spec §9 rule 2: when the current `jurisdiction` block no longer matches the
+  acknowledged fingerprint, or `jurisdiction.verified_on` is `null` or older than 12 months, the connector
+  stays enabled but `personal` and `special_category` are refused until the operator acknowledges again.
+  Other manifest changes need no new acknowledgement; the current manifest's own `allowed_data_classes`
+  always applies.
 
 **Preferences live in `ooat.toml`** (read with `tomllib`; no secrets, no enablement):
 
@@ -143,12 +150,17 @@ Prices come from `catalog/routing.json` (`prices`, with `valid_from` and `source
    quota cool-down.
 2. Data-class guard: `data_class` must be allowed by the manifest, by the acknowledgement and by the
    routing data-class policy; `special_category` is always refused in F1 (no verified redaction yet).
-3. Only connectors with `automation_confirmed` are used (spec §6 `operator_confirmed`). In F1 every gateway
-   call is unattended; human-relayed use of other plans (`subscription_manual`) comes with HIL in 05.
+3. Automation: a connector is used only if its manifest's `automation_permitted` is not `not_permitted`
+   **and** the acknowledgement has `automation_confirmed: true`. An acknowledgement never overrides a manifest
+   that forbids automation (no way around provider terms). In F1 every gateway call is unattended;
+   human-relayed use (`subscription_manual`) comes with HIL in 05.
 4. A pin for the tier selects that connector; if the pin fails steps 1–3, the call fails with the reason
    (no silent fallback).
 5. Otherwise the lowest estimated cost wins; ties prefer `subscription_cli`, then `local`, then `api`
    (already-paid capacity first, ADR 0005).
+
+Deferred steps of the spec §6 routing policy: keeping only connectors on which the capability passed its eval
+for the tier (needs evals: 02 and 06), and running a T3+ critic on a different vendor than the author (T3, F2).
 
 **Budget**: if the request names a contract, remaining budget = `max_usd` of its `CONTRACT_ISSUED` minus the
 `usd` of its events. The call is refused with `BUDGET` when the estimate exceeds the remainder; a
@@ -175,7 +187,7 @@ After a restart the cool-down is rebuilt from the latest `QUOTA_WARNING`.
 |---|---|
 | `NOT_PERMITTED` (data class, automation, no acknowledged connector for the tier) | `ABSTAIN_NOT_PERMITTED` |
 | `BUDGET` | `ABSTAIN_BUDGET` |
-| `QUOTA_EXHAUSTED`, `UNAVAILABLE`, `PROVIDER_ERROR`, `TIMEOUT` | `FAILED` with that error code |
+| `QUOTA_EXHAUSTED`, `UNAVAILABLE`, `API_ERROR`, `TIMEOUT` | `FAILED` with that error code |
 
 Every error carries the routing trace (candidates and why each was excluded), so the caller can explain it.
 
