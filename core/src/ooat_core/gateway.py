@@ -17,7 +17,8 @@ from .connector_admin import acknowledgements
 from .connectors import (ConnectorError, DecisionAnswer, DecisionRequest, ModelConnector, ModelRequest, ModelResponse,
                          jurisdiction_stale)
 from .connectors.registry import Registry
-from .decisions import check_questions, checked_answers, merged_answers, with_reversed_choices
+from .decisions import (check_questions, checked_answers, fallback_prompt, merged_answers, parse_fallback,
+                        with_reversed_choices)
 from .ledger import DATA_CLASSES, Ledger, new_event
 from .routing import Price, RoutingPolicy
 from .credentials_env import SecretResolver
@@ -27,6 +28,9 @@ ACTOR = {"kind": "system", "id": "ooat-gateway"}
 _ACCESS_RANK = {"subscription_cli": 0, "local": 1, "api": 2, "subscription_manual": 3}
 _PERSONAL_OR_HIGHER = frozenset({"personal", "special_category"})
 _STATE_EVENTS = ["ADAPTER_ACKNOWLEDGED", "ADAPTER_DISABLED", "QUOTA_WARNING"]
+# When no decision connector can answer, the cheapest text tier answers the same typed questions (spec §6).
+FALLBACK_TIER = "economy"
+FALLBACK_TIMEOUT_S = 120
 
 
 class GatewayError(Exception):
@@ -38,6 +42,7 @@ class GatewayError(Exception):
         self.message = message
         self.trace = trace or []  # why each connector was excluded
         self.cost = cost  # cost record for the caller's event when a connector was called
+        self.fallback_from: GatewayError | None = None  # decide(): the decision tier's failure before this one
 
 
 @dataclass(frozen=True)
@@ -141,17 +146,43 @@ class Gateway:
         return GatewayResult(response, cost, candidate.estimate)
 
     def estimate_decision(self, request: DecisionRequest) -> Estimate:
-        """Expected cost of the decision on the connector routing would pick; no provider call."""
+        """Expected cost of the decision on the engine decide() would use; no provider call."""
         check_questions(request.questions)
-        return self._route(self._expanded(request), kind="decision").estimate
+        expanded = self._expanded(request)
+        try:
+            return self._route(expanded, kind="decision").estimate
+        except GatewayError:
+            return self.estimate(self._fallback_request(expanded))
 
     def decide(self, request: DecisionRequest) -> DecisionResult:
-        """Answer typed questions on a decision connector. Every choice is also asked with its options reversed,
-        and the answers are checked against the questions before anyone may act on them (spec §6, ADR 0011)."""
+        """Answer typed questions on a decision connector, or on the economy text tier when none can answer.
+
+        Every choice is also asked with its options reversed, and the answers are checked against the questions
+        before anyone may act on them (spec §6, ADR 0011). A budget refusal never falls back: the text tier costs
+        more. If the text tier cannot be tried either, the decision tier's error is raised; if it ran and failed,
+        its own error is raised with `fallback_from` set, so the caller can record both costs.
+        """
         if request.task is None:
             raise ValueError("every gateway call belongs to a task")
         check_questions(request.questions)
         expanded = self._expanded(request)
+        try:
+            return self._decide_on_connector(request, expanded)
+        except GatewayError as error:
+            if error.code == "BUDGET":
+                raise
+            failure = error
+        try:
+            result = self._decide_on_text_model(request, expanded)
+        except GatewayError as error:
+            if error.cost is None:  # nothing ran on the text tier
+                raise GatewayError(failure.code, f"{failure.message}; fallback: {error.message}",
+                                   failure.trace + error.trace, failure.cost) from None
+            error.fallback_from = failure
+            raise
+        return dataclasses.replace(result, fallback_from=failure)
+
+    def _decide_on_connector(self, request: DecisionRequest, expanded: DecisionRequest) -> DecisionResult:
         candidate = self._route(expanded, kind="decision")
         self._check_budget(expanded, candidate.estimate)
         response = self._invoke(expanded, candidate, "decide")
@@ -163,6 +194,24 @@ class Gateway:
         self._warn_budget(request, cost["usd"])
         return DecisionResult(merged_answers(request.questions, answers), candidate.connector.manifest["id"],
                               response.model, cost, candidate.estimate)
+
+    def _decide_on_text_model(self, request: DecisionRequest, expanded: DecisionRequest) -> DecisionResult:
+        result = self.call(self._fallback_request(expanded))
+        try:
+            answers = checked_answers(expanded.questions, parse_fallback(result.response.text, expanded.questions))
+        except ValueError as error:  # the model answered, so the call is charged
+            raise GatewayError("API_ERROR", self._secrets.redact(f"unusable fallback answer: {error}"),
+                               cost=result.cost) from None
+        return DecisionResult(merged_answers(request.questions, answers), result.cost["adapter"],
+                              result.response.model, result.cost, result.estimate)
+
+    @staticmethod
+    def _fallback_request(expanded: DecisionRequest) -> ModelRequest:
+        system, prompt = fallback_prompt(expanded)
+        options = sum(len(q.criteria) if q.type != "noul" else 1 for q in expanded.questions.values())
+        return ModelRequest(tier=FALLBACK_TIER, prompt=prompt, system=system, data_class=expanded.data_class,
+                            max_output_tokens=200 + 20 * options, task=expanded.task, contract=expanded.contract,
+                            timeout_s=max(expanded.timeout_s, FALLBACK_TIMEOUT_S))
 
     @staticmethod
     def _expanded(request: DecisionRequest) -> DecisionRequest:

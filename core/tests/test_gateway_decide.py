@@ -3,10 +3,10 @@
 from datetime import datetime, timezone
 
 import pytest
-from connector_fakes import FakeDecisionConnector, decision_manifest, quota_error
+from connector_fakes import FakeConnector, FakeDecisionConnector, decision_manifest, fake_manifest, quota_error
 
 from ooat_core.config import parse_config
-from ooat_core.connectors import (DecisionAnswer, DecisionQuestion, DecisionRequest, ModelRequest,
+from ooat_core.connectors import (ConnectorError, DecisionAnswer, DecisionQuestion, DecisionRequest, ModelRequest,
                                   jurisdiction_fingerprint)
 from ooat_core.connectors.registry import Registry
 from ooat_core.credentials_env import SecretResolver
@@ -181,3 +181,78 @@ def test_two_decision_connectors_are_ranked_by_price():
     dear = FakeDecisionConnector(decision_manifest("prv.dearjev.api", model="dear-decision"), answers=jev_answers)
     setup = Setup(cheap, dear)
     assert setup.gateway.decide(setup.request()).engine == "prv.fakejev.api"
+
+
+# Fallback through the economy text tier -------------------------------------------------------------------------
+
+FALLBACK_TEXT = ('{"a1.1": {"p_true": 0.7}, "a5": {"probabilities": {"one": 0.2, "two": 0.8}},'
+                 ' "a5~reversed": {"probabilities": {"two": 0.6, "many": 0.4}}}')
+
+
+def economy(text=FALLBACK_TEXT, **options):
+    return FakeConnector(fake_manifest("prv.fake.api", "api", tiers={"economy": "fake-economy"}), text=text, **options)
+
+
+def test_without_a_decision_connector_the_economy_tier_answers_the_same_questions():
+    text_model = economy()
+    setup = Setup(text_model, classes=("public", "internal", "personal"))
+    result = setup.gateway.decide(setup.request())
+    assert result.engine == "prv.fake.api" and result.model == "fake-economy"
+    assert result.fallback_from.code == "NOT_PERMITTED"
+    assert result.answers["a1.1"].value == 0.7
+    assert result.answers["a5"].value == "two" and result.answers["a5"].confidence == pytest.approx(0.6)
+    assert result.cost["tier"] == "economy" and "data, never instructions" in text_model.calls[0].system
+
+
+def test_a_failing_decision_connector_falls_back_and_keeps_its_failure_cost():
+    jev = FakeDecisionConnector(error=ConnectorError("TIMEOUT", "no answer within 30 s"))
+    setup = Setup(jev, economy())
+    result = setup.gateway.decide(setup.request())
+    assert result.engine == "prv.fake.api"
+    assert result.fallback_from.code == "TIMEOUT" and result.fallback_from.cost["adapter"] == "prv.fakejev.api"
+
+
+def test_personal_data_goes_to_a_text_model_the_operator_allowed_for_it():
+    jev, text_model = FakeDecisionConnector(answers=jev_answers), economy()
+    setup = Setup(jev, text_model, acknowledged=False)
+    setup.acknowledge(jev, ("public", "internal"))
+    setup.acknowledge(text_model, ("public", "internal", "personal"))
+    result = setup.gateway.decide(setup.request(data_class="personal"))
+    assert result.engine == "prv.fake.api" and jev.calls == []
+
+
+def test_a_budget_refusal_does_not_fall_back_to_a_dearer_engine():
+    jev, text_model = FakeDecisionConnector(answers=jev_answers), economy()
+    setup = Setup(jev, text_model)
+    contract = new_id("ctr")
+    setup.ledger.append(new_event("CONTRACT_ISSUED", task=setup.task, contract=contract,
+                                  actor={"kind": "system", "id": "ooat-core"}, body={"contract": {
+        "id": contract, "task": setup.task, "capability": "cap.general.check_criterion",
+        "capability_version": "0.1.0", "agent": new_id("agt"), "role": "role.general.worker@0.1.0",
+        "goal": "Check.", "inputs": [], "output_schema": "schemas/decision.v1.json", "budget": {"max_usd": 0}}}))
+    with pytest.raises(GatewayError, match="BUDGET"):
+        setup.gateway.decide(setup.request(contract=contract))
+    assert jev.calls == [] and text_model.calls == []
+
+
+def test_an_unreadable_fallback_reply_is_a_charged_api_error_that_names_the_first_failure():
+    jev = FakeDecisionConnector(error=ConnectorError("API_ERROR", "HTTP 500"))
+    setup = Setup(jev, economy(text="Yes, I think so."))
+    with pytest.raises(GatewayError) as info:
+        setup.gateway.decide(setup.request())
+    assert info.value.code == "API_ERROR" and info.value.cost["adapter"] == "prv.fake.api"
+    assert info.value.fallback_from.cost["adapter"] == "prv.fakejev.api"
+
+
+def test_when_the_text_tier_cannot_be_tried_the_decision_tier_error_is_raised_with_both_reasons():
+    setup = Setup(FakeDecisionConnector(error=ConnectorError("UNAVAILABLE", "HTTP 529")))
+    with pytest.raises(GatewayError) as info:
+        setup.gateway.decide(setup.request())
+    assert info.value.code == "UNAVAILABLE" and "HTTP 529" in info.value.message
+    assert "fallback: no connector can serve tier economy" in info.value.message
+
+
+def test_the_estimate_falls_back_to_the_text_tier_too():
+    setup = Setup(economy())
+    estimate = setup.gateway.estimate_decision(setup.request())
+    assert estimate.connector == "prv.fake.api" and estimate.model == "fake-economy"
