@@ -11,7 +11,7 @@
 
 | Priority | Adapter | Tiers | Role in F1 |
 |---|---|---|---|
-| 1 | `prv.anthropic.subscription_cli` (Claude Code headless, USD 100/month plan) | `workhorse`, `frontier` | Default worker and orchestrator |
+| 1 | `prv.anthropic.subscription_cli` (Claude Code headless, USD 100/month plan) | `economy`, `workhorse`, `frontier` | Default worker and orchestrator; `economy` (Haiku) keeps cheap meta-work on the already-paid plan (amended 2026-10-01 by the owner) |
 | 2 | `prv.openai.subscription_cli` (Codex CLI, USD 20/month plan) | `workhorse` | Second vendor, so T3 critics can run on a different vendor than the author |
 | 3 | `prv.typesafe.api` (Jev) | `decision` | Gate step A, data-class guard, acceptance pre-checks |
 | 4 | `prv.anthropic.api`, `prv.openai.api` | `economy` to `frontier` | Fallback when quota is exhausted or automation is not permitted; also satisfies the F1 requirement of one metered API adapter |

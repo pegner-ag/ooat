@@ -16,3 +16,5 @@
 - [x] Token accounting convention: `tokens_in` excludes cache reads and includes cache writes; `tokens_cached`
       is cache reads, billed at the cached price (documented in each connector's `description.md`, 03b).
 - [ ] Cache writes are billed at the base input price; Anthropic charges 1.25x (5-minute) or 2x (1-hour).
+- [ ] The consequences card shows both `jurisdiction.training_on_inputs` and `data_policy.training_on_inputs`
+      (and `retention_days`) and flags a mismatch; today it shows only the enforced `data_policy` value.

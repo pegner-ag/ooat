@@ -7,6 +7,7 @@ vendor names. Model connectors are served now; tool connectors (MCP, REST, CLI t
 import hashlib
 import json
 from dataclasses import dataclass
+from datetime import date
 from typing import Literal, Protocol
 
 ENTRY_POINT_GROUP = "ooat.connectors"
@@ -72,3 +73,14 @@ def jurisdiction_fingerprint(manifest: dict) -> str:
     """SHA-256 of the canonical JSON of the manifest's jurisdiction block (ADR 0010)."""
     canonical = json.dumps(manifest["jurisdiction"], sort_keys=True, separators=(",", ":"), ensure_ascii=False)
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def jurisdiction_stale(manifest: dict, acknowledgement: dict, today: date) -> bool:
+    """Spec §9 rule 2: the jurisdiction changed since acknowledgement, or was not verified within 12 months.
+
+    A stale connector stays enabled but refuses personal and special-category data until acknowledged again.
+    """
+    verified_on = manifest["jurisdiction"]["verified_on"]
+    if verified_on is None or (today - date.fromisoformat(verified_on)).days > 365:
+        return True
+    return jurisdiction_fingerprint(manifest) != acknowledgement.get("jurisdiction_sha256")

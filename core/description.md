@@ -3,7 +3,8 @@
 ## Purpose
 Reference runtime of OOAT. Currently: identifiers, OOA Spec validation, the append-only ledger, artifact
 storage, state projections and the provider gateway core (connector contract, registry, routing, budgets,
-metering). Concrete connectors, Gate, workers and API are not implemented yet.
+metering), the connector contract used by the packages in `adapters/`, and the `ooat connectors` operator
+command. Gate, workers and API are not implemented yet.
 
 ## Key components
 - `ids.py` — `new_id(prefix)`, ULIDs, `parse_artifact_ref()`
@@ -25,7 +26,12 @@ metering). Concrete connectors, Gate, workers and API are not implemented yet.
   passes the routed model to the connector in `ModelRequest.model`
 - `connectors/cli.py` — `run_cli()`: vendor CLI with the prompt on stdin, in an empty temporary directory,
   typed `UNAVAILABLE` / `TIMEOUT` failures
-- `connectors/conformance.py` — `check_connector()`: the contract every connector package tests
+- `connectors/conformance.py` — `check_connector()`: the contract every connector package tests;
+  `jurisdiction_stale()` in `connectors/__init__.py` is the spec §9 rule 2 check shared by gateway and CLI
+- `connector_admin.py` — `connector_statuses()`, `consequences_card()`, `acknowledge()`, `disable()`: operator
+  actions; state changes are `ADAPTER_ACKNOWLEDGED` / `ADAPTER_DISABLED` events by a named human;
+  `acknowledgements()` is the connector state the gateway routes on
+- `operator_cli.py` — the `ooat` command: `ooat connectors list | show | enable | disable`
 
 Schemas are read from `spec/schemas/` in the repository, so the package works from a checkout or an editable
 install (`pip install -e core`); packaging the schemas into the wheel is release work.
@@ -36,4 +42,5 @@ in a backend; every backend passes `tests/test_ledger.py`.
 
 ## Public API
 `Ledger.open(url)`, `new_event()`, `ArtifactStore`, `BlobStore`, `task_state()`, `contract_state()`, `validate()`,
-`Gateway`, `Registry.discover()`, `load_config()`, `load_routing()`, `SecretResolver`.
+`Gateway`, `Registry.discover()`, `load_config()`, `load_routing()`, `SecretResolver`, `connector_admin`, the `ooat`
+console script.

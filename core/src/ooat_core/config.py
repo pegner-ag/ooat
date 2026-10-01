@@ -7,7 +7,7 @@ ledger state (ADR 0010). Unknown keys are rejected so a pasted API key cannot hi
 import re
 import tomllib
 from dataclasses import dataclass, field
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 
 TIERS = frozenset({"local", "economy", "workhorse", "frontier"})
 _PROVIDER_ID = re.compile(r"^prv\.[a-z][a-z0-9_-]*\.[a-z][a-z0-9_]*$")
@@ -59,5 +59,14 @@ def parse_config(data: dict) -> Config:
 
 
 def load_config(path: str | Path) -> Config:
+    """Load ooat.toml; a relative sqlite ledger path is resolved against the config file's folder."""
     with open(path, "rb") as file:
-        return parse_config(tomllib.load(file))
+        config = parse_config(tomllib.load(file))
+    prefix = "sqlite:///"
+    location = config.ledger_url[len(prefix):] if config.ledger_url.startswith(prefix) else None
+    # Absolute in either convention stays as written: a Windows drive path is not "relative" on Linux.
+    absolute = PurePosixPath(location).is_absolute() or PureWindowsPath(location).is_absolute() if location else True
+    if location and location != ":memory:" and not absolute:
+        resolved = (Path(path).resolve().parent / location).as_posix()
+        config = Config(ledger_url=prefix + resolved, pins=config.pins, connectors=config.connectors)
+    return config

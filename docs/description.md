@@ -36,7 +36,8 @@ Chosen by decision (`docs/adr/`), not yet used in code:
 
 ## Configuration
 `ooat.toml` (operator preferences: ledger URL, per-tier pins, connector settings; secrets only as environment
-variable names). Connector enablement is ledger state (`ADAPTER_ACKNOWLEDGED`, `ADAPTER_DISABLED`, ADR 0010).
+variable names). Connector enablement is ledger state (`ADAPTER_ACKNOWLEDGED`, `ADAPTER_DISABLED`, ADR 0010),
+written by `ooat connectors enable | disable` after the operator has read the connection consequences card.
 Prices and the data-class policy: `catalog/routing.json`. Dev dependencies: `requirements-dev.txt`, then
 `pip install -e core -e adapters/claude-code -e adapters/codex -e adapters/anthropic-api`; run `python -m pytest`
 (paths in `pytest.ini`). Tests that spend quota or credit run only with `OOAT_LIVE=1`.

@@ -8,10 +8,11 @@ import dataclasses
 import math
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone
 
 from .config import Config
-from .connectors import ConnectorError, ModelConnector, ModelRequest, ModelResponse, jurisdiction_fingerprint
+from .connector_admin import acknowledgements
+from .connectors import ConnectorError, ModelConnector, ModelRequest, ModelResponse, jurisdiction_stale
 from .connectors.registry import Registry
 from .ledger import DATA_CLASSES, Ledger, new_event
 from .routing import Price, RoutingPolicy
@@ -134,11 +135,11 @@ class Gateway:
         if request.data_class not in DATA_CLASSES:
             raise ValueError(f"unknown data class: {request.data_class}")
         events = self._ledger.events(types=_STATE_EVENTS)
-        acknowledgements, cooldowns = self._acknowledgements(events), self._cooldowns(events)
+        acknowledged, cooldowns = acknowledgements(events), self._cooldowns(events)
         candidates, trace, cooling = [], [], set()
         for connector_id in self._registry.ids():
             connector = self._registry.get(connector_id)
-            reason = self._exclusion(connector, request, acknowledgements.get(connector_id), cooldowns)
+            reason = self._exclusion(connector, request, acknowledged.get(connector_id), cooldowns)
             if reason is None:
                 reason, candidate = self._priced(connector, request)
                 if candidate is not None:
@@ -187,7 +188,7 @@ class Gateway:
             return f"{data_class} requires verified redaction, not available yet"
         if policy.get("require_contract"):  # manifests cannot state a processing agreement yet: fail closed
             return f"{data_class} requires a provider contract, which cannot be verified yet"
-        if data_class in _PERSONAL_OR_HIGHER and self._stale(manifest, acknowledgement):
+        if data_class in _PERSONAL_OR_HIGHER and jurisdiction_stale(manifest, acknowledgement, self._clock().date()):
             return "jurisdiction changed or not verified within 12 months; acknowledge again for personal data"
         if manifest["automation_permitted"] == "not_permitted":
             return "provider terms do not permit automated use"
@@ -196,12 +197,6 @@ class Gateway:
         if connector_id in cooldowns:
             return f"quota cool-down until {cooldowns[connector_id]}"
         return None
-
-    def _stale(self, manifest: dict, acknowledgement: dict) -> bool:
-        verified_on = manifest["jurisdiction"]["verified_on"]
-        if verified_on is None or (self._clock().date() - date.fromisoformat(verified_on)).days > 365:
-            return True
-        return jurisdiction_fingerprint(manifest) != acknowledgement.get("jurisdiction_sha256")
 
     def _models(self, connector_id: str) -> dict:
         return self._config.connectors.get(connector_id, {}).get("models", {})
@@ -220,16 +215,6 @@ class Gateway:
         tokens_out = request.expected_output_tokens or request.max_output_tokens
         estimate = Estimate(connector_id, model, tokens_in, tokens_out, price.usd(tokens_in, 0, tokens_out), "prior")
         return None, _Candidate(estimate, connector, price)
-
-    @staticmethod
-    def _acknowledgements(events: list[dict]) -> dict[str, dict]:
-        state: dict[str, dict | None] = {}
-        for event in events:
-            if event["type"] == "ADAPTER_ACKNOWLEDGED":
-                state[event["body"]["adapter"]] = event["body"]
-            elif event["type"] == "ADAPTER_DISABLED":
-                state[event["body"]["adapter"]] = None
-        return {connector_id: body for connector_id, body in state.items() if body is not None}
 
     def _cooldowns(self, events: list[dict]) -> dict[str, str]:
         latest = {e["body"]["adapter"]: e["body"] for e in events if e["type"] == "QUOTA_WARNING"}

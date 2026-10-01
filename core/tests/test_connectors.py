@@ -1,7 +1,9 @@
 import pytest
 from connector_fakes import FakeConnector, fake_manifest
 
-from ooat_core.connectors import ConnectorError, jurisdiction_fingerprint, registry
+from datetime import date
+
+from ooat_core.connectors import ConnectorError, jurisdiction_fingerprint, jurisdiction_stale, registry
 from ooat_core.connectors.registry import Registry
 
 
@@ -58,6 +60,18 @@ def test_jurisdiction_fingerprint_ignores_key_order_and_detects_changes():
     changed = dict(manifest, jurisdiction=dict(manifest["jurisdiction"], processing_regions=["us"]))
     assert jurisdiction_fingerprint(manifest) == jurisdiction_fingerprint(reordered)
     assert jurisdiction_fingerprint(manifest) != jurisdiction_fingerprint(changed)
+
+
+def test_jurisdiction_staleness_follows_spec_rule_2():
+    manifest = fake_manifest()
+    acknowledgement = {"jurisdiction_sha256": jurisdiction_fingerprint(manifest)}
+    assert not jurisdiction_stale(manifest, acknowledgement, date(2026, 10, 1))
+    assert jurisdiction_stale(manifest, acknowledgement, date(2027, 9, 2))  # verified_on older than 12 months
+    assert jurisdiction_stale(manifest, {"jurisdiction_sha256": "0" * 64}, date(2026, 10, 1))
+    assert jurisdiction_stale(manifest, {}, date(2026, 10, 1))  # acknowledgement from before ADR 0010
+    unverified = fake_manifest(jurisdiction=dict(manifest["jurisdiction"], verified_on=None))
+    assert jurisdiction_stale(unverified, {"jurisdiction_sha256": jurisdiction_fingerprint(unverified)},
+                              date(2026, 10, 1))
 
 
 def test_connector_error_codes_are_the_schema_codes():
