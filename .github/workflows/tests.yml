@@ -21,4 +21,5 @@ jobs:
           python-version: ${{ matrix.python-version }}
       - run: python -m pip install -r requirements-dev.txt
       - run: python -m pip install -e core
+      - run: python -m pip install -e adapters/claude-code -e adapters/codex -e adapters/anthropic-api
       - run: python -m pytest
