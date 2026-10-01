@@ -20,8 +20,10 @@ written for a sub-project only when the ones it depends on are done, so it can u
 
 ## Constraints carried into later sub-projects
 
-- The ledger does not authenticate actors. HIL identity is verified at intake and notifier (04, 05); only those
-  paths may append events with `actor.kind = hil`, so a worker can never write a human approval (R3, spec §9).
+- The ledger does not authenticate actors. In 04 the local `ooat` commands are trusted as the operator's own hand
+  (whoever can run them can also edit the ledger file); remote HIL identity (REST, Telegram) is verified in 05.
+  Only those paths may append events with `actor.kind = hil`, so a worker can never write a human approval (R3,
+  spec §9).
 - 05 (REST intake, up to 5 agent instances) defines the threading model of the SQLite backend
   (`check_same_thread`, WAL, `busy_timeout`) before serving concurrent requests.
 
