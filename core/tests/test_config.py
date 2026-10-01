@@ -109,3 +109,9 @@ def test_relative_sqlite_ledger_is_resolved_against_the_config_folder(tmp_path, 
     for url in ("sqlite:///:memory:", f"sqlite:///{(tmp_path / 'abs.sqlite').as_posix()}"):
         (tmp_path / "ooat.toml").write_text(f'[ledger]\nurl = "{url}"\n', encoding="utf-8")
         assert load_config(tmp_path / "ooat.toml").ledger_url == url
+
+
+@pytest.mark.parametrize("url", ["sqlite:///C:/ooat/ledger.sqlite", "sqlite:////var/ooat/ledger.sqlite"])
+def test_absolute_paths_of_either_convention_are_kept(tmp_path, url):
+    (tmp_path / "ooat.toml").write_text(f'[ledger]\nurl = "{url}"\n', encoding="utf-8")
+    assert load_config(tmp_path / "ooat.toml").ledger_url == url
