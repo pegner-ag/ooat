@@ -10,8 +10,8 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 
 from .backends import LedgerBackend, open_backend
-from .ids import new_id, parse_artifact_ref
-from .validation import validate
+from .ids import is_artifact_ref, new_id, parse_artifact_ref
+from .validation import SpecValidationError, validate
 
 # The envelope's cost keys differ from the spec's column names for usd and basis.
 _COST_COLUMNS = {
@@ -55,6 +55,14 @@ def new_event(
         if value is not None:
             event[key] = value
     return event
+
+
+def _artifact_refs(value) -> set[str]:
+    """Every artifact reference in a JSON value; free text that merely mentions one is not a reference."""
+    if isinstance(value, str):
+        return {value} if is_artifact_ref(value) else set()
+    items = value.values() if isinstance(value, dict) else value if isinstance(value, list) else ()
+    return set().union(*(_artifact_refs(item) for item in items))
 
 
 def _event_row(event: dict) -> dict:
@@ -104,10 +112,20 @@ class Ledger:
         Raises SpecValidationError without writing anything if the event does not match the spec.
         """
         validate("event", event)
+        try:
+            # JSON Schema accepts NaN and Infinity; SQL stores them as NULL or invalid JSON, losing data.
+            json.dumps(event, allow_nan=False)
+        except ValueError:
+            raise SpecValidationError("event", ["numbers must be finite (no NaN or Infinity)"]) from None
         artifacts = list(artifacts)
-        unreferenced = [a.ref for a in artifacts if a.ref not in event["refs"]]
+        staged_refs = {a.ref for a in artifacts}
+        unreferenced = sorted(staged_refs - set(event["refs"]))
         if unreferenced:
             raise ValueError(f"staged artifacts must be referenced by their event: {unreferenced}")
+        unknown = sorted(ref for ref in _artifact_refs([event["refs"], event["body"]])
+                         if ref not in staged_refs and self.artifact(ref) is None)
+        if unknown:
+            raise ValueError(f"event references unknown artifacts: {unknown}")
         artifact_rows = []
         for artifact in artifacts:
             artifact_id, version = parse_artifact_ref(artifact.ref)

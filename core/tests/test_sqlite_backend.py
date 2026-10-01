@@ -38,3 +38,22 @@ def test_artifact_needs_an_existing_event(backend):
     with pytest.raises(LedgerIntegrityError):
         backend.insert({**EVENT, "id": "evt_2"}, [orphan])
     assert [row["id"] for row in backend.select_events(None, [])] == ["evt_1"]
+
+
+def test_replace_by_explicit_seq_is_rejected(backend):
+    backend.insert({**EVENT, "id": "evt_2"}, [])  # no artifacts, so no foreign key protects it
+    with pytest.raises(sqlite3.DatabaseError, match="append-only"):
+        backend._db.execute(
+            "INSERT OR REPLACE INTO event (seq, id, ts, actor_kind, actor_id, type, body)"
+            " VALUES (2, 'evt_forged', 't', 'hil', 'x', 'TASK_CLOSED', '{}')"
+        )
+    assert [row["id"] for row in backend.select_events(None, [])] == ["evt_1", "evt_2"]
+
+
+def test_orphan_artifact_is_rejected_without_the_foreign_key_pragma(tmp_path):
+    path = tmp_path / "ledger.sqlite"
+    SqliteBackend(path).close()
+    raw = sqlite3.connect(path)  # foreign keys are off by default on a new connection
+    with pytest.raises(sqlite3.DatabaseError, match="producing event"):
+        raw.execute("INSERT INTO artifact VALUES ('art_9', 1, 'summary', 'public', 0, 'x', 'blob:x', 'evt_missing')")
+    raw.close()

@@ -36,7 +36,10 @@ def open_backend(url: str) -> LedgerBackend:
     if scheme == "sqlite":
         from .sqlite import SqliteBackend
 
-        return SqliteBackend(rest.removeprefix("/"))
+        path = rest.removeprefix("/")
+        if not path:  # sqlite3 would silently open a throwaway database
+            raise ValueError("a sqlite ledger URL needs a path: sqlite:///<file> or sqlite:///:memory:")
+        return SqliteBackend(path)
     if scheme in ("postgresql", "mssql"):
         raise NotImplementedError(f"the {scheme} ledger backend is not implemented yet (ADR 0008)")
     raise ValueError(f"unknown ledger backend: {scheme}")

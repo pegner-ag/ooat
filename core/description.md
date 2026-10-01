@@ -7,7 +7,7 @@ storage and state projections. Gate, gateway, workers and API are not implemente
 ## Key components
 - `ids.py` — `new_id(prefix)`, ULIDs, `parse_artifact_ref()`
 - `validation.py` — `validate(entity, document)` against `spec/schemas/`
-- `ledger.py` — `Ledger`: the only write path; validates events, writes an event and its artifacts atomically
+- `ledger.py` — `Ledger`: the only write path; validates events (schema, finite numbers, known artifact references), writes an event and its artifacts atomically
 - `backends/` — `LedgerBackend` protocol and `open_backend(url)`; implemented: SQLite (ADR 0008)
 - `blobs.py` — SHA-256 addressed bodies; tampering detected on read
 - `artifacts.py` — `ArtifactStore.stage()` / `.read()`; artifacts exist only through their producing event

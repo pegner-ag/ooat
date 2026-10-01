@@ -70,6 +70,29 @@ def test_staged_artifact_must_be_referenced_by_its_event(ledger):
     assert ledger.events() == []
 
 
+def test_reference_to_an_unknown_artifact_is_rejected(ledger):
+    ref = new_id("art") + "@v1"
+    with pytest.raises(ValueError, match="unknown artifact"):
+        ledger.append(result(new_id("tsk"), new_id("ctr"), [ref]))  # claims an output nobody stored
+    assert ledger.events() == []
+
+
+def test_reference_to_an_existing_artifact_needs_no_staging(ledger):
+    task, ref = new_id("tsk"), new_id("art") + "@v1"
+    ledger.append(result(task, new_id("ctr"), [ref]), [staged(ref)])
+    ledger.append(result(task, new_id("ctr"), [ref]))
+    assert len(ledger.events(task=task)) == 2
+
+
+def test_non_finite_numbers_are_rejected(ledger):
+    task, ref = new_id("tsk"), new_id("art") + "@v1"
+    event = result(task, new_id("ctr"), [ref])
+    event["cost"]["usd"] = float("nan")
+    with pytest.raises(SpecValidationError, match="finite"):
+        ledger.append(event, [staged(ref)])
+    assert ledger.events() == []
+
+
 def test_event_and_artifacts_are_written_atomically(ledger):
     task, contract, ref = new_id("tsk"), new_id("ctr"), new_id("art") + "@v1"
     first = ledger.append(result(task, contract, [ref]), [staged(ref)])
@@ -93,6 +116,8 @@ def test_unknown_or_planned_backends():
         Ledger.open("oracle://db")
     with pytest.raises(ValueError):
         Ledger.open("ledger.sqlite")
+    with pytest.raises(ValueError, match="path"):
+        Ledger.open("sqlite://")  # would silently open a throwaway database
     for url in ("postgresql://host/ooat", "mssql://host/ooat"):
         with pytest.raises(NotImplementedError):
             Ledger.open(url)

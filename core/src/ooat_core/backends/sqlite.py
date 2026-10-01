@@ -45,13 +45,18 @@ CREATE TABLE IF NOT EXISTS artifact (
   produced_by_event TEXT NOT NULL REFERENCES event (id),
   PRIMARY KEY (id, version)
 );
--- INSERT OR REPLACE deletes the old row without firing delete triggers, so inserts over an existing key abort too.
+-- INSERT OR REPLACE deletes the old row without firing delete triggers, so inserts over an existing key
+-- (id or seq) abort too.
 CREATE TRIGGER IF NOT EXISTS event_no_replace BEFORE INSERT ON event
-  WHEN EXISTS (SELECT 1 FROM event WHERE id = NEW.id)
+  WHEN EXISTS (SELECT 1 FROM event WHERE id = NEW.id OR seq = NEW.seq)
   BEGIN SELECT RAISE(ABORT, 'ledger is append-only'); END;
 CREATE TRIGGER IF NOT EXISTS artifact_no_replace BEFORE INSERT ON artifact
   WHEN EXISTS (SELECT 1 FROM artifact WHERE id = NEW.id AND version = NEW.version)
   BEGIN SELECT RAISE(ABORT, 'ledger is append-only'); END;
+-- Provenance holds even on connections that did not enable foreign keys.
+CREATE TRIGGER IF NOT EXISTS artifact_needs_event BEFORE INSERT ON artifact
+  WHEN NOT EXISTS (SELECT 1 FROM event WHERE id = NEW.produced_by_event)
+  BEGIN SELECT RAISE(ABORT, 'artifact needs its producing event'); END;
 CREATE TRIGGER IF NOT EXISTS event_no_update BEFORE UPDATE ON event
   BEGIN SELECT RAISE(ABORT, 'ledger is append-only'); END;
 CREATE TRIGGER IF NOT EXISTS event_no_delete BEFORE DELETE ON event

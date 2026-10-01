@@ -25,6 +25,10 @@ def new_id(prefix: str) -> str:
     return f"{prefix}_{ulid()}"
 
 
+def is_artifact_ref(value: str) -> bool:
+    return _ARTIFACT_REF.match(value) is not None
+
+
 def parse_artifact_ref(ref: str) -> tuple[str, int]:
     """Split art_<ulid>@v<n> into (artifact id, version)."""
     match = _ARTIFACT_REF.match(ref)
