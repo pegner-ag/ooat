@@ -13,5 +13,6 @@
       appends the cost, so concurrent or back-to-back calls cannot overspend (with the 04 threading model).
 - [ ] `GatewayError` documents the design §7 mapping to contract outcomes (`NOT_PERMITTED` and `BUDGET` are
       abstentions, not `RESULT.error.code` values).
-- [ ] Token accounting convention defined and documented: `tokens_in` excludes cached input; `tokens_cached`
-      is billed at the cached price (settled with the connectors in 03b).
+- [x] Token accounting convention: `tokens_in` excludes cache reads and includes cache writes; `tokens_cached`
+      is cache reads, billed at the cached price (documented in each connector's `description.md`, 03b).
+- [ ] Cache writes are billed at the base input price; Anthropic charges 1.25x (5-minute) or 2x (1-hour).

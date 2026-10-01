@@ -10,6 +10,7 @@ and the provider gateway core (no concrete connectors, Gate, workers or API yet)
 In use:
 - Core runtime: Python 3.12+ (`core/`), JSON Schema 2020-12 validation (`jsonschema`)
 - Ledger backend: SQLite, selected by URL (ADR 0008)
+- Model connectors as separate packages in `adapters/`: Claude Code CLI, Codex CLI, Anthropic Messages API
 
 Chosen by decision (`docs/adr/`), not yet used in code:
 - FastAPI and Pydantic v2 for the API
@@ -24,7 +25,10 @@ Chosen by decision (`docs/adr/`), not yet used in code:
 - `catalog/taxonomy.json` — 13 starter domains + `general` fallback; 103 capability names with summary, proposed `impl` and per-domain target
 - `catalog/tests/` — schema, family-chain and taxonomy checks
 - `core/` — `ooat-core` package: ledger, artifact storage, state projections, provider gateway core (see `core/description.md`)
-- `sdk/`, `adapters/`, `dashboard/`, `evals/` — empty
+- `adapters/` — connector packages `ooat-adapter-claude-code`, `ooat-adapter-codex`, `ooat-adapter-anthropic-api`
+  (each with `description.md`), `integration_tests/` (gateway with the real connectors, no network)
+- `catalog/routing.json` — reference routing policy: Anthropic list prices with source and date, data-class policy
+- `sdk/`, `dashboard/`, `evals/` — empty
 - `docs/adr/` — decision records; `docs/assets/` — images (social preview)
 - `.github/` — CI (`tests.yml`: pytest on 3.12 and 3.13), Claude review workflows (`claude-review.yml` automatic on same-repo PRs, `claude.yml` on `@claude` mentions; Opus 5.5, comment-only, advisory per ADR 0007; auth via `CLAUDE_CODE_OAUTH_TOKEN`), issue and PR templates
 - `CONTRIBUTING.md`, `CODE_OF_CONDUCT.md`, `SECURITY.md` — contribution rules, Contributor Covenant 2.1, private vulnerability reporting
@@ -33,7 +37,9 @@ Chosen by decision (`docs/adr/`), not yet used in code:
 ## Configuration
 `ooat.toml` (operator preferences: ledger URL, per-tier pins, connector settings; secrets only as environment
 variable names). Connector enablement is ledger state (`ADAPTER_ACKNOWLEDGED`, `ADAPTER_DISABLED`, ADR 0010).
-Dev dependencies: `requirements-dev.txt`; run `python -m pytest` (paths in `pytest.ini`).
+Prices and the data-class policy: `catalog/routing.json`. Dev dependencies: `requirements-dev.txt`, then
+`pip install -e core -e adapters/claude-code -e adapters/codex -e adapters/anthropic-api`; run `python -m pytest`
+(paths in `pytest.ini`). Tests that spend quota or credit run only with `OOAT_LIVE=1`.
 
 ## Security invariants
 - No secrets in the repository.
