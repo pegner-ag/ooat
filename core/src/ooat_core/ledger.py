@@ -160,17 +160,26 @@ class Ledger:
             if body.get("risk_class") == "R3" and default is not None and default.get("acts") is not False:
                 errors.append("$.body.default_on_silence: an R3 request must default to the option with acts: false")
         elif event["type"] == "HIL_RESPONSE":
-            requests = {e["id"]: e for e in self.events(task=event["task"], types=["HIL_REQUEST"])}
-            request = requests.get(body["request"])
+            hil = self.events(task=event["task"], types=["HIL_REQUEST", "HIL_RESPONSE"])
+            request = next((e for e in hil if e["type"] == "HIL_REQUEST" and e["id"] == body["request"]), None)
             if request is None:
                 errors.append(f"$.body.request: no HIL_REQUEST {body['request']} in this task")
-            elif "choice" in body and body["choice"] not in {o["id"] for o in request["body"]["options"]}:
-                errors.append(f"$.body.choice: {body['choice']!r} is not an option of {body['request']}")
+            elif any(e["type"] == "HIL_RESPONSE" and e["body"]["request"] == body["request"] for e in hil):
+                errors.append(f"$.body.request: {body['request']} is already answered")
+            else:
+                if "choice" in body and body["choice"] not in {o["id"] for o in request["body"]["options"]}:
+                    errors.append(f"$.body.choice: {body['choice']!r} is not an option of {body['request']}")
+                # Silence may only ever apply the declared default; for R3 that is the do-not-act option.
+                if body.get("default_applied") and body.get("choice") != request["body"]["default_on_silence"]:
+                    errors.append("$.body.choice: a default_applied response must choose the request's default")
         if errors:
             raise SpecValidationError("event", errors)
 
     def _check_staged(self, artifacts: list[StagedArtifact]) -> None:
-        """Staged records must be what ArtifactStore produces: real digest, blob URI, next version without gaps."""
+        """Staged records must look like ArtifactStore output: digest format, blob URI, next version without gaps.
+
+        Whether the blob itself exists is checked by BlobStore on read, not here.
+        """
         expected: dict[str, int] = {}
         for artifact in artifacts:
             if not artifact.type:

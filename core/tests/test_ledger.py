@@ -220,3 +220,23 @@ def test_response_must_answer_an_open_request_of_its_task(ledger):
         ledger.append(response(request["id"], "maybe"))
     ledger.append(response(request["id"], "hold"))
     assert [e["type"] for e in ledger.events(task=task)] == ["HIL_REQUEST", "HIL_RESPONSE"]
+
+
+def test_default_applied_response_must_record_the_requests_default(ledger):
+    task = new_id("tsk")
+    request = ledger.append(hil_request(task, "R3", "hold"))
+    forged = new_event("HIL_RESPONSE", task=task, actor=HIL,
+                       body={"request": request["id"], "choice": "send", "default_applied": True})
+    with pytest.raises(SpecValidationError, match="default"):
+        ledger.append(forged)
+    ledger.append(new_event("HIL_RESPONSE", task=task, actor=HIL,
+                            body={"request": request["id"], "choice": "hold", "default_applied": True}))
+
+
+def test_request_is_answered_only_once(ledger):
+    task = new_id("tsk")
+    request = ledger.append(hil_request(task, "R1", "hold"))
+    answer = {"request": request["id"], "choice": "hold"}
+    ledger.append(new_event("HIL_RESPONSE", task=task, actor=HIL, body=answer))
+    with pytest.raises(SpecValidationError, match="already answered"):
+        ledger.append(new_event("HIL_RESPONSE", task=task, actor=HIL, body={**answer, "choice": "send"}))
