@@ -13,7 +13,7 @@ written for a sub-project only when the ones it depends on are done, so it can u
 | 01b | Server ledger backends: PostgreSQL and optional SQL Server (ADR 0008) — PostgreSQL is an F2 item (spec §12); listed here only for its dependency on 01, not part of the F1 exit | 01 | later |
 | 01c | First-run setup `ooat init`: detect available databases, ask, write config, install only the chosen driver (ADR 0008); later also adapter acknowledgement and notifier choice | 01 | later |
 | 02 | Catalog runtime: load and resolve families/roles/capabilities (linter rules from `spec/README.md`), 15 capabilities, 5 roles, eval sets | 01, task-04 seed tasks | later |
-| 03 | Provider gateway — design: `task-03-provider-gateway/design.md` (ADR 0010). Plans: 03a gateway core + connector contract, 03b connectors (Claude Code CLI, Codex CLI, Anthropic API), 03c `ooat connectors` + consequences card | 01 | 03a next |
+| 03 | Provider gateway — design: `task-03-provider-gateway/design.md` (ADR 0010). Plans: 03a gateway core + connector contract (done), 03b connectors (Claude Code CLI, Codex CLI, Anthropic API), 03c `ooat connectors` + consequences card | 01 | 03b next |
 | 04 | Task runtime T0–T2: intake (CLI + REST), minimal Gate (A1, A2, A3, A10) with pre-start cost estimate and budget checkpoint (design §9), worker, deterministic acceptance, abstentions, task closing | 01–03 | later |
 | 05 | HIL and dashboard: one notifier with one-tap answers; HIL queue, rating queue, exceptions, tasks | 04 | later |
 | 06 | Baseline: eval runner, 5 seed tasks at T2 with cost, HIL hours and acceptance | 02–05 | later |
