@@ -1,0 +1,18 @@
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+[project]
+name = "ooat-adapter-anthropic-api"
+version = "0.1.0"
+description = "OOAT model connector for the Anthropic Messages API (metered)."
+readme = "description.md"
+requires-python = ">=3.12"
+license = "Apache-2.0"
+dependencies = ["ooat-core"]
+
+[project.entry-points."ooat.connectors"]
+anthropic-api = "ooat_adapter_anthropic_api:AnthropicApiConnector"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/ooat_adapter_anthropic_api"]
