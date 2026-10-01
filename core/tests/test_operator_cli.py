@@ -131,3 +131,115 @@ def test_explicit_yes_for_forbidding_terms_is_refused(config):
     code, out = run(config, "connectors", "enable", "prv.fake.api", "--operator", "Martin", "--classes", "public",
                     "--automation", "yes", "--confirm", "prv.fake.api", connectors=[connector])
     assert code == 1 and "do not permit" in out and state_events(config) == []
+
+
+def run_without_config(directory, *argv, answers=""):
+    stdout = io.StringIO()
+    code = main(list(argv), stdin=io.StringIO(answers), stdout=stdout, registry=Registry([FakeConnector()]),
+                today=TODAY)
+    return code, stdout.getvalue()
+
+
+def test_read_only_commands_without_config_create_no_ledger(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    assert run_without_config(tmp_path, "connectors", "show", "prv.fake.api")[0] == 0
+    code, out = run_without_config(tmp_path, "connectors", "list")
+    assert code == 0 and "no ooat.toml" in out.lower()
+    assert list(tmp_path.iterdir()) == []
+
+
+@pytest.mark.parametrize("argv", [
+    ("connectors", "enable", "prv.fake.api", "--operator", "M", "--classes", "public", "--automation", "no",
+     "--confirm", "prv.fake.api"),
+    ("connectors", "disable", "prv.fake.api", "--operator", "M", "--reason", "x"),
+])
+def test_state_changes_without_config_are_refused(tmp_path, monkeypatch, argv):
+    monkeypatch.chdir(tmp_path)
+    code, out = run_without_config(tmp_path, *argv)
+    assert code == 1 and "ooat.toml" in out and list(tmp_path.iterdir()) == []
+
+
+@pytest.mark.parametrize("content, message", [
+    ("[ledger\n", "Config error"),
+    ("[secrets]\n", "Config error"),
+    ('[ledger]\nurl = "postgresql://host/ooat"\n', "Cannot open ledger"),
+    ('[ledger]\nurl = "sqlite:///missing/folder/ledger.sqlite"\n', "Cannot open ledger"),
+])
+def test_config_and_ledger_mistakes_end_without_a_traceback(tmp_path, content, message):
+    path = tmp_path / "ooat.toml"
+    path.write_text(content, encoding="utf-8")
+    code, out = run((path, None), "connectors", "list")
+    assert code == 1 and message in out
+
+
+def test_success_names_the_ledger_written(config):
+    _, out = run(config, "connectors", "enable", "prv.fake.api", "--operator", "Martin", "--classes", "public",
+                 "--automation", "no", "--confirm", "prv.fake.api")
+    assert "ledger.sqlite" in out
+
+
+def test_summary_before_confirmation_repeats_what_is_allowed(config):
+    _, out = run(config, "connectors", "enable", "prv.fake.api", "--operator", "Martin",
+                 answers="public\nno\nprv.fake.api\n")
+    assert "You are allowing: public; unattended use: no" in out
+
+
+@pytest.mark.parametrize("argv", [
+    ("--operator", " ", "--classes", "public"),
+    ("--operator", "Martin", "--classes", "secret"),
+    ("--operator", "Martin", "--classes", ""),
+])
+def test_bad_operator_or_classes_are_refused_before_any_question(config, argv):
+    code, out = run(config, "connectors", "enable", "prv.fake.api", *argv)
+    assert code == 1 and "Do the terms" not in out and "to confirm" not in out and state_events(config) == []
+
+
+def test_end_of_input_changes_nothing(config):
+    code, _ = run(config, "connectors", "enable", "prv.fake.api", "--operator", "Martin", answers="")
+    assert code == 1 and state_events(config) == []
+
+
+def test_manual_relay_is_not_asked_and_explicit_yes_is_refused(config):
+    manual = fake_manifest("prv.fake.subscription_manual", "subscription_manual")
+    manual["metering"] = "none"
+    code, out = run(config, "connectors", "enable", "prv.fake.subscription_manual", "--operator", "Martin",
+                    "--classes", "public", "--automation", "yes", "--confirm", "prv.fake.subscription_manual",
+                    connectors=[FakeConnector(manual)])
+    assert code == 1 and "manual relay" in out
+    code, out = run(config, "connectors", "enable", "prv.fake.subscription_manual", "--operator", "Martin",
+                    answers="public\nprv.fake.subscription_manual\n", connectors=[FakeConnector(manual)])
+    assert code == 0 and "Do the terms" not in out
+
+
+def test_ctrl_c_at_a_prompt_cancels_cleanly(config):
+    class Interrupting(io.StringIO):
+        def readline(self, *args):
+            raise KeyboardInterrupt
+
+    stdout = io.StringIO()
+    code = main(["--config", str(config[0]), "connectors", "enable", "prv.fake.api", "--operator", "Martin"],
+                stdin=Interrupting(), stdout=stdout, registry=Registry([FakeConnector()]), today=TODAY)
+    assert code == 130 and "nothing was changed" in stdout.getvalue() and state_events(config) == []
+
+
+def test_enabled_through_the_cli_the_gateway_routes_to_it(config):
+    from ooat_core.config import load_config
+    from ooat_core.connectors import ModelRequest
+    from ooat_core.gateway import Gateway
+    from ooat_core.ids import new_id
+    from ooat_core.routing import RoutingPolicy
+
+    run(config, "connectors", "enable", "prv.fake.api", "--operator", "Martin", "--classes", "public,internal",
+        "--automation", "yes", "--confirm", "prv.fake.api")
+    policy = {c: {"allowed": True} for c in ("public", "internal", "client_confidential", "personal")}
+    policy["special_category"] = {"allowed": True, "require_verified_redaction": True}
+    routing = RoutingPolicy({"version": "0.1.0", "data_class_policy": policy, "prices": [
+        {"adapter": "prv.fake.api", "model": "fake-model", "usd_per_mtok_in": 1, "usd_per_mtok_out": 5,
+         "valid_from": "2026-01-01", "source": "https://fake.invalid/pricing"}]})
+    ledger = Ledger.open(load_config(config[0]).ledger_url)
+    try:
+        gateway = Gateway(ledger, Registry([FakeConnector()]), routing)
+        request = ModelRequest(tier="workhorse", prompt="x", data_class="internal", task=new_id("tsk"))
+        assert gateway.call(request).cost["adapter"] == "prv.fake.api"
+    finally:
+        ledger.close()

@@ -109,3 +109,12 @@ def test_unconfirmed_acknowledgement_is_enabled_but_not_unattended(ledger):
     acknowledge(ledger, connector, "Martin", ["public"], automation_confirmed=False)
     (status,) = connector_statuses(Registry([connector]), ledger, TODAY)
     assert status.state == "enabled" and not status.unattended
+
+
+@pytest.mark.parametrize("operator", ["M\x00", "Martin\nEvil", "\t"])
+def test_operator_names_with_control_characters_are_refused(ledger, operator):
+    with pytest.raises(ValueError):
+        acknowledge(ledger, FakeConnector(), operator, ["public"], True)
+    with pytest.raises(ValueError):
+        disable(ledger, "prv.fake.api", operator, "reason")
+    assert ledger.events() == []

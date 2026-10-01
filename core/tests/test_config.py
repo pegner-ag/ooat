@@ -99,3 +99,13 @@ def test_secret_with_inner_control_characters_is_refused_without_echoing_it():
     with pytest.raises(ConnectorError) as info:
         secrets.get("prv.a.api")
     assert info.value.code == "UNAVAILABLE" and "sk-1" not in info.value.message and "A_KEY" in info.value.message
+
+
+def test_relative_sqlite_ledger_is_resolved_against_the_config_folder(tmp_path, monkeypatch):
+    (tmp_path / "ooat.toml").write_text('[ledger]\nurl = "sqlite:///data/ledger.sqlite"\n', encoding="utf-8")
+    monkeypatch.chdir(tmp_path.parent)
+    config = load_config(tmp_path / "ooat.toml")
+    assert config.ledger_url == f"sqlite:///{(tmp_path / 'data' / 'ledger.sqlite').as_posix()}"
+    for url in ("sqlite:///:memory:", f"sqlite:///{(tmp_path / 'abs.sqlite').as_posix()}"):
+        (tmp_path / "ooat.toml").write_text(f'[ledger]\nurl = "{url}"\n', encoding="utf-8")
+        assert load_config(tmp_path / "ooat.toml").ledger_url == url

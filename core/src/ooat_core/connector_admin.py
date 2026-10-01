@@ -125,13 +125,18 @@ def consequences_card(manifest: dict, today: date) -> str:
     return "\n".join(lines)
 
 
-def acknowledge(ledger: Ledger, connector: ModelConnector, operator: str, data_classes: Iterable[str],
-                automation_confirmed: bool) -> dict:
-    """Enable a connector: a named operator allows data classes and states whether automation is confirmed."""
-    manifest = connector.manifest
-    operator = operator.strip()
-    if not operator:
+def checked_operator(name: str) -> str:
+    """The approver's name as recorded: required, one line, no control characters."""
+    name = name.strip()
+    if not name:
         raise ValueError("a named operator is required")
+    if any(ord(character) < 32 or ord(character) == 127 for character in name):
+        raise ValueError("the operator name may not contain line breaks or control characters")
+    return name
+
+
+def checked_classes(manifest: dict, data_classes: Iterable[str]) -> list[str]:
+    """Requested classes in canonical order, limited to what the connector accepts."""
     requested = set(data_classes)
     if not requested:
         raise ValueError("allow at least one data class")
@@ -142,6 +147,15 @@ def acknowledge(ledger: Ledger, connector: ModelConnector, operator: str, data_c
     beyond = [c for c in classes if c not in manifest["data_policy"]["allowed_data_classes"]]
     if beyond:
         raise ValueError(f"{manifest['id']} does not accept {beyond}")
+    return classes
+
+
+def acknowledge(ledger: Ledger, connector: ModelConnector, operator: str, data_classes: Iterable[str],
+                automation_confirmed: bool) -> dict:
+    """Enable a connector: a named operator allows data classes and states whether automation is confirmed."""
+    manifest = connector.manifest
+    operator = checked_operator(operator)
+    classes = checked_classes(manifest, data_classes)
     forbidden = unattended_forbidden(manifest)
     if automation_confirmed and forbidden:
         raise ValueError(f"{manifest['id']}: {forbidden}; it cannot be confirmed")
@@ -152,8 +166,8 @@ def acknowledge(ledger: Ledger, connector: ModelConnector, operator: str, data_c
 
 
 def disable(ledger: Ledger, connector_id: str, operator: str, reason: str) -> dict:
-    operator, reason = operator.strip(), reason.strip()
-    if not operator or not reason:
-        raise ValueError("a named operator and a reason are required")
+    operator, reason = checked_operator(operator), reason.strip()
+    if not reason:
+        raise ValueError("a reason is required")
     return ledger.append(new_event("ADAPTER_DISABLED", task=None, actor={"kind": "hil", "id": operator},
                                    body={"adapter": connector_id, "operator": operator, "reason": reason}))
