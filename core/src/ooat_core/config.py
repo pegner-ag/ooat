@@ -59,5 +59,12 @@ def parse_config(data: dict) -> Config:
 
 
 def load_config(path: str | Path) -> Config:
+    """Load ooat.toml; a relative sqlite ledger path is resolved against the config file's folder."""
     with open(path, "rb") as file:
-        return parse_config(tomllib.load(file))
+        config = parse_config(tomllib.load(file))
+    prefix = "sqlite:///"
+    location = config.ledger_url[len(prefix):] if config.ledger_url.startswith(prefix) else None
+    if location and location != ":memory:" and not Path(location).is_absolute():
+        resolved = (Path(path).resolve().parent / location).as_posix()
+        config = Config(ledger_url=prefix + resolved, pins=config.pins, connectors=config.connectors)
+    return config

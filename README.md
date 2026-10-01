@@ -16,8 +16,29 @@ action waiting for a named human.
 
 ## Status
 
-Specification stage (draft v0.1): JSON Schemas and the starter catalog taxonomy exist; no runnable runtime yet.
+Early F1 (spec draft v0.1): JSON Schemas, the starter catalog taxonomy, the ledger, the provider gateway with
+three model connectors and the `ooat connectors` command exist; the task runtime (Gate, workers) does not yet.
 Decision records are in `docs/adr/`.
+
+## First steps
+
+Create `ooat.toml` in your working folder (a relative ledger path resolves next to this file):
+
+```toml
+[ledger]
+url = "sqlite:///ooat-ledger.sqlite"
+```
+
+```sh
+python -m pip install -e core -e adapters/claude-code -e adapters/codex -e adapters/anthropic-api
+ooat connectors list                      # installed connectors and their state
+ooat connectors show prv.anthropic.api    # connection consequences card
+ooat connectors enable prv.anthropic.api --operator "Your Name"
+```
+
+`enable` and `disable` need an `ooat.toml`, so state always lands in the same ledger. Settings live in
+`ooat.toml` (ledger URL, per-tier pins, connector settings; secrets only as environment
+variable names); prices and the data-class policy in `catalog/routing.json`.
 
 ## Repository layout
 

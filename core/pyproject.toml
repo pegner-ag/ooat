@@ -11,5 +11,8 @@ requires-python = ">=3.12"
 license = "Apache-2.0"
 dependencies = ["jsonschema>=4.23", "referencing>=0.30", "rfc3339-validator>=0.1.4"]
 
+[project.scripts]
+ooat = "ooat_core.operator_cli:main"
+
 [tool.hatch.build.targets.wheel]
 packages = ["src/ooat_core"]
