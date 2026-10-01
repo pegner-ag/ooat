@@ -4,7 +4,7 @@
 
 **Goal:** Let the operator see installed connectors, read each connection consequences card, and enable or disable a connector as a named human — `ooat connectors list | show | enable | disable` — so the gateway can route real calls.
 
-**Architecture:** `connector_admin.py` holds the operator actions as plain functions over the registry and the ledger: statuses, the consequences card built only from manifest facts, `acknowledge()` (writes `ADAPTER_ACKNOWLEDGED` with allowed classes, `automation_confirmed` and the jurisdiction fingerprint) and `disable()` (`ADAPTER_DISABLED`). `cli.py` is a thin argparse front end, installed as the `ooat` console script; it asks questions on stdin when flags are omitted and requires the connector id typed again as confirmation. The spec §9 staleness rule moves into `ooat_core.connectors` so gateway and CLI share it.
+**Architecture:** `connector_admin.py` holds the operator actions as plain functions over the registry and the ledger: statuses, the consequences card built only from manifest facts, `acknowledge()` (writes `ADAPTER_ACKNOWLEDGED` with allowed classes, `automation_confirmed` and the jurisdiction fingerprint) and `disable()` (`ADAPTER_DISABLED`). `operator_cli.py` is a thin argparse front end, installed as the `ooat` console script; it asks questions on stdin when flags are omitted and requires the connector id typed again as confirmation. The spec §9 staleness rule moves into `ooat_core.connectors` so gateway and CLI share it, and `connector_admin.acknowledgements()` becomes the connector state the gateway routes on, so `list` and routing cannot drift apart.
 
 **Tech Stack:** Python 3.12+ standard library (`argparse`), pytest.
 
@@ -16,6 +16,9 @@
 - The card shows only manifest facts; unknown values are printed as `unknown`; the card says it is not legal advice (spec §9 rule 4).
 - An acknowledgement allows only classes the manifest accepts; it never confirms automation for a manifest whose terms say `not_permitted`.
 - Enabling requires the connector id typed again; a mismatch changes nothing.
+- Manual relay and terms that forbid automation are never confirmed; an explicit `--automation yes` for them is refused, not ignored.
+- An explicit `--config` that does not exist is refused; only an omitted flag falls back to defaults (a `disable` must never land in a stray ledger).
+- `list` shows `[enabled, not usable unattended]` when the gateway would not route to an enabled connector; a failing `detect()` is reported, not raised.
 - Code, comments, docs and messages in English.
 
 ## Review Focus
@@ -34,9 +37,9 @@
 core/src/ooat_core/connectors/__init__.py   jurisdiction_stale() (Task 1)
 core/src/ooat_core/gateway.py                uses jurisdiction_stale() (Task 1)
 core/src/ooat_core/connector_admin.py        statuses, card, acknowledge, disable (Task 2)
-core/src/ooat_core/cli.py                    `ooat` command (Task 3)
+core/src/ooat_core/operator_cli.py           `ooat` command (Task 3)
 core/pyproject.toml                          console script (Task 3)
-core/tests/test_connectors.py, test_connector_admin.py, test_cli.py
+core/tests/test_connectors.py, test_connector_admin.py, test_operator_cli.py
 ```
 
 How to apply a "replace" step: the old text occurs exactly once; replace it with the new text. Files may have CRLF line endings on Windows — match the text, not the line endings.
@@ -212,11 +215,12 @@ git commit -m "core: share the jurisdiction staleness rule between gateway and o
 
 **Files:**
 - Create: `core/src/ooat_core/connector_admin.py`
+- Modify: `core/src/ooat_core/gateway.py` (routes on `acknowledgements()`)
 - Test: `core/tests/test_connector_admin.py`
 
 **Interfaces:**
 - Consumes: `Registry`, `BrokenConnector`, `ModelConnector`, `jurisdiction_fingerprint`, `jurisdiction_stale`; `Ledger`, `new_event`, `DATA_CLASSES`; `Gateway`, `RoutingPolicy`, `Config` (test only).
-- Produces: `ConnectorStatus(id, state, detail, tiers, automation, stale)` with `state` ∈ `enabled | disabled | not acknowledged | broken`; `connector_statuses(registry, ledger, today) -> list[ConnectorStatus]`; `consequences_card(manifest, today) -> str`; `acknowledge(ledger, connector, operator, data_classes, automation_confirmed) -> dict` (`ValueError` for an empty operator, no or unknown classes, classes the manifest does not accept, or automation with `not_permitted` terms); `disable(ledger, connector_id, operator, reason) -> dict`; constants `DATA_CLASS_ORDER`, `DEFAULT_CLASSES = ("public", "internal")`.
+- Produces: `ConnectorStatus(id, state, detail, tiers, automation, stale, unattended)`; `latest_state_events(events) -> dict`; `acknowledgements(events) -> dict[str, dict]` (used by the gateway); `unattended_forbidden(manifest) -> str | None`; with `state` ∈ `enabled | disabled | not acknowledged | broken`; `connector_statuses(registry, ledger, today) -> list[ConnectorStatus]`; `consequences_card(manifest, today) -> str`; `acknowledge(ledger, connector, operator, data_classes, automation_confirmed) -> dict` (`ValueError` for an empty operator, no or unknown classes, classes the manifest does not accept, or automation for `not_permitted` terms or manual relay); `disable(ledger, connector_id, operator, reason) -> dict`; constants `DATA_CLASS_ORDER`, `DEFAULT_CLASSES = ("public", "internal")`.
 
 - [ ] **Step 1: Write the failing test** — `core/tests/test_connector_admin.py`:
 
@@ -310,6 +314,28 @@ def test_acknowledged_connector_is_usable_by_the_gateway(ledger):
     gateway = Gateway(ledger, Registry([connector]), routing, Config())
     request = ModelRequest(tier="workhorse", prompt="x", data_class="internal", task=new_id("tsk"))
     assert gateway.call(request).cost["adapter"] == "prv.fake.api"
+
+
+def test_manual_relay_can_never_be_confirmed_for_unattended_use(ledger):
+    manual = fake_manifest("prv.fake.subscription_manual", "subscription_manual")
+    manual["metering"] = "none"
+    with pytest.raises(ValueError, match="manual relay"):
+        acknowledge(ledger, FakeConnector(manual), "Martin", ["public"], automation_confirmed=True)
+
+
+def test_one_faulty_detect_does_not_break_the_listing(ledger):
+    faulty = FakeConnector(fake_manifest("prv.faulty.api"))
+    faulty.detect = lambda: (_ for _ in ()).throw(OSError("probe crashed"))
+    details = {s.id: s.detail for s in connector_statuses(Registry([faulty, FakeConnector()]), ledger, TODAY)}
+    assert details["prv.faulty.api"].startswith("detect failed: OSError")
+    assert details["prv.fake.api"] == "fake connector"
+
+
+def test_unconfirmed_acknowledgement_is_enabled_but_not_unattended(ledger):
+    connector = FakeConnector()
+    acknowledge(ledger, connector, "Martin", ["public"], automation_confirmed=False)
+    (status,) = connector_statuses(Registry([connector]), ledger, TODAY)
+    assert status.state == "enabled" and not status.unattended
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
@@ -347,31 +373,53 @@ class ConnectorStatus:
     tiers: dict
     automation: str
     stale: bool
+    unattended: bool  # the gateway may route to it: enabled, terms allow it, operator confirmed
 
 
-def _latest_states(ledger: Ledger) -> dict[str, dict]:
+def latest_state_events(events: Iterable[dict]) -> dict[str, dict]:
+    """The latest ADAPTER_ACKNOWLEDGED or ADAPTER_DISABLED event per connector."""
     latest = {}
-    for event in ledger.events(types=_STATE_EVENTS):
-        latest[event["body"]["adapter"]] = event
+    for event in events:
+        if event["type"] in _STATE_EVENTS:
+            latest[event["body"]["adapter"]] = event
     return latest
 
 
+def acknowledgements(events: Iterable[dict]) -> dict[str, dict]:
+    """Bodies of the acknowledgements in force: the connectors whose latest state event enables them."""
+    return {connector_id: event["body"] for connector_id, event in latest_state_events(events).items()
+            if event["type"] == "ADAPTER_ACKNOWLEDGED"}
+
+
+def unattended_forbidden(manifest: dict) -> str | None:
+    """Why this connector can never be confirmed for unattended use, or None (ADR 0010 §3)."""
+    if manifest["automation_permitted"] == "not_permitted":
+        return "the provider's terms do not permit unattended use"
+    if manifest["access"] == "subscription_manual":
+        return "manual relay is never used unattended"
+    return None
+
+
 def connector_statuses(registry: Registry, ledger: Ledger, today: date) -> list[ConnectorStatus]:
-    latest, statuses = _latest_states(ledger), []
+    latest, statuses = latest_state_events(ledger.events(types=_STATE_EVENTS)), []
     for connector_id in registry.ids():
         connector = registry.get(connector_id)
         event = latest.get(connector_id)
-        if event is None:
-            state, stale = "not acknowledged", False
-        elif event["type"] == "ADAPTER_DISABLED":
-            state, stale = "disabled", False
-        else:
+        state, stale, unattended = "not acknowledged", False, False
+        if event is not None and event["type"] == "ADAPTER_DISABLED":
+            state = "disabled"
+        elif event is not None:
             state, stale = "enabled", jurisdiction_stale(connector.manifest, event["body"], today)
-        statuses.append(ConnectorStatus(connector_id, state, connector.detect().detail,
-                                        dict(connector.manifest["tiers"]),
-                                        connector.manifest["automation_permitted"], stale))
+            unattended = (event["body"].get("automation_confirmed") is True
+                          and unattended_forbidden(connector.manifest) is None)
+        try:
+            detail = connector.detect().detail
+        except Exception as error:  # plugin code: one faulty connector must not break the listing
+            detail = f"detect failed: {type(error).__name__}: {error}"
+        statuses.append(ConnectorStatus(connector_id, state, detail, dict(connector.manifest["tiers"]),
+                                        connector.manifest["automation_permitted"], stale, unattended))
     for broken in registry.broken:
-        statuses.append(ConnectorStatus(broken.name, "broken", broken.error, {}, "unknown", False))
+        statuses.append(ConnectorStatus(broken.name, "broken", broken.error, {}, "unknown", False, False))
     return statuses
 
 
@@ -442,8 +490,9 @@ def acknowledge(ledger: Ledger, connector: ModelConnector, operator: str, data_c
     beyond = [c for c in classes if c not in manifest["data_policy"]["allowed_data_classes"]]
     if beyond:
         raise ValueError(f"{manifest['id']} does not accept {beyond}")
-    if automation_confirmed and manifest["automation_permitted"] == "not_permitted":
-        raise ValueError(f"the terms of {manifest['id']} do not permit unattended use; it cannot be confirmed")
+    forbidden = unattended_forbidden(manifest)
+    if automation_confirmed and forbidden:
+        raise ValueError(f"{manifest['id']}: {forbidden}; it cannot be confirmed")
     return ledger.append(new_event("ADAPTER_ACKNOWLEDGED", task=None, actor={"kind": "hil", "id": operator}, body={
         "adapter": manifest["id"], "manifest_version": manifest["version"], "allowed_data_classes": classes,
         "operator": operator, "automation_confirmed": automation_confirmed,
@@ -458,6 +507,66 @@ def disable(ledger: Ledger, connector_id: str, operator: str, reason: str) -> di
                                    body={"adapter": connector_id, "operator": operator, "reason": reason}))
 ```
 
+The gateway routes on the same state:
+
+In `core/src/ooat_core/gateway.py`, replace:
+
+```python
+from .config import Config
+```
+
+with:
+
+```python
+from .config import Config
+from .connector_admin import acknowledgements
+```
+
+In `core/src/ooat_core/gateway.py`, replace:
+
+```python
+        acknowledgements, cooldowns = self._acknowledgements(events), self._cooldowns(events)
+```
+
+with:
+
+```python
+        acknowledged, cooldowns = acknowledgements(events), self._cooldowns(events)
+```
+
+In `core/src/ooat_core/gateway.py`, replace:
+
+```python
+            reason = self._exclusion(connector, request, acknowledgements.get(connector_id), cooldowns)
+```
+
+with:
+
+```python
+            reason = self._exclusion(connector, request, acknowledged.get(connector_id), cooldowns)
+```
+
+In `core/src/ooat_core/gateway.py`, replace:
+
+```python
+    @staticmethod
+    def _acknowledgements(events: list[dict]) -> dict[str, dict]:
+        state: dict[str, dict | None] = {}
+        for event in events:
+            if event["type"] == "ADAPTER_ACKNOWLEDGED":
+                state[event["body"]["adapter"]] = event["body"]
+            elif event["type"] == "ADAPTER_DISABLED":
+                state[event["body"]["adapter"]] = None
+        return {connector_id: body for connector_id, body in state.items() if body is not None}
+```
+
+with:
+
+```python
+
+```
+
+
 - [ ] **Step 4: Run tests to verify they pass**
 
 Run: `python -m pytest core/tests -q`
@@ -466,8 +575,8 @@ Expected: PASS
 - [ ] **Step 5: Commit**
 
 ```bash
-git add core/src/ooat_core/connector_admin.py core/tests/test_connector_admin.py
-git commit -m "core: connector statuses, consequences card, acknowledge and disable"
+git add core/src/ooat_core/connector_admin.py core/src/ooat_core/gateway.py core/tests/test_connector_admin.py
+git commit -m "core: connector statuses, consequences card, acknowledge and disable; gateway routes on the same state"
 ```
 
 ---
@@ -475,15 +584,15 @@ git commit -m "core: connector statuses, consequences card, acknowledge and disa
 ### Task 3: The `ooat connectors` command
 
 **Files:**
-- Create: `core/src/ooat_core/cli.py`
+- Create: `core/src/ooat_core/operator_cli.py`
 - Modify: `core/pyproject.toml`
-- Test: `core/tests/test_cli.py`
+- Test: `core/tests/test_operator_cli.py`
 
 **Interfaces:**
 - Consumes: `connector_admin` (Task 2); `load_config`, `Config`; `Registry.discover()`; `Ledger`.
 - Produces: `main(argv=None, stdin=None, stdout=None, registry=None, today=None) -> int` (0 done, 1 refused, argparse exits 2 on usage errors); console script `ooat`. Commands: `ooat [--config PATH] connectors list`, `show ID`, `enable ID --operator NAME [--classes a,b] [--automation yes|no] [--confirm ID]`, `disable ID --operator NAME --reason TEXT`.
 
-- [ ] **Step 1: Write the failing test** — `core/tests/test_cli.py`:
+- [ ] **Step 1: Write the failing test** — `core/tests/test_operator_cli.py`:
 
 ```python
 import io
@@ -492,7 +601,7 @@ from datetime import date
 import pytest
 from connector_fakes import FakeConnector, fake_manifest
 
-from ooat_core.cli import main
+from ooat_core.operator_cli import main
 from ooat_core.connectors.registry import Registry
 from ooat_core.ledger import Ledger
 
@@ -595,15 +704,38 @@ def test_console_script_is_installed():
     from importlib.metadata import entry_points
 
     (script,) = [e for e in entry_points(group="console_scripts") if e.name == "ooat"]
-    assert script.value == "ooat_core.cli:main"
+    assert script.value == "ooat_core.operator_cli:main"
+
+
+def test_missing_explicit_config_is_refused_and_writes_no_ledger(tmp_path):
+    stdout = io.StringIO()
+    code = main(["--config", str(tmp_path / "typo.toml"), "connectors", "disable", "prv.fake.api", "--operator", "M",
+                 "--reason", "x"], stdin=io.StringIO(), stdout=stdout, registry=Registry([FakeConnector()]),
+                today=TODAY)
+    assert code == 1 and "not found" in stdout.getvalue()
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_list_tells_when_an_enabled_connector_is_not_usable_unattended(config):
+    run(config, "connectors", "enable", "prv.fake.api", "--operator", "Martin", "--classes", "public",
+        "--automation", "no", "--confirm", "prv.fake.api")
+    _, out = run(config, "connectors", "list")
+    assert "[enabled, not usable unattended]" in out
+
+
+def test_explicit_yes_for_forbidding_terms_is_refused(config):
+    connector = FakeConnector(fake_manifest(automation="not_permitted"))
+    code, out = run(config, "connectors", "enable", "prv.fake.api", "--operator", "Martin", "--classes", "public",
+                    "--automation", "yes", "--confirm", "prv.fake.api", connectors=[connector])
+    assert code == 1 and "do not permit" in out and state_events(config) == []
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `python -m pytest core/tests/test_cli.py -q`
-Expected: FAIL — `ModuleNotFoundError: No module named 'ooat_core.cli'`
+Run: `python -m pytest core/tests/test_operator_cli.py -q`
+Expected: FAIL — `ModuleNotFoundError: No module named 'ooat_core.operator_cli'`
 
-- [ ] **Step 3: Implement** — `core/src/ooat_core/cli.py`:
+- [ ] **Step 3: Implement** — `core/src/ooat_core/operator_cli.py`:
 
 ```python
 """`ooat` command line: operator commands. Currently `ooat connectors list | show | enable | disable`."""
@@ -623,7 +755,7 @@ REFUSED = 1
 
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="ooat", description="OOAT operator commands.")
-    parser.add_argument("--config", default="ooat.toml", help="operator config (default: ./ooat.toml if present)")
+    parser.add_argument("--config", help="operator config (default: ./ooat.toml if present)")
     commands = parser.add_subparsers(dest="command", required=True)
     connectors = commands.add_parser("connectors", help="list, inspect, enable or disable model connectors")
     actions = connectors.add_subparsers(dest="action", required=True)
@@ -653,7 +785,12 @@ def _ask(prompt: str, stdin, stdout) -> str:
 def main(argv=None, stdin=None, stdout=None, registry: Registry | None = None, today=None) -> int:
     stdin, stdout = stdin or sys.stdin, stdout or sys.stdout
     args = _parser().parse_args(argv)
-    config = load_config(args.config) if Path(args.config).exists() else Config()
+    if args.config is not None and not Path(args.config).exists():
+        # An explicit config that is missing must not fall back to a default ledger: a disable would land elsewhere.
+        stdout.write(f"Config file not found: {args.config}\n")
+        return REFUSED
+    path = args.config or "ooat.toml"
+    config = load_config(path) if Path(path).exists() else Config()
     registry = registry or Registry.discover()
     today = today or datetime.now(timezone.utc).date()
     ledger = Ledger.open(config.ledger_url)
@@ -666,9 +803,12 @@ def main(argv=None, stdin=None, stdout=None, registry: Registry | None = None, t
 def _connectors(args, ledger, registry, today, stdin, stdout) -> int:
     if args.action == "list":
         for status in connector_admin.connector_statuses(registry, ledger, today):
+            state = status.state
+            if state == "enabled" and not status.unattended:
+                state += ", not usable unattended"
             stale = " (jurisdiction stale: personal data refused)" if status.stale else ""
             tiers = ", ".join(f"{tier}={model or 'set in ooat.toml'}" for tier, model in status.tiers.items())
-            stdout.write(f"{status.id}  [{status.state}]{stale}\n  {status.detail}\n")
+            stdout.write(f"{status.id}  [{state}]{stale}\n  {status.detail}\n")
             if tiers:
                 stdout.write(f"  tiers: {tiers}; unattended use per terms: {status.automation}\n")
         return 0
@@ -696,7 +836,11 @@ def _enable(args, ledger, connector, stdin, stdout) -> int:
     answer = args.classes if args.classes is not None else _ask(
         f"\nData classes to allow [{','.join(default)}]: ", stdin, stdout)
     classes = [c.strip() for c in answer.split(",") if c.strip()] or default
-    if connector.manifest["automation_permitted"] == "not_permitted":
+    forbidden = connector_admin.unattended_forbidden(connector.manifest)
+    if forbidden and args.automation == "yes":
+        stdout.write(f"Refused: {forbidden}; nothing was changed.\n")
+        return REFUSED
+    if forbidden:
         automation = False
     else:
         automation_answer = args.automation or _ask(
@@ -715,7 +859,10 @@ def _enable(args, ledger, connector, stdin, stdout) -> int:
     except ValueError as error:
         stdout.write(f"Refused: {error}\n")
         return REFUSED
-    mode = "unattended use confirmed" if automation else "not used unattended until automation is confirmed"
+    if forbidden:
+        mode = f"{forbidden}"
+    else:
+        mode = "unattended use confirmed" if automation else "not used unattended until automation is confirmed"
     stdout.write(f"{connector.manifest['id']} enabled for {', '.join(classes)}; {mode}.\n")
     return 0
 
@@ -734,7 +881,7 @@ with:
 
 ```
 [project.scripts]
-ooat = "ooat_core.cli:main"
+ooat = "ooat_core.operator_cli:main"
 
 [tool.hatch.build.targets.wheel]
 ```
@@ -750,7 +897,7 @@ Expected: PASS. Smoke check: `ooat connectors list` prints the installed connect
 - [ ] **Step 5: Commit**
 
 ```bash
-git add core/src/ooat_core/cli.py core/pyproject.toml core/tests/test_cli.py
+git add core/src/ooat_core/operator_cli.py core/pyproject.toml core/tests/test_operator_cli.py
 git commit -m "core: ooat connectors list | show | enable | disable"
 ```
 
@@ -779,8 +926,9 @@ with:
 - `connectors/conformance.py` — `check_connector()`: the contract every connector package tests;
   `jurisdiction_stale()` in `connectors/__init__.py` is the spec §9 rule 2 check shared by gateway and CLI
 - `connector_admin.py` — `connector_statuses()`, `consequences_card()`, `acknowledge()`, `disable()`: operator
-  actions; state changes are `ADAPTER_ACKNOWLEDGED` / `ADAPTER_DISABLED` events by a named human
-- `cli.py` — the `ooat` command: `ooat connectors list | show | enable | disable`
+  actions; state changes are `ADAPTER_ACKNOWLEDGED` / `ADAPTER_DISABLED` events by a named human;
+  `acknowledgements()` is the connector state the gateway routes on
+- `operator_cli.py` — the `ooat` command: `ooat connectors list | show | enable | disable`
 ```
 
 In `core/description.md`, replace:
