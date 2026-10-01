@@ -10,7 +10,7 @@
     "id": {"$ref": "common.schema.json#/$defs/event_id"},
     "ts": {"description": "ISO 8601 UTC.", "type": "string", "format": "date-time", "pattern": "Z$"},
     "task": {
-      "description": "Task id. ADAPTER_ACKNOWLEDGED is not tied to a task and uses null.",
+      "description": "Task id. ADAPTER_ACKNOWLEDGED and ADAPTER_DISABLED are not tied to a task and use null.",
       "anyOf": [{"$ref": "common.schema.json#/$defs/task_id"}, {"type": "null"}]
     },
     "contract": {"anyOf": [{"$ref": "common.schema.json#/$defs/contract_id"}, {"type": "null"}]},
@@ -23,7 +23,7 @@
   },
   "allOf": [
     {
-      "if": {"properties": {"type": {"not": {"const": "ADAPTER_ACKNOWLEDGED"}}}},
+      "if": {"properties": {"type": {"not": {"enum": ["ADAPTER_ACKNOWLEDGED", "ADAPTER_DISABLED"]}}}},
       "then": {"properties": {"task": {"$ref": "common.schema.json#/$defs/task_id"}}}
     },
     {
@@ -37,8 +37,8 @@
       "then": {"properties": {"actor": {"properties": {"kind": {"const": "agent"}}}}}
     },
     {
-      "description": "Only a human answers, rates, reports defects or acknowledges adapters.",
-      "if": {"properties": {"type": {"enum": ["HIL_RESPONSE", "TASK_RATED", "DEFECT_FOUND", "ADAPTER_ACKNOWLEDGED"]}}},
+      "description": "Only a human answers, rates, reports defects, acknowledges or disables adapters.",
+      "if": {"properties": {"type": {"enum": ["HIL_RESPONSE", "TASK_RATED", "DEFECT_FOUND", "ADAPTER_ACKNOWLEDGED", "ADAPTER_DISABLED"]}}},
       "then": {"properties": {"actor": {"properties": {"kind": {"const": "hil"}}}}}
     },
     {
@@ -63,7 +63,8 @@
     {"if": {"properties": {"type": {"const": "TASK_CLOSED"}}}, "then": {"properties": {"body": {"$ref": "#/$defs/body_task_closed"}}}},
     {"if": {"properties": {"type": {"const": "TASK_RATED"}}}, "then": {"properties": {"body": {"$ref": "#/$defs/body_task_rated"}}}},
     {"if": {"properties": {"type": {"const": "DEFECT_FOUND"}}}, "then": {"properties": {"body": {"$ref": "#/$defs/body_defect_found"}}}},
-    {"if": {"properties": {"type": {"const": "ADAPTER_ACKNOWLEDGED"}}}, "then": {"properties": {"body": {"$ref": "#/$defs/body_adapter_acknowledged"}}}}
+    {"if": {"properties": {"type": {"const": "ADAPTER_ACKNOWLEDGED"}}}, "then": {"properties": {"body": {"$ref": "#/$defs/body_adapter_acknowledged"}}}},
+    {"if": {"properties": {"type": {"const": "ADAPTER_DISABLED"}}}, "then": {"properties": {"body": {"$ref": "#/$defs/body_adapter_disabled"}}}}
   ],
   "$defs": {
     "event_type": {
@@ -71,7 +72,7 @@
         "TASK_SUBMITTED", "TOPOLOGY_DECIDED", "CONTRACT_ISSUED", "CLAIM", "RESULT", "ABSTAIN",
         "OBJECTION", "OBJECTION_RESOLVED", "DECISION", "GATE_PASSED", "GATE_FAILED",
         "HIL_REQUEST", "HIL_RESPONSE", "BUDGET_WARNING", "QUOTA_WARNING",
-        "TASK_CLOSED", "TASK_RATED", "DEFECT_FOUND", "ADAPTER_ACKNOWLEDGED"
+        "TASK_CLOSED", "TASK_RATED", "DEFECT_FOUND", "ADAPTER_ACKNOWLEDGED", "ADAPTER_DISABLED"
       ]
     },
     "actor": {
@@ -101,7 +102,8 @@
         "quota_units": {"type": "number", "minimum": 0},
         "usd": {"$ref": "common.schema.json#/$defs/usd"},
         "basis": {"enum": ["exact", "estimated", "shadow"]},
-        "price_ver": {"type": "string", "minLength": 1}
+        "price_ver": {"type": "string", "minLength": 1},
+        "estimated_usd": {"description": "Estimate made by the gateway before the call (ADR 0010).", "$ref": "common.schema.json#/$defs/usd"}
       }
     },
     "text": {"type": "string", "minLength": 1},
@@ -204,7 +206,7 @@
           "required": ["code", "message"],
           "additionalProperties": false,
           "properties": {
-            "code": {"enum": ["TOOL_ERROR", "TIMEOUT", "API_ERROR", "QUOTA_EXHAUSTED", "INVALID_OUTPUT"]},
+            "code": {"enum": ["TOOL_ERROR", "TIMEOUT", "API_ERROR", "QUOTA_EXHAUSTED", "INVALID_OUTPUT", "UNAVAILABLE"]},
             "message": {"$ref": "#/$defs/text"}
           }
         }
@@ -399,13 +401,25 @@
     },
     "body_adapter_acknowledged": {
       "type": "object",
-      "required": ["adapter", "manifest_version", "allowed_data_classes", "operator"],
+      "required": ["adapter", "manifest_version", "allowed_data_classes", "operator", "automation_confirmed", "jurisdiction_sha256"],
       "additionalProperties": false,
       "properties": {
         "adapter": {"$ref": "common.schema.json#/$defs/provider_id"},
         "manifest_version": {"$ref": "common.schema.json#/$defs/semver"},
         "allowed_data_classes": {"type": "array", "items": {"$ref": "common.schema.json#/$defs/data_class"}, "uniqueItems": true},
-        "operator": {"description": "Name of the acknowledging operator.", "$ref": "#/$defs/text"}
+        "operator": {"description": "Name of the acknowledging operator.", "$ref": "#/$defs/text"},
+        "automation_confirmed": {"description": "The operator checked that the plan terms allow unattended use (ADR 0010).", "type": "boolean"},
+        "jurisdiction_sha256": {"description": "Fingerprint of the acknowledged jurisdiction block (ADR 0010).", "type": "string", "pattern": "^[0-9a-f]{64}$"}
+      }
+    },
+    "body_adapter_disabled": {
+      "type": "object",
+      "required": ["adapter", "operator", "reason"],
+      "additionalProperties": false,
+      "properties": {
+        "adapter": {"$ref": "common.schema.json#/$defs/provider_id"},
+        "operator": {"$ref": "#/$defs/text"},
+        "reason": {"$ref": "#/$defs/text"}
       }
     }
   }

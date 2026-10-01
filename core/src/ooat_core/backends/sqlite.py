@@ -6,7 +6,7 @@ from pathlib import Path
 from . import LedgerIntegrityError
 
 # Bumped with every DDL change; a ledger written by newer code is never opened by older code.
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 # Spec §7 event table plus seq (portable append order) and the artifact table.
 # task_id is nullable because ADAPTER_ACKNOWLEDGED has no task (ADR 0003).
@@ -32,7 +32,8 @@ CREATE TABLE IF NOT EXISTS event (
   quota_units   REAL,
   cost_usd      REAL,
   cost_basis    TEXT CHECK (cost_basis IN ('exact','estimated','shadow')),
-  price_ver     TEXT
+  price_ver     TEXT,
+  estimated_usd REAL
 );
 CREATE INDEX IF NOT EXISTS event_task_seq ON event (task_id, seq);
 CREATE INDEX IF NOT EXISTS event_type_seq ON event (type, seq);
@@ -84,6 +85,11 @@ class SqliteBackend:
             self._db.close()
             raise ValueError(f"ledger schema version {version} is newer than this code ({SCHEMA_VERSION})")
         self._db.executescript(_DDL)
+        # Version 2 records the gateway's estimate (ADR 0010). Check the column, not the number, so a crash
+        # between ALTER and the version stamp, or a file from before versioning, still migrates cleanly.
+        columns = [row[1] for row in self._db.execute("PRAGMA table_info(event)")]
+        if "estimated_usd" not in columns:
+            self._db.execute("ALTER TABLE event ADD COLUMN estimated_usd REAL")
         self._db.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
 
     def insert(self, event_row: dict, artifact_rows: list[dict]) -> None:

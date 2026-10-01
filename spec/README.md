@@ -21,11 +21,13 @@ Normative part of OOAT: JSON Schemas (draft 2020-12) plus the semantics in `ooat
 
 - Deterministic capabilities have no model policy; `decision` capabilities run only on the `decision` tier and vice versa.
 - Adapters allowing `client_confidential`, `personal` or `special_category` must declare `training_on_inputs: false`.
-- Subscription adapters need a `plan`; manual relay cannot be `operator_confirmed` or metered.
+- Subscription adapters need a `plan`; manual relay cannot be `permitted` for automation or metered.
+- `automation_permitted` states the provider's terms (`permitted | not_permitted | unknown`); the operator's
+  confirmation is `automation_confirmed` in `ADAPTER_ACKNOWLEDGED` (ADR 0010).
 - Abstentions require `reason` (≤ 300 chars), `missing` and `confidence`.
 - `HIL_REQUEST`: 2–3 options, recommendation, default on silence, deadline; an R3 request must offer a do-not-act option (`acts: false`).
 - Objections reference an artifact version and use a closed `reason_code` list.
-- Only agents emit `CLAIM`/`RESULT`/`OBJECTION`; only humans emit `HIL_RESPONSE`, `TASK_RATED`, `DEFECT_FOUND`, `ADAPTER_ACKNOWLEDGED`.
+- Only agents emit `CLAIM`/`RESULT`/`OBJECTION`; only humans emit `HIL_RESPONSE`, `TASK_RATED`, `DEFECT_FOUND`, `ADAPTER_ACKNOWLEDGED`, `ADAPTER_DISABLED`.
 - Timestamps are UTC (`Z`).
 
 ## Rules left to the catalog linter or runtime

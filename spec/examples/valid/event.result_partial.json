@@ -16,5 +16,5 @@
     ],
     "remaining": "Mapování KPI marže po dodání definice."
   },
-  "cost": {"adapter": "prv.anthropic.subscription_cli", "tier": "workhorse", "quota_units": 21000, "usd": 0.42, "basis": "shadow"}
+  "cost": {"adapter": "prv.anthropic.subscription_cli", "tier": "workhorse", "quota_units": 21000, "usd": 0.42, "basis": "shadow", "estimated_usd": 0.5}
 }

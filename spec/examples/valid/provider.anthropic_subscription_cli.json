@@ -7,7 +7,7 @@
   "tiers": {"workhorse": null, "frontier": null},
   "metering": "reported",
   "plan": {"fee_usd_month": 100, "quota_window_hours": null, "units": "token_equivalent"},
-  "automation_permitted": "operator_confirmed",
+  "automation_permitted": "unknown",
   "concurrency": 1,
   "data_policy": {"training_on_inputs": false, "retention_days": null, "allowed_data_classes": ["public", "internal", "client_confidential"]},
   "features": {"tool_use": true, "vision": true, "context_tokens": null},
