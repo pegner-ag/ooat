@@ -9,6 +9,7 @@ written for a sub-project only when the ones it depends on are done, so it can u
 | # | Sub-project | Depends on | Plan |
 |---|---|---|---|
 | 01 | Core ledger: ids, spec validation, append-only SQLite ledger, artifact store, state projections | — | `task-01-core-ledger/plan.md` |
+| 01d | Ledger hardening: deferred review findings (`task-01d-ledger-hardening/task.md`) | 01 | later |
 | 01b | Server ledger backends: PostgreSQL and optional SQL Server (ADR 0008) — PostgreSQL is an F2 item (spec §12); listed here only for its dependency on 01, not part of the F1 exit | 01 | later |
 | 01c | First-run setup `ooat init`: detect available databases, ask, write config, install only the chosen driver (ADR 0008); later also adapter acknowledgement and notifier choice | 01 | later |
 | 02 | Catalog runtime: load and resolve families/roles/capabilities (linter rules from `spec/README.md`), 15 capabilities, 5 roles, eval sets | 01, task-04 seed tasks | later |
