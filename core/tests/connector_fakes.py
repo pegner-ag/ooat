@@ -1,6 +1,6 @@
 """A configurable fake model connector for gateway tests (no network, no secrets)."""
 
-from ooat_core.connectors import ConnectorError, Detection, ModelResponse
+from ooat_core.connectors import ConnectorError, DecisionResponse, Detection, ModelResponse
 
 JURISDICTION = {
     "vendor_entity": "Fake Vendor Ltd", "vendor_country": "IE", "host_entity": "Fake Vendor Ltd",
@@ -55,3 +55,30 @@ class FakeConnector:
 
 def quota_error(resets_at=None):
     return ConnectorError("QUOTA_EXHAUSTED", "usage limit reached", resets_at=resets_at)
+
+
+def decision_manifest(connector_id="prv.fakejev.api", model="fake-decision-1", allowed=("public", "internal")):
+    return fake_manifest(connector_id, "api", tiers={"decision": model}, allowed=allowed)
+
+
+class FakeDecisionConnector:
+    """Answers every question from a script: {question id: DecisionAnswer} or a function of the request."""
+
+    kind = "decision"
+
+    def __init__(self, manifest=None, answers=None, usage=(300, 20), error=None, reported_model=None):
+        self.manifest = manifest or decision_manifest()
+        self.answers, self.usage, self.error = answers or {}, usage, error
+        self.reported_model = reported_model
+        self.calls = []
+
+    def detect(self):
+        return Detection(True, "fake decision connector")
+
+    def decide(self, request, secrets):
+        self.calls.append(request)
+        if self.error:
+            raise self.error
+        answers = self.answers(request) if callable(self.answers) else self.answers
+        model = self.reported_model or request.model or self.manifest["tiers"]["decision"]
+        return DecisionResponse(dict(answers), model, self.usage[0], None, self.usage[1], None, "exact")

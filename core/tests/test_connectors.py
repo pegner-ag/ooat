@@ -1,9 +1,10 @@
 import pytest
-from connector_fakes import FakeConnector, fake_manifest
+from connector_fakes import FakeConnector, FakeDecisionConnector, fake_manifest
 
 from datetime import date
 
 from ooat_core.connectors import ConnectorError, jurisdiction_fingerprint, jurisdiction_stale, registry
+from ooat_core.connectors.conformance import check_connector
 from ooat_core.connectors.registry import Registry
 
 
@@ -78,3 +79,23 @@ def test_connector_error_codes_are_the_schema_codes():
     assert ConnectorError("UNAVAILABLE", "claude not on PATH").code == "UNAVAILABLE"
     with pytest.raises(ValueError):
         ConnectorError("PROVIDER_ERROR", "x")
+
+
+def test_decision_connectors_are_registered_and_listed_by_kind():
+    reg = Registry([FakeConnector(), FakeDecisionConnector()])
+    assert reg.ids() == ["prv.fake.api", "prv.fakejev.api"]
+    assert reg.ids("decision") == ["prv.fakejev.api"] and reg.ids("model") == ["prv.fake.api"]
+
+
+@pytest.mark.parametrize("connector", [
+    FakeDecisionConnector(fake_manifest("prv.fakejev.api", tiers={"workhorse": "m"})),
+    FakeDecisionConnector(fake_manifest("prv.fakejev.api", tiers={"decision": "d", "economy": "m"})),
+    FakeConnector(fake_manifest("prv.fake.api", tiers={"decision": "d"})),
+])
+def test_the_decision_tier_belongs_to_decision_connectors_only(connector):
+    reg = Registry([connector])
+    assert reg.ids() == [] and "cannot serve tiers" in reg.broken[0].error
+
+
+def test_conformance_accepts_a_decision_connector():
+    check_connector(FakeDecisionConnector())

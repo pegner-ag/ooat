@@ -1,7 +1,7 @@
 """Discovery of installed connectors (entry-point group "ooat.connectors").
 
-A connector that fails to load, has an invalid manifest, an unsupported kind or a duplicate id is listed as
-broken and never used; it does not stop the other connectors from loading.
+A connector that fails to load, has an invalid manifest, an unsupported kind, a tier that does not fit its kind
+or a duplicate id is listed as broken and never used; it does not stop the other connectors from loading.
 """
 
 from collections.abc import Iterable
@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from importlib.metadata import entry_points
 
 from ..validation import SpecValidationError, validate
-from . import ENTRY_POINT_GROUP, ModelConnector
+from . import CONNECTOR_KINDS, ENTRY_POINT_GROUP, ModelConnector
 
 
 @dataclass(frozen=True)
@@ -36,13 +36,19 @@ class Registry:
     def _check(self, connector) -> str | None:
         manifest = getattr(connector, "manifest", None)
         name = manifest.get("id", repr(connector)) if isinstance(manifest, dict) else repr(connector)
-        if getattr(connector, "kind", None) != "model":
-            self.broken.append(BrokenConnector(name, f"unsupported connector kind: {getattr(connector, 'kind', None)!r}"))
+        kind = getattr(connector, "kind", None)
+        if kind not in CONNECTOR_KINDS:
+            self.broken.append(BrokenConnector(name, f"unsupported connector kind: {kind!r}"))
             return None
         try:
             validate("provider", manifest)
         except (SpecValidationError, TypeError) as error:
             self.broken.append(BrokenConnector(name, str(error)))
+            return None
+        # The decision tier serves only decision connectors and they serve nothing else (capability schema rule).
+        tiers = sorted(manifest["tiers"])
+        if ("decision" in tiers) != (kind == "decision") or (kind == "decision" and len(tiers) > 1):
+            self.broken.append(BrokenConnector(name, f"a {kind} connector cannot serve tiers {tiers}"))
             return None
         return manifest["id"]
 
@@ -56,8 +62,8 @@ class Registry:
                 broken.append(BrokenConnector(entry_point.name, f"{type(error).__name__}: {error}"))
         return cls(connectors, broken)
 
-    def ids(self) -> list[str]:
-        return sorted(self._connectors)
+    def ids(self, kind: str | None = None) -> list[str]:
+        return sorted(i for i, c in self._connectors.items() if kind is None or c.kind == kind)
 
     def get(self, connector_id: str) -> ModelConnector | None:
         return self._connectors.get(connector_id)
