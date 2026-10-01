@@ -3,7 +3,8 @@
 ## Purpose
 Reference runtime of OOAT. Currently: identifiers, OOA Spec validation, the append-only ledger, artifact
 storage, state projections and the provider gateway core (connector contract, registry, routing, budgets,
-metering). Concrete connectors, Gate, workers and API are not implemented yet.
+metering), the connector contract used by the packages in `adapters/`, and the `ooat connectors` operator
+command. Gate, workers and API are not implemented yet.
 
 ## Key components
 - `ids.py` — `new_id(prefix)`, ULIDs, `parse_artifact_ref()`
