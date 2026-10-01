@@ -120,3 +120,12 @@ def test_live_minimal_call():
 def test_null_usage_counts_are_read_as_zero():
     data = dict(MESSAGE, usage={"input_tokens": None, "output_tokens": 3})
     assert parse_message(data).tokens_in == 0
+
+
+def test_unreadable_200_reply_is_an_api_error_because_the_call_was_billed():
+    def opener(req, timeout):
+        return Reply(b"<html>not json</html>")
+
+    with pytest.raises(ConnectorError) as info:
+        AnthropicApiConnector(opener).complete(request(), Secrets())
+    assert info.value.code == "API_ERROR"

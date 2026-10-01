@@ -65,7 +65,7 @@ class AnthropicApiConnector:
             "x-api-key": key, "anthropic-version": API_VERSION, "content-type": "application/json"})
         try:
             with self._open(req, request.timeout_s) as reply:
-                data = json.loads(reply.read().decode("utf-8"))
+                raw = reply.read()
         except urllib.error.HTTPError as error:
             raise self._http_error(error) from None
         except (socket.timeout, TimeoutError):
@@ -74,6 +74,10 @@ class AnthropicApiConnector:
             raise ConnectorError("UNAVAILABLE", f"cannot reach the API: {error.reason}") from None
         except ValueError:  # e.g. an invalid header value; its message would quote the key, so it is dropped
             raise ConnectorError("UNAVAILABLE", "the request could not be built (check the API key value)") from None
+        try:  # the provider answered, so the call was billed: an unreadable reply is an API error, not "did not run"
+            data = json.loads(raw.decode("utf-8"))
+        except (UnicodeDecodeError, ValueError):
+            raise ConnectorError("API_ERROR", "the API returned an unreadable reply") from None
         return parse_message(data)
 
     def _http_error(self, error: urllib.error.HTTPError) -> ConnectorError:
