@@ -49,7 +49,7 @@ core/src/ooat_core/gateway.py                  decide(), estimate_decision(), De
 core/tests/test_decisions.py, core/tests/test_gateway_decide.py   (Tasks 2-4)
 adapters/typesafe-jev/   pyproject.toml, description.md, src/ooat_adapter_typesafe_jev/__init__.py, tests/ (Task 5)
 catalog/routing.json, catalog/tests/test_routing_catalog.py, adapters/integration_tests/, CI (Task 5)
-spec/schemas/event.schema.json, spec/examples/valid/, spec/tests/test_schemas.py (Task 6)
+spec/schemas/event.schema.json, spec/schemas/common.schema.json, spec/examples/valid/, spec/tests/ (Task 6)
 core/description.md, docs/description.md, README.md, .claude/lessons.md (Task 7)
 ```
 
@@ -2280,13 +2280,18 @@ git commit -m "feat(adapters): Jev decision connector with reference prices"
 ### Task 6: Event schema changes of ADR 0011
 
 **Files:**
-- Modify: `spec/schemas/event.schema.json`
+- Modify: `spec/schemas/event.schema.json`, `spec/schemas/common.schema.json`
 - Modify: `spec/examples/valid/event.task_submitted.json`, `spec/examples/valid/event.topology_decided.json`
-- Create: `spec/examples/valid/event.task_rated.json`
+- Create: `spec/examples/valid/event.gate_passed.json`, `spec/examples/valid/event.task_rated.json`
 - Test: `spec/tests/test_schemas.py`
 
 **Interfaces:**
-- Produces (used by 04b and 04c): `TASK_SUBMITTED.body.project` (`^[a-z0-9][a-z0-9_-]*$`); `TOPOLOGY_DECIDED.body.decisions[]` = `{question, engine, model, answer, confidence, threshold}`; `TASK_RATED.body.decisions` = `{question id: {verdict: confirmed | corrected, value}}`, `value` required when corrected; `$defs/question_id` matches `decisions.QUESTION_ID`.
+- Produces (used by 04b and 04c):
+  - `TASK_SUBMITTED.body.project` (`^[a-z0-9][a-z0-9_-]*$`)
+  - `$defs/decision_record` = `{question, engine, model, answer, confidence, threshold}`, in `TOPOLOGY_DECIDED.body.decisions[]` (Gate) and `GATE_PASSED` / `GATE_FAILED` `body.criteria[].decision` (acceptance)
+  - `TASK_RATED.body.decisions[]` = `{event, question, verdict: confirmed | corrected, value}`, `value` required when corrected; `event` is the event holding the record, so a question asked again after a clarification or in a retry is rated separately
+  - gate ids may use the kind `decision` (`gate.decision.<name>`)
+  - `$defs/question_id` matches `decisions.QUESTION_ID`
 
 - [ ] **Step 1: Write the failing examples and cases**
 
@@ -2327,6 +2332,28 @@ with:
     "candidates": [
 ````
 
+Create `spec/examples/valid/event.gate_passed.json`:
+
+````json
+{
+  "id": "evt_01J9ZQ78A8K3M5N7P9Q1R3S5T7",
+  "ts": "2026-09-28T23:10:00Z",
+  "task": "tsk_01J9ZQ7A1BK3M5N7P9Q1R3S5T7",
+  "contract": "ctr_01J9ZQ7F3CK3M5N7P9Q1R3S5T7",
+  "actor": {"kind": "system", "id": "ooat-core"},
+  "type": "GATE_PASSED",
+  "refs": ["art_01J9ZQ6X9EK3M5N7P9Q1R3S5T7@v1"],
+  "body": {
+    "gate": "gate.decision.check_criterion",
+    "criteria": [
+      {"id": "c1", "passed": true, "score": 0.91,
+       "decision": {"question": "c1", "engine": "prv.typesafe.api", "model": "jev-1.13.0", "answer": 0.91, "confidence": 0.91, "threshold": 0.8}}
+    ],
+    "evidence": ["Every competitor row links at least one source."]
+  }
+}
+````
+
 Create `spec/examples/valid/event.task_rated.json`:
 
 ````json
@@ -2342,10 +2369,11 @@ Create `spec/examples/valid/event.task_rated.json`:
     "accepted": true,
     "value_class": "B",
     "note": "Dobrý základ, dva zdroje doplněny ručně.",
-    "decisions": {
-      "a1.1": {"verdict": "confirmed"},
-      "a5": {"verdict": "corrected", "value": "two"}
-    }
+    "decisions": [
+      {"event": "evt_01J9ZQ71A1K3M5N7P9Q1R3S5T7", "question": "a1.1", "verdict": "confirmed"},
+      {"event": "evt_01J9ZQ71A1K3M5N7P9Q1R3S5T7", "question": "a5", "verdict": "corrected", "value": "two"},
+      {"event": "evt_01J9ZQ78A8K3M5N7P9Q1R3S5T7", "question": "c1", "verdict": "confirmed"}
+    ]
   }
 }
 ````
@@ -2371,19 +2399,41 @@ with:
      _delete(["body", "decisions", 0, "model"])),
     ("event_decision_bad_question_id", "event", "event.topology_decided.json",
      _set(["body", "decisions", 0, "question"], "A1 criterion")),
+    ("event_gate_decision_without_engine", "event", "event.gate_passed.json",
+     _delete(["body", "criteria", 0, "decision", "engine"])),
+    ("event_gate_unknown_kind", "event", "event.gate_passed.json", _set(["body", "gate"], "gate.oracle.check")),
     ("event_rating_correction_without_value", "event", "event.task_rated.json",
-     _delete(["body", "decisions", "a5", "value"])),
+     _delete(["body", "decisions", 1, "value"])),
     ("event_rating_unknown_verdict", "event", "event.task_rated.json",
-     _set(["body", "decisions", "a1.1", "verdict"], "maybe")),
+     _set(["body", "decisions", 0, "verdict"], "maybe")),
+    ("event_rating_without_event", "event", "event.task_rated.json", _delete(["body", "decisions", 0, "event"])),
 ]
 ````
 
 - [ ] **Step 2: Run the tests to verify they fail**
 
 Run: `python -m pytest spec -q`
-Expected: `11 failed, 60 passed` — the three examples fail validation (`Additional properties are not allowed ('project' | 'decisions' ...)`) and eight invalid cases fail on "base example must be valid" (the six new ones plus `event_task_required_outside_acknowledgement` and `event_gate_rule_out_of_range`, whose base examples changed).
+Expected: `15 failed, 60 passed` — the four examples fail validation (`Additional properties are not allowed ('project' | 'decisions' ...)`, or the `gate.decision.` id) and eleven invalid cases fail on "base example must be valid" (the nine new ones plus `event_task_required_outside_acknowledgement` and `event_gate_rule_out_of_range`, whose base examples changed).
 
-- [ ] **Step 3: Extend the event schema**
+- [ ] **Step 3: Extend the schemas**
+
+In `spec/schemas/common.schema.json`:
+
+Replace:
+
+````json
+    "provider_id": {"type": "string", "pattern": "^prv\\.[a-z][a-z0-9_-]*\\.[a-z][a-z0-9_]*$"},
+    "gate_id": {"type": "string", "pattern": "^gate\\.(deterministic|critic|hil)\\.[a-z][a-z0-9_]*$"},
+    "semver": {"type": "string", "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$"},
+````
+
+with:
+
+````json
+    "provider_id": {"type": "string", "pattern": "^prv\\.[a-z][a-z0-9_-]*\\.[a-z][a-z0-9_]*$"},
+    "gate_id": {"type": "string", "pattern": "^gate\\.(deterministic|decision|critic|hil)\\.[a-z][a-z0-9_]*$"},
+    "semver": {"type": "string", "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$"},
+````
 
 In `spec/schemas/event.schema.json`:
 
@@ -2451,6 +2501,23 @@ with:
 Replace:
 
 ````json
+              "score": {"$ref": "common.schema.json#/$defs/probability"},
+              "note": {"$ref": "#/$defs/text"}
+            }
+````
+
+with:
+
+````json
+              "score": {"$ref": "common.schema.json#/$defs/probability"},
+              "note": {"$ref": "#/$defs/text"},
+              "decision": {"description": "The typed decision behind this criterion (ADR 0011).", "$ref": "#/$defs/decision_record"}
+            }
+````
+
+Replace:
+
+````json
         "value_class": {"$ref": "common.schema.json#/$defs/value_class"},
         "note": {"$ref": "#/$defs/text"}
       }
@@ -2462,14 +2529,15 @@ with:
         "value_class": {"$ref": "common.schema.json#/$defs/value_class"},
         "note": {"$ref": "#/$defs/text"},
         "decisions": {
-          "description": "The operator's verdict on each decision of the task; feeds the thresholds (ADR 0011).",
-          "type": "object",
-          "propertyNames": {"$ref": "#/$defs/question_id"},
-          "additionalProperties": {
+          "description": "The operator's verdict on decisions of the task; feeds the thresholds (ADR 0011).",
+          "type": "array",
+          "items": {
             "type": "object",
-            "required": ["verdict"],
+            "required": ["event", "question", "verdict"],
             "additionalProperties": false,
             "properties": {
+              "event": {"description": "The event holding the decision record.", "$ref": "common.schema.json#/$defs/event_id"},
+              "question": {"$ref": "#/$defs/question_id"},
               "verdict": {"enum": ["confirmed", "corrected"]},
               "value": {"description": "The right answer; required when corrected.", "$ref": "#/$defs/decision_value"}
             },
@@ -2482,13 +2550,13 @@ with:
 
 - [ ] **Step 4: Run the tests to verify they pass**
 
-Run: `python -m pytest spec -q` → Expected: `71 passed`.
-Run: `python -m pytest -q` → Expected: `470 passed, 4 skipped`.
+Run: `python -m pytest spec -q` → Expected: `75 passed`.
+Run: `python -m pytest -q` → Expected: `474 passed, 4 skipped`.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add spec/schemas/event.schema.json spec/examples/valid/event.task_submitted.json spec/examples/valid/event.topology_decided.json spec/examples/valid/event.task_rated.json spec/tests/test_schemas.py
+git add spec/schemas/event.schema.json spec/schemas/common.schema.json spec/examples/valid/event.task_submitted.json spec/examples/valid/event.topology_decided.json spec/examples/valid/event.gate_passed.json spec/examples/valid/event.task_rated.json spec/tests/test_schemas.py
 git commit -m "feat(spec): project, decision records and rated decisions in events (ADR 0011)"
 ```
 
@@ -2681,7 +2749,7 @@ with:
 
 - [ ] **Step 2: Check the docs match the code**
 
-Run: `python -m pytest -q` → Expected: `470 passed, 4 skipped`.
+Run: `python -m pytest -q` → Expected: `474 passed, 4 skipped`.
 Run: `git grep -n "typesafe-jev" -- README.md docs/description.md .github/workflows/tests.yml` → Expected: the install lines in all three files.
 
 - [ ] **Step 3: Commit**

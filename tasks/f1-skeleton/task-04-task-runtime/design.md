@@ -102,14 +102,19 @@ Deterministic rules, no question: A2 (verified recipe → T1) never fires in F1 
 (value below `v_min`, default USD 15) sends the task to T2 without step B. A6, A8, A9 concern T3+ or R2/R3 actions,
 which 04 does not have.
 
-- **Autonomy (ADR 0011):** an answer is acted on when its confidence reaches the threshold θ of its decision point
-  (A1, A4, A5, A7, A10, acceptance), engine and model version. θ = 0.8 until 5 rated tasks exist for that key. From
-  5 ratings on, θ = max(0.8, θ_computed) where θ_computed is the spec §6 rule (`min θ with error rate ≤ ε`,
-  ε = 5 % for R0) on the rated history, recomputed after every rating; from 20 ratings θ_computed alone applies.
-  The floor stops five samples from pushing θ arbitrarily low (spec §11 warns about n = 5); the computed value can
-  still raise θ above 0.8 from the fifth rating. Ratings of another model version do not count, so a new Jev
-  version starts again at 0.8. Below θ the safer outcome applies (A1: ask; A10: keep the declared class, or the
-  higher one if detected).
+- **Autonomy (ADR 0011):** an answer is acted on when its confidence reaches the threshold θ of its key: decision
+  point (A1, A4, A5, A7, A10, acceptance), engine and model version. Only R0 and R1 tasks act on decisions alone
+  (spec §6); every task in 04 is R0 or R1 because the worker only writes artifacts.
+  - Interim θ while a key has fewer than 5 rated decisions: 0.8 for a decision connector (Jev); 1 for the
+    text-model fallback, so a model's self-stated probability never acts alone before OOAT has rated it (spec §4
+    "not on the vendor's word").
+  - θ_computed: the smallest θ on the grid 0.50, 0.51, …, 0.99 for which the rated decisions with confidence ≥ θ
+    number at least 5 and their error rate is at most ε (R0: 5 %, R1: 2 %). When no θ qualifies, θ_computed = 1
+    and nothing on that key acts alone.
+  - From 5 to 19 ratings: θ = max(0.8, θ_computed), recomputed after every rating. The floor stops five samples
+    from pushing θ low (spec §11 warns about n = 5); θ_computed can still raise it. From 20 ratings: θ = θ_computed.
+  - Ratings of another model version do not count, so a new Jev version starts again at the interim θ.
+  - Below θ the safer outcome applies (A1: ask; A10: keep the declared class, or the higher one if detected).
 - **The data class is never lowered** below the class the operator declared; detection can only raise it.
 - **What reaches Jev before A10 has run.** A10 is routed by the declared class, so undeclared personal data in an
   `internal` task would reach a US processor before detection could raise the class. Two measures:
@@ -129,7 +134,9 @@ which 04 does not have.
   (question id, engine, model version, answer, confidence, threshold used).
 - **Clarification:** T0 by A1 issues a blocking `HIL_REQUEST` with the question; the `HIL_RESPONSE` text is the
   clarification itself (no extra event), the task returns to `SUBMITTED` (ADR 0009) and the Gate runs again with
-  the task text plus every clarification so far.
+  the task text plus every clarification so far. At most 3 clarifying questions per task (spec A1, ADR 0009): if
+  the Gate would ask a fourth, the task closes as `CLOSED_ABSTAINED` with `ABSTAIN_UNABLE` and `missing` naming
+  the criteria that are still not checkable.
 
 ## 5. Task runtime and commands (04c)
 
@@ -148,27 +155,35 @@ which 04 does not have.
 - **Acceptance:** deterministic checks first (non-empty, size limit), then one Jev `noul` per criterion on the
   output ("does the output meet: …?"). An answer below θ is not a pass: per spec §6 the criterion goes to the LLM
   critic (workhorse tier, JSON verdict with reason); a critic that is also unsure counts the criterion as unmet, so
-  an uncertain answer can never produce `DONE`. All met → `RESULT DONE`; otherwise one retry with the failed criteria as
+  an uncertain answer can never produce `DONE`. When any input of the task is `untrusted` (an attached file), the
+  output may carry text written to steer a checker, so a "met" answer never passes alone: the critic confirms it.
+  Each criterion's decision is recorded in its `GATE_PASSED` / `GATE_FAILED` event (`criteria[].decision`), so
+  acceptance decisions are rated and calibrated like Gate decisions. All met → `RESULT DONE`; otherwise one retry with the failed criteria as
   feedback (`max_attempts` 2); still failing → `RESULT PARTIAL` with the unmet criteria as `remaining`, or
   `ABSTAIN_UNABLE` when nothing usable came back. Every check is a `GATE_PASSED` / `GATE_FAILED` event.
 - **Closing:** `TASK_CLOSED` with the four cost parts (contracts, gate, orchestrator = 0 in T2, critic) and the
   final artifact; `ooat task show <id>` prints the timeline, costs, estimate vs. actual and the artifact path.
-- **Rating:** `ooat task rate <id> --accepted yes|no --value A|B|C [--note …]` asks to confirm or correct each Gate
-  decision of the task (one word each); stored in `TASK_RATED` (ADR 0011) and used for the thresholds of §4.
+- **Rating:** `ooat task rate <id> --accepted yes|no --value A|B|C [--note …]` asks to confirm or correct each
+  decision of the task, Gate and acceptance, every Gate run and every attempt (one word each); stored in
+  `TASK_RATED` (ADR 0011) and used for the thresholds of §4.
 - **HIL:** `ooat hil list` (open requests with deadline, recommendation, default) and
   `ooat hil answer <evt> --choice X | --text "…"`. The answering human is the `--operator` named on the command
   line. Local `ooat` commands are trusted as the operator's own hand (whoever can run them can also edit the
   ledger file); remote identity (REST, Telegram) is verified in 05. Only these commands append `actor.kind = hil`
-  events; the worker and the Gate cannot.
+  events; the worker and the Gate cannot. The `--operator` name is self-declared: acceptable while 04 has no R2/R3
+  action, and to be revisited before any R3 gate accepts a local answer (spec §9: named human approver).
 - **Concurrency:** one task runs at a time in the foreground; the SQLite threading model for concurrent requests
   moves to 05 together with the REST intake.
 
 ## 6. Schema changes (ADR 0011)
 
 - `TASK_SUBMITTED.body.project` (optional, `^[a-z0-9][a-z0-9_-]*$`).
-- `TOPOLOGY_DECIDED.body.decisions`: list of `{question, engine, model, answer, confidence, threshold}`.
-- `TASK_RATED.body.decisions`: map question id → `{verdict: confirmed | corrected, value}`; `value` (the correct
-  answer: option, 0/1 or level) is required when corrected, so `choice` corrections keep the right option.
+- Decision record `{question, engine, model, answer, confidence, threshold}` in
+  `TOPOLOGY_DECIDED.body.decisions[]` (Gate) and in `GATE_PASSED` / `GATE_FAILED` `body.criteria[].decision`
+  (acceptance).
+- `TASK_RATED.body.decisions`: list of `{event, question, verdict: confirmed | corrected, value}`. `event` is the
+  event that holds the decision record, so a question asked again after a clarification or in a retry is rated
+  separately; `value` (the correct answer: option, 0/1 or level) is required when corrected.
 - Provider manifests: tier `decision` already exists in `common.schema.json`; connector `kind` stays a code
   attribute.
 

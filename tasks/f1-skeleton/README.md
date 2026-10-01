@@ -23,7 +23,8 @@ written for a sub-project only when the ones it depends on are done, so it can u
 - The ledger does not authenticate actors. In 04 the local `ooat` commands are trusted as the operator's own hand
   (whoever can run them can also edit the ledger file); remote HIL identity (REST, Telegram) is verified in 05.
   Only those paths may append events with `actor.kind = hil`, so a worker can never write a human approval (R3,
-  spec §9).
+  spec §9). The local `--operator` name is self-declared; revisit this trust model before any R3 gate accepts a
+  local answer.
 - 05 (REST intake, up to 5 agent instances) defines the threading model of the SQLite backend
   (`check_same_thread`, WAL, `busy_timeout`) before serving concurrent requests.
 
