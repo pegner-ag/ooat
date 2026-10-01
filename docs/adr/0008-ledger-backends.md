@@ -14,9 +14,10 @@ reference server also runs Microsoft SQL Server, and the owner wants the databas
 4. **First-run choice, no forced installs.** `ooat init` detects what the machine already has (SQLite is
    always available as part of Python; a reachable SQL Server or PostgreSQL is offered when found), asks
    the operator which to use and writes the ledger URL to the configuration. OOAT never installs a database
-   itself; for a missing one it shows how to install it. Only the chosen backend's driver is installed, as an
-   optional extra (`ooat-core[postgresql]`, `ooat-core[mssql]`). Credentials are not written to the
-   configuration; they come from environment variables or the OS credential store.
+   itself; for a missing one it shows how to install it. Only the chosen backend's driver is needed, as an
+   optional extra (`ooat-core[postgresql]`, `ooat-core[mssql]`); `ooat init` prints the exact install command
+   and runs it only after the operator confirms. Credentials are not written to the configuration; they come
+   from environment variables or the OS credential store.
 5. Every backend must pass the shared conformance tests in `core/tests/test_ledger.py`; append-only
    enforcement (triggers, and for server databases an application role with INSERT and SELECT only) is
    tested per backend.
@@ -27,3 +28,5 @@ reference server also runs Microsoft SQL Server, and the owner wants the databas
 - Server backends add a driver dependency each (e.g. psycopg, pyodbc) as optional extras, never as core
   requirements.
 - Creating databases or logins on a shared server is an operator action outside OOAT.
+- Spec §3 (stores) and §7 (`seq` column) are amended by this ADR; the spec text is aligned in its next revision.
+- Decided by the owner on 2026-10-01.

@@ -6,16 +6,17 @@
 
 **Architecture:** `Ledger` owns the spec rules (validate every event against `spec/schemas/event.schema.json`, write an event and the artifacts it produces atomically, map envelopes to rows) and delegates SQL to a `LedgerBackend` chosen by URL (ADR 0008). Artifact bodies live in a SHA-256 addressed `BlobStore`; an artifact becomes visible only when its producing event is appended. Task and contract state are pure functions over events.
 
-**Tech Stack:** Python 3.12+, `jsonschema` + `referencing`, `sqlite3` (stdlib), pytest, hatchling.
+**Tech Stack:** Python 3.12+, `jsonschema`, `referencing`, `sqlite3` (stdlib), pytest, hatchling.
 
 **Spec:** `spec/ooat-specification.md` §2 (entities, outcomes), §3 (non-functional requirements), §7 (event envelope, ledger schema), §8 (task lifecycle); `spec/schemas/`; ADR 0003 and ADR 0008. Task definition: `task.md` next to this plan.
 
 ## Global Constraints
 
-- Python `>=3.12`; runtime dependencies only `jsonschema>=4.23` and `rfc3339-validator>=0.1.4`.
+- Python `>=3.12`; runtime dependencies only `jsonschema>=4.23`, `referencing>=0.30` and `rfc3339-validator>=0.1.4`.
 - Identifiers `tsk_`, `ctr_`, `agt_`, `evt_`, `art_` + 26-character ULID; artifact references `art_<ulid>@v<n>` (ADR 0003).
 - Timestamps ISO 8601 UTC ending in `Z`.
-- Ledger is append-only: no UPDATE or DELETE of events or artifact records, enforced in the database.
+- Ledger is append-only: no UPDATE, DELETE or INSERT OR REPLACE of events or artifact records, enforced in the database.
+- The ledger does not authenticate actors: HIL identity is verified at intake/notifier (sub-projects 04/05), which are the only paths allowed to append `kind: hil` events.
 - Only `ooat-core` writes the ledger; every event is validated against the OOA Spec before it is written.
 - Code, comments, docs and commit messages in English; free-text test data may be Czech.
 - No secrets in code, tests or fixtures.
@@ -23,7 +24,7 @@
 ## Review Focus
 
 1. An event that fails the schema must leave the ledger unchanged and report every violation — `test_invalid_event_is_rejected_and_not_written` (Task 3), `test_every_violation_is_reported` (Task 2).
-2. A failure while writing an event with artifacts must not leave half of it behind — `test_event_and_artifacts_are_written_atomically` (Task 3), `test_artifact_needs_an_existing_event` (Task 3).
+2. A failure while writing an event with artifacts must not leave half of it behind, and a duplicate key must not silently replace a row — `test_event_and_artifacts_are_written_atomically`, `test_artifact_needs_an_existing_event`, the `INSERT OR REPLACE` cases of `test_rows_cannot_be_changed_or_deleted` (Task 3).
 3. A restarted runtime must see the same events in the same order — `test_reopened_ledger_keeps_events_in_order` (Task 3).
 4. A blob changed on disk or a crafted digest must not be served — `test_tampered_blob_is_detected`, `test_path_traversal_digest_is_rejected` (Task 4).
 5. An artifact must not be readable before the event that produces it exists — `test_artifact_is_readable_only_after_its_event` (Task 4).
@@ -83,7 +84,7 @@ description = "OOAT reference runtime: ledger, contracts and Topology Gate."
 readme = "description.md"
 requires-python = ">=3.12"
 license = "Apache-2.0"
-dependencies = ["jsonschema>=4.23", "rfc3339-validator>=0.1.4"]
+dependencies = ["jsonschema>=4.23", "referencing>=0.30", "rfc3339-validator>=0.1.4"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/ooat_core"]
@@ -340,6 +341,7 @@ git commit -m "core: validate documents against the OOA Spec schemas"
 **Interfaces:**
 - Consumes: `validate` (Task 2); `new_id`, `parse_artifact_ref` (Task 1).
 - Produces:
+  - `LedgerIntegrityError(Exception)` — raised by every backend's `insert` on a duplicate key or an artifact without its event; nothing is written.
   - `LedgerBackend` protocol: `insert(event_row: dict, artifact_rows: list[dict]) -> None`, `select_events(task: str | None, types: list[str]) -> list[dict]`, `select_artifact(artifact_id: str, version: int) -> dict | None`, `max_artifact_version(artifact_id: str) -> int`, `close() -> None`.
   - `open_backend(url: str) -> LedgerBackend` — `sqlite:///<path>`; `postgresql://` and `mssql://` raise `NotImplementedError`; anything else `ValueError`.
   - `SqliteBackend(path)`.
@@ -354,6 +356,7 @@ import sqlite3
 
 import pytest
 
+from ooat_core.backends import LedgerIntegrityError
 from ooat_core.backends.sqlite import SqliteBackend
 
 EVENT = {"id": "evt_1", "ts": "2026-10-01T00:00:00Z", "task_id": "tsk_1", "actor_kind": "hil",
@@ -375,6 +378,9 @@ def backend():
     "DELETE FROM event",
     "UPDATE artifact SET data_class = 'public'",
     "DELETE FROM artifact",
+    "INSERT OR REPLACE INTO event (id, ts, actor_kind, actor_id, type, body)"
+    " VALUES ('evt_1', '2026-10-01T00:00:00Z', 'hil', 'x', 'CLAIM', '{}')",
+    "INSERT OR REPLACE INTO artifact VALUES ('art_1', 1, 'summary', 'public', 0, 'x', 'blob:x', 'evt_1')",
 ])
 def test_rows_cannot_be_changed_or_deleted(backend, sql):
     with pytest.raises(sqlite3.DatabaseError, match="append-only"):
@@ -383,7 +389,7 @@ def test_rows_cannot_be_changed_or_deleted(backend, sql):
 
 def test_artifact_needs_an_existing_event(backend):
     orphan = {**ARTIFACT, "id": "art_2", "produced_by_event": "evt_missing"}
-    with pytest.raises(sqlite3.IntegrityError):
+    with pytest.raises(LedgerIntegrityError):
         backend.insert({**EVENT, "id": "evt_2"}, [orphan])
     assert [row["id"] for row in backend.select_events(None, [])] == ["evt_1"]
 ```
@@ -404,9 +410,16 @@ Every backend implements the same small surface and must pass core/tests/test_le
 from typing import Protocol
 
 
+class LedgerIntegrityError(Exception):
+    """A write would duplicate or orphan a ledger row. Backends translate their driver's integrity errors."""
+
+
 class LedgerBackend(Protocol):
     def insert(self, event_row: dict, artifact_rows: list[dict]) -> None:
-        """Insert one event row and its artifact rows in a single transaction."""
+        """Insert one event row and its artifact rows in a single transaction.
+
+        Raises LedgerIntegrityError, writing nothing, on a duplicate id or an artifact without its event.
+        """
 
     def select_events(self, task: str | None, types: list[str]) -> list[dict]:
         """Event rows in append order (ascending seq), optionally filtered."""
@@ -440,6 +453,8 @@ def open_backend(url: str) -> LedgerBackend:
 
 import sqlite3
 from pathlib import Path
+
+from . import LedgerIntegrityError
 
 # Spec §7 event table plus seq (portable append order) and the artifact table.
 # task_id is nullable because ADAPTER_ACKNOWLEDGED has no task (ADR 0003).
@@ -481,6 +496,13 @@ CREATE TABLE IF NOT EXISTS artifact (
   produced_by_event TEXT NOT NULL REFERENCES event (id),
   PRIMARY KEY (id, version)
 );
+-- INSERT OR REPLACE deletes the old row without firing delete triggers, so inserts over an existing key abort too.
+CREATE TRIGGER IF NOT EXISTS event_no_replace BEFORE INSERT ON event
+  WHEN EXISTS (SELECT 1 FROM event WHERE id = NEW.id)
+  BEGIN SELECT RAISE(ABORT, 'ledger is append-only'); END;
+CREATE TRIGGER IF NOT EXISTS artifact_no_replace BEFORE INSERT ON artifact
+  WHEN EXISTS (SELECT 1 FROM artifact WHERE id = NEW.id AND version = NEW.version)
+  BEGIN SELECT RAISE(ABORT, 'ledger is append-only'); END;
 CREATE TRIGGER IF NOT EXISTS event_no_update BEFORE UPDATE ON event
   BEGIN SELECT RAISE(ABORT, 'ledger is append-only'); END;
 CREATE TRIGGER IF NOT EXISTS event_no_delete BEFORE DELETE ON event
@@ -500,10 +522,13 @@ class SqliteBackend:
         self._db.executescript(_DDL)
 
     def insert(self, event_row: dict, artifact_rows: list[dict]) -> None:
-        with self._db:  # commits on success, rolls back on any error
-            self._insert("event", event_row)
-            for row in artifact_rows:
-                self._insert("artifact", row)
+        try:
+            with self._db:  # commits on success, rolls back on any error
+                self._insert("event", event_row)
+                for row in artifact_rows:
+                    self._insert("artifact", row)
+        except sqlite3.IntegrityError as error:
+            raise LedgerIntegrityError(str(error)) from error
 
     def _insert(self, table: str, row: dict) -> None:
         columns = ",".join(row)
@@ -539,13 +564,14 @@ class SqliteBackend:
 - [ ] **Step 4: Run backend tests to verify they pass**
 
 Run: `python -m pytest core/tests/test_sqlite_backend.py -v`
-Expected: 5 passed
+Expected: 7 passed
 
 - [ ] **Step 5: Write the failing ledger test** — `core/tests/test_ledger.py`:
 
 ```python
 import pytest
 
+from ooat_core.backends import LedgerIntegrityError
 from ooat_core.ids import new_id
 from ooat_core.ledger import Ledger, StagedArtifact, new_event
 from ooat_core.validation import SpecValidationError
@@ -618,7 +644,7 @@ def test_staged_artifact_must_be_referenced_by_its_event(ledger):
 def test_event_and_artifacts_are_written_atomically(ledger):
     task, contract, ref = new_id("tsk"), new_id("ctr"), new_id("art") + "@v1"
     first = ledger.append(result(task, contract, [ref]), [staged(ref)])
-    with pytest.raises(Exception):  # the same artifact version again violates the primary key
+    with pytest.raises(LedgerIntegrityError):  # the same artifact version again
         ledger.append(result(task, contract, [ref]), [staged(ref)])
     assert [e["id"] for e in ledger.events()] == [first["id"]]
 

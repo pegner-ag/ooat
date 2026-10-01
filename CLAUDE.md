@@ -17,7 +17,8 @@ Non-technical rationale: `spec/manifesto.md`.
 ## Critical project rules
 - Language (D3): spec, schemas, code, docs, commits in English. Tasks/free text may be in the user's language;
   event types, reason codes and schema keys always English.
-- Current phase: **F0 Foundation**. Do not build F1+ runtime features before F0 deliverables exist.
+- Current phase: **F0 Foundation** (seed tasks open); F1 sub-project 01 (core ledger) runs in parallel on the
+  owner's instruction (2026-10-01). Do not start other F1+ runtime work without the owner.
 - Simplicity over completeness: a measured small catalog beats a large untested one (spec §13).
 - Only `ooat-core` writes to the ledger; ledger is append-only (no UPDATE/DELETE).
 - Secrets (API keys, subscription sessions) live only in the provider gateway — never in catalog, artifacts,
