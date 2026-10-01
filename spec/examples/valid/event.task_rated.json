@@ -1,0 +1,19 @@
+{
+  "id": "evt_01J9ZQ79A9K3M5N7P9Q1R3S5T7",
+  "ts": "2026-09-29T08:00:00Z",
+  "task": "tsk_01J9ZQ7A1BK3M5N7P9Q1R3S5T7",
+  "actor": {"kind": "hil", "id": "operator"},
+  "type": "TASK_RATED",
+  "refs": ["evt_01J9ZQ71A1K3M5N7P9Q1R3S5T7"],
+  "lang": "cs",
+  "body": {
+    "accepted": true,
+    "value_class": "B",
+    "note": "Dobrý základ, dva zdroje doplněny ručně.",
+    "decisions": [
+      {"event": "evt_01J9ZQ71A1K3M5N7P9Q1R3S5T7", "question": "a1.1", "verdict": "confirmed"},
+      {"event": "evt_01J9ZQ71A1K3M5N7P9Q1R3S5T7", "question": "a5", "verdict": "corrected", "value": "two"},
+      {"event": "evt_01J9ZQ78A8K3M5N7P9Q1R3S5T7", "question": "c1", "verdict": "confirmed"}
+    ]
+  }
+}

@@ -8,6 +8,7 @@
   "lang": "cs",
   "body": {
     "goal": "Rešerše 30 konkurentů pro web SME-AI.",
+    "project": "sme-ai",
     "expected_output": "Tabulka konkurentů se zdroji.",
     "acceptance": ["Každý konkurent má alespoň jeden ověřitelný zdroj."],
     "task_type": "research.competitors",

@@ -35,7 +35,7 @@
     },
     "family_id": {"type": "string", "pattern": "^family\\.[a-z][a-z0-9_-]*$"},
     "provider_id": {"type": "string", "pattern": "^prv\\.[a-z][a-z0-9_-]*\\.[a-z][a-z0-9_]*$"},
-    "gate_id": {"type": "string", "pattern": "^gate\\.(deterministic|critic|hil)\\.[a-z][a-z0-9_]*$"},
+    "gate_id": {"type": "string", "pattern": "^gate\\.(deterministic|decision|critic|hil)\\.[a-z][a-z0-9_]*$"},
     "semver": {"type": "string", "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$"},
     "lang": {
       "description": "BCP 47 language tag of free-text fields.",

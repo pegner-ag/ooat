@@ -115,6 +115,7 @@
       "additionalProperties": false,
       "properties": {
         "goal": {"$ref": "#/$defs/text"},
+        "project": {"description": "The operator's project the task belongs to (ADR 0011).", "type": "string", "pattern": "^[a-z0-9][a-z0-9_-]*$"},
         "expected_output": {"$ref": "#/$defs/text"},
         "acceptance": {"type": "array", "items": {"$ref": "#/$defs/text"}},
         "task_type": {"type": "string", "pattern": "^[a-z][a-z0-9_.]*$"},
@@ -168,10 +169,26 @@
           }
         },
         "uncertain": {"description": "EU gap below uncertainty: cheaper candidate picked, task flagged for calibration.", "type": "boolean"},
-        "overrides": {"description": "Set when a human overrides an earlier decision.", "$ref": "common.schema.json#/$defs/event_id"}
+        "overrides": {"description": "Set when a human overrides an earlier decision.", "$ref": "common.schema.json#/$defs/event_id"},
+        "decisions": {"description": "Every typed decision the Gate acted on or set aside (ADR 0011).", "type": "array", "items": {"$ref": "#/$defs/decision_record"}}
       }
     },
     "gate_rule": {"type": "string", "pattern": "^A([1-9]|10)$"},
+    "question_id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9_.-]{0,63}$"},
+    "decision_value": {"description": "noul: probability of yes; choice: the option; score: position on the levels.", "oneOf": [{"type": "number"}, {"type": "string", "minLength": 1}]},
+    "decision_record": {
+      "type": "object",
+      "required": ["question", "engine", "model", "answer", "confidence", "threshold"],
+      "additionalProperties": false,
+      "properties": {
+        "question": {"$ref": "#/$defs/question_id"},
+        "engine": {"description": "The connector that answered; thresholds are calibrated per engine and model.", "$ref": "common.schema.json#/$defs/provider_id"},
+        "model": {"description": "The model version the provider reported.", "type": "string", "minLength": 1},
+        "answer": {"$ref": "#/$defs/decision_value"},
+        "confidence": {"$ref": "common.schema.json#/$defs/probability"},
+        "threshold": {"$ref": "common.schema.json#/$defs/probability"}
+      }
+    },
     "body_contract_issued": {
       "type": "object",
       "required": ["contract"],
@@ -278,7 +295,8 @@
               "id": {"type": "string", "pattern": "^[a-z][a-z0-9_]*$"},
               "passed": {"type": "boolean"},
               "score": {"$ref": "common.schema.json#/$defs/probability"},
-              "note": {"$ref": "#/$defs/text"}
+              "note": {"$ref": "#/$defs/text"},
+              "decision": {"description": "The typed decision behind this criterion (ADR 0011).", "$ref": "#/$defs/decision_record"}
             }
           }
         },
@@ -385,7 +403,24 @@
       "properties": {
         "accepted": {"type": "boolean"},
         "value_class": {"$ref": "common.schema.json#/$defs/value_class"},
-        "note": {"$ref": "#/$defs/text"}
+        "note": {"$ref": "#/$defs/text"},
+        "decisions": {
+          "description": "The operator's verdict on decisions of the task; feeds the thresholds (ADR 0011).",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["event", "question", "verdict"],
+            "additionalProperties": false,
+            "properties": {
+              "event": {"description": "The event holding the decision record.", "$ref": "common.schema.json#/$defs/event_id"},
+              "question": {"$ref": "#/$defs/question_id"},
+              "verdict": {"enum": ["confirmed", "corrected"]},
+              "value": {"description": "The right answer; required when corrected.", "$ref": "#/$defs/decision_value"}
+            },
+            "if": {"properties": {"verdict": {"const": "corrected"}}},
+            "then": {"required": ["value"]}
+          }
+        }
       }
     },
     "body_defect_found": {
