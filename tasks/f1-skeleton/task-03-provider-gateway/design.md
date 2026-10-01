@@ -40,7 +40,7 @@ ooat-core
   connectors/          contract (ModelConnector), Detection, registry (entry points "ooat.connectors")
   gateway/             Gateway: estimate(), call(); routing, budgets, quota, data-class guard, metering
   config.py            ooat.toml (operator preferences; no secrets, no enablement)
-  secrets.py           SecretResolver: env var names from config -> values, redaction helper
+  credentials_env.py   SecretResolver: env var names from config -> values, redaction helper
 adapters/              one distribution per connector; install only what you use
   claude-code/         ooat-adapter-claude-code   subscription_cli   claude -p --output-format json
   codex/               ooat-adapter-codex         subscription_cli   codex exec --json

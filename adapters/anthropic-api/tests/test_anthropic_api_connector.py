@@ -13,7 +13,7 @@ from ooat_core.config import parse_config
 from ooat_core.connectors import ConnectorError, ModelRequest
 from ooat_core.connectors.conformance import check_connector
 from ooat_core.connectors.registry import Registry
-from ooat_core.secrets import SecretResolver
+from ooat_core.credentials_env import SecretResolver
 
 KEY = "sk-ant-test-0123456789"
 MESSAGE = {

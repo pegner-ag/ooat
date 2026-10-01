@@ -2,7 +2,7 @@ import pytest
 
 from ooat_core.config import Config, load_config, parse_config
 from ooat_core.connectors import ConnectorError
-from ooat_core.secrets import REDACTED, SecretResolver
+from ooat_core.credentials_env import REDACTED, SecretResolver
 
 EXAMPLE = """
 [ledger]

@@ -18,7 +18,7 @@ metering). Concrete connectors, Gate, workers and API are not implemented yet.
   and lists broken ones without using them
 - `config.py` — `load_config()` for `ooat.toml`: ledger URL, per-tier pins, connector settings; no secrets,
   no enablement
-- `secrets.py` — `SecretResolver`: values from named environment variables, `redact()`
+- `credentials_env.py` — `SecretResolver`: values from named environment variables, `redact()`
 - `routing.py` — `RoutingPolicy` from `routing.json`: dated prices, optional tier allow-list, data-class policy
 - `gateway.py` — `Gateway.estimate()` / `.call()`: data-class guard, acknowledgement and automation rules from
   the ledger, quota cool-down, pins, cheapest connector, contract budget, cost record with `estimated_usd`;

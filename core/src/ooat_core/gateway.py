@@ -15,7 +15,7 @@ from .connectors import ConnectorError, ModelConnector, ModelRequest, ModelRespo
 from .connectors.registry import Registry
 from .ledger import DATA_CLASSES, Ledger, new_event
 from .routing import Price, RoutingPolicy
-from .secrets import SecretResolver
+from .credentials_env import SecretResolver
 
 ACTOR = {"kind": "system", "id": "ooat-gateway"}
 # Already-paid capacity first when estimated costs tie (ADR 0005).

@@ -11,7 +11,7 @@ from ooat_core.gateway import Gateway, GatewayError
 from ooat_core.ids import new_id
 from ooat_core.ledger import Ledger, new_event
 from ooat_core.routing import RoutingPolicy
-from ooat_core.secrets import SecretResolver
+from ooat_core.credentials_env import SecretResolver
 
 NOW = datetime(2026, 10, 1, 12, 0, tzinfo=timezone.utc)
 HIL = {"kind": "hil", "id": "operator"}
