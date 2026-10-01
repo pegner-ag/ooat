@@ -4,6 +4,7 @@ Every call is estimated, routed (data class, acknowledgement, automation, quota,
 and returned with a cost record for the caller's event. Connector state is read from the ledger (ADR 0010).
 """
 
+import dataclasses
 import math
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -62,6 +63,33 @@ def _utc(text: str) -> datetime:
     return datetime.fromisoformat(text.replace("Z", "+00:00"))
 
 
+def _normalised_utc(text) -> str | None:
+    """An ISO 8601 time with an offset, as UTC "...Z"; None for anything else (connector output is untrusted)."""
+    try:
+        moment = _utc(text)
+    except (TypeError, ValueError, AttributeError):
+        return None
+    if moment.tzinfo is None:
+        return None
+    return moment.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _count(value) -> int | None:
+    return value if type(value) is int and 0 <= value < 2**63 else None
+
+
+class _OwnSecret:
+    """Hands a connector its own secret only (defence in depth; the contract is fixed before connectors exist)."""
+
+    def __init__(self, resolver: SecretResolver, connector_id: str):
+        self._resolver, self._connector_id = resolver, connector_id
+
+    def get(self, connector_id: str) -> str:
+        if connector_id != self._connector_id:
+            raise ConnectorError("UNAVAILABLE", f"{self._connector_id} may only read its own secret")
+        return self._resolver.get(connector_id)
+
+
 class Gateway:
     def __init__(self, ledger: Ledger, registry: Registry, routing: RoutingPolicy, config: Config = Config(),
                  secrets: SecretResolver | None = None,
@@ -84,7 +112,7 @@ class Gateway:
         self._check_budget(request, candidate.estimate)
         connector_id = candidate.connector.manifest["id"]
         try:
-            response = candidate.connector.complete(request, self._secrets)
+            response = candidate.connector.complete(request, _OwnSecret(self._secrets, connector_id))
         except ConnectorError as error:
             if error.code == "QUOTA_EXHAUSTED":
                 self._cool_down(request, candidate.connector, error.resets_at)
@@ -94,6 +122,7 @@ class Gateway:
         except Exception as error:  # a connector bug must surface as a typed, redacted failure
             raise GatewayError("API_ERROR", self._secrets.redact(f"{connector_id}: {type(error).__name__}: {error}"),
                                cost=self._failure_cost(request, candidate, True)) from None
+        response = self._sanitised(response)
         cost = self._cost(request, candidate, response)
         self._warn_budget(request, cost["usd"])
         return GatewayResult(response, cost, candidate.estimate)
@@ -155,12 +184,14 @@ class Gateway:
             return f"{data_class} requires a known processing region"
         if policy.get("require_verified_redaction"):
             return f"{data_class} requires verified redaction, not available yet"
+        if policy.get("require_contract"):  # manifests cannot state a processing agreement yet: fail closed
+            return f"{data_class} requires a provider contract, which cannot be verified yet"
         if data_class in _PERSONAL_OR_HIGHER and self._stale(manifest, acknowledgement):
             return "jurisdiction changed or not verified within 12 months; acknowledge again for personal data"
         if manifest["automation_permitted"] == "not_permitted":
             return "provider terms do not permit automated use"
-        if not acknowledgement["automation_confirmed"]:
-            return "automated use not confirmed by the operator"
+        if acknowledgement.get("automation_confirmed") is not True:  # absent in acknowledgements before ADR 0010
+            return "automated use not confirmed by the operator; acknowledge again"
         if connector_id in cooldowns:
             return f"quota cool-down until {cooldowns[connector_id]}"
         return None
@@ -169,7 +200,7 @@ class Gateway:
         verified_on = manifest["jurisdiction"]["verified_on"]
         if verified_on is None or (self._clock().date() - date.fromisoformat(verified_on)).days > 365:
             return True
-        return jurisdiction_fingerprint(manifest) != acknowledgement["jurisdiction_sha256"]
+        return jurisdiction_fingerprint(manifest) != acknowledgement.get("jurisdiction_sha256")
 
     def _models(self, connector_id: str) -> dict:
         return self._config.connectors.get(connector_id, {}).get("models", {})
@@ -179,7 +210,9 @@ class Gateway:
         model = self._models(connector_id).get(request.tier) or connector.manifest["tiers"].get(request.tier)
         if model is None:
             return f"no model configured for tier {request.tier}", None
-        price = self._routing.price(connector_id, model, self._clock().date())
+        # Only non-API connectors may borrow another adapter's price: the spec §6 prior for subscriptions.
+        price = self._routing.price(connector_id, model, self._clock().date(),
+                                    fallback=connector.manifest["access"] != "api")
         if price is None:
             return f"no price for model {model} in routing.json", None
         tokens_in = math.ceil(len(request.system + request.prompt) / 4)
@@ -235,11 +268,27 @@ class Gateway:
                                           body={"level": "contract", "used_usd": spent + usd, "limit_usd": limit}))
 
     def _cool_down(self, request: ModelRequest, connector: ModelConnector, resets_at: str | None) -> None:
+        resets_at = _normalised_utc(resets_at)
         if resets_at is None:
             hours = (connector.manifest.get("plan") or {}).get("quota_window_hours") or 1
             resets_at = (self._clock() + timedelta(hours=hours)).strftime("%Y-%m-%dT%H:%M:%SZ")
         self._ledger.append(new_event("QUOTA_WARNING", task=request.task, actor=ACTOR, body={
             "adapter": connector.manifest["id"], "utilisation": 1.0, "window_resets_at": resets_at}))
+
+    def _sanitised(self, response: ModelResponse) -> ModelResponse:
+        """Connector output is untrusted: redact secrets, drop usage numbers the ledger could not store."""
+        quota = response.quota_units
+        if not (type(quota) in (int, float) and math.isfinite(quota) and quota >= 0):
+            quota = None
+        tokens = [_count(response.tokens_in), _count(response.tokens_cached), _count(response.tokens_out)]
+        metering = response.metering
+        if any(value is None and raw is not None for value, raw in
+               zip(tokens, (response.tokens_in, response.tokens_cached, response.tokens_out))):
+            tokens, metering = [None, None, None], "estimated"
+        return dataclasses.replace(response, text=self._secrets.redact(str(response.text)),
+                                   model=self._secrets.redact(str(response.model)), tokens_in=tokens[0],
+                                   tokens_cached=tokens[1], tokens_out=tokens[2], quota_units=quota,
+                                   metering=metering)
 
     def _cost(self, request: ModelRequest, candidate: _Candidate, response: ModelResponse) -> dict:
         manifest, estimate = candidate.connector.manifest, candidate.estimate

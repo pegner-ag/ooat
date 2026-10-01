@@ -109,3 +109,50 @@ def test_estimate_survives_the_round_trip():
     ledger.append(event)
     assert ledger.events()[0]["cost"]["estimated_usd"] == 0.25
     ledger.close()
+
+
+
+def _version_1_file(tmp_path, with_column=False, version=1):
+    from ooat_core.backends import sqlite as sqlite_backend
+
+    path = tmp_path / "ledger.sqlite"
+    raw = sqlite3.connect(path)
+    ddl = sqlite_backend._DDL if with_column else sqlite_backend._DDL.replace(
+        "  price_ver     TEXT,\n  estimated_usd REAL\n", "  price_ver     TEXT\n")
+    raw.executescript(ddl)
+    raw.execute(f"PRAGMA user_version = {version}")
+    raw.commit()
+    return path, raw
+
+
+def test_migration_keeps_existing_events(tmp_path):
+    from ooat_core.ids import new_id
+    from ooat_core.ledger import Ledger, new_event
+
+    path, raw = _version_1_file(tmp_path)
+    raw.execute("INSERT INTO event (id, ts, task_id, contract_id, actor_kind, actor_id, role_ver, type, refs, body,"
+                " cost_usd, cost_basis) VALUES ('evt_old', '2026-09-30T10:00:00Z', 'tsk_old', 'ctr_old', 'agent',"
+                " 'agt_old', 'role.general.worker@0.1.0', 'RESULT', '[]', '{\"outcome\": \"DONE\"}', 0.5, 'exact')")
+    raw.commit()
+    raw.close()
+    ledger = Ledger.open(f"sqlite:///{path}")
+    (old,) = ledger.events()
+    assert old["id"] == "evt_old" and old["cost"] == {"usd": 0.5, "basis": "exact"}
+    event = new_event("RESULT", task=new_id("tsk"), contract=new_id("ctr"),
+                      actor={"kind": "agent", "id": new_id("agt"), "role": "role.general.worker@0.1.0"},
+                      body={"outcome": "FAILED", "error": {"code": "UNAVAILABLE", "message": "x"}},
+                      cost={"usd": 0.0, "basis": "estimated", "estimated_usd": 0.25})
+    ledger.append(event)
+    assert ledger.events()[1]["cost"]["estimated_usd"] == 0.25
+    ledger.close()
+
+
+@pytest.mark.parametrize("with_column, version", [(True, 1), (False, 0)])
+def test_migration_checks_the_column_not_the_version_number(tmp_path, with_column, version):
+    path, raw = _version_1_file(tmp_path, with_column=with_column, version=version)
+    raw.close()
+    SqliteBackend(path).close()  # a crash after ALTER (column, still v1) or a pre-versioning file (v0)
+    raw = sqlite3.connect(path)
+    assert "estimated_usd" in [row[1] for row in raw.execute("PRAGMA table_info(event)")]
+    assert raw.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
+    raw.close()

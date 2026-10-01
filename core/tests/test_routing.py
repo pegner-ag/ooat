@@ -55,3 +55,14 @@ def test_tier_allow_list_applies_only_to_listed_tiers():
 def test_invalid_routing_document_is_rejected():
     with pytest.raises(SpecValidationError):
         RoutingPolicy({"version": "0.1.0", "prices": []})
+
+
+
+def test_newest_valid_price_wins():
+    routing = policy([price("prv.fake.api", "m", 3, 15), price("prv.fake.api", "m", 2, 10, valid_from="2026-09-01")])
+    assert routing.price("prv.fake.api", "m", date(2026, 10, 1)) == Price(2, 2, 10)
+
+
+def test_fallback_to_another_adapters_price_can_be_disabled():
+    routing = policy([price("prv.other.api", "m", 1, 5)])
+    assert routing.price("prv.fake.api", "m", date(2026, 10, 1), fallback=False) is None

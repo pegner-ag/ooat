@@ -31,16 +31,17 @@ class RoutingPolicy:
         """A tier listed in routing.json is an allow-list; an unlisted tier accepts any connector (ADR 0010)."""
         return tier not in self._tiers or connector_id in self._tiers[tier]
 
-    def price(self, connector_id: str, model: str, on: date) -> Price | None:
-        """The connector's own price for the model, else any listed price for the same model.
+    def price(self, connector_id: str, model: str, on: date, fallback: bool = True) -> Price | None:
+        """The connector's newest valid price for the model, else (with fallback) the newest of any adapter.
 
         The fallback is the spec §6 prior for subscriptions: the API list price of an equivalent model.
         """
         valid = [p for p in self._prices if p["model"] == model
                  and date.fromisoformat(p["valid_from"]) <= on
                  and ("valid_until" not in p or on <= date.fromisoformat(p["valid_until"]))]
+        valid.sort(key=lambda p: p["valid_from"], reverse=True)  # a newer price supersedes an open-ended older one
         own = [p for p in valid if p["adapter"] == connector_id]
-        chosen = (own or valid or [None])[0]
+        chosen = (own or (valid if fallback else []) or [None])[0]
         if chosen is None:
             return None
         return Price(chosen["usd_per_mtok_in"], chosen.get("usd_per_mtok_cached", chosen["usd_per_mtok_in"]),

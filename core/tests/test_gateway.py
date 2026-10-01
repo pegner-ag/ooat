@@ -376,3 +376,89 @@ def test_failed_calls_count_against_the_budget():
     with pytest.raises(GatewayError) as info:
         setup.gateway.call(setup.request(contract=contract))
     assert info.value.code == "BUDGET"
+
+
+
+# Final review fixes --------------------------------------------------------------------------------------------
+
+def test_contract_requirement_fails_closed():
+    setup = ready(API)
+    setup.gateway = Gateway(setup.ledger, Registry(setup.connectors), RoutingPolicy({
+        "version": "0.1.0", "prices": prices(),
+        "data_class_policy": dict(POLICY, internal={"allowed": True, "require_contract": True})}),
+        setup.config, clock=lambda: NOW)
+    with pytest.raises(GatewayError) as info:
+        setup.gateway.estimate(setup.request("internal"))
+    assert "contract" in info.value.trace[0]
+
+
+def test_legacy_acknowledgement_does_not_break_routing():
+    from ooat_core.ledger import _event_row
+
+    setup = ready(API)
+    legacy = FakeConnector(EXPENSIVE)
+    setup.connectors = (setup.connectors[0], legacy)
+    setup.gateway = setup.make_gateway()
+    old = new_event("ADAPTER_ACKNOWLEDGED", task=None, actor=HIL, body={
+        "adapter": "prv.premium.api", "manifest_version": "1.0.0",
+        "allowed_data_classes": ["internal"], "operator": "Operator"})  # written before ADR 0010
+    setup.ledger.backend.insert(_event_row(old), [])
+    estimate = setup.gateway.estimate(setup.request())
+    assert estimate.connector == "prv.fake.api"
+    with pytest.raises(GatewayError) as info:
+        Gateway(setup.ledger, Registry([legacy]), setup.gateway._routing, setup.config,
+                clock=lambda: NOW).estimate(setup.request())
+    assert "acknowledge again" in info.value.trace[0]
+
+
+@pytest.mark.parametrize("resets_at, expected", [
+    ("soon", "2026-10-01T17:00:00Z"),
+    ("2026-10-01T13:00:00", "2026-10-01T17:00:00Z"),
+    ("2026-10-01T15:00:00+02:00", "2026-10-01T13:00:00Z"),
+])
+def test_connector_reset_time_is_normalised_or_replaced(resets_at, expected):
+    setup = ready(SUBSCRIPTION)
+    setup.connectors[0].error = quota_error(resets_at=resets_at)
+    with pytest.raises(GatewayError) as info:
+        setup.gateway.call(setup.request())
+    assert info.value.code == "QUOTA_EXHAUSTED"
+    assert setup.ledger.events(types=["QUOTA_WARNING"])[0]["body"]["window_resets_at"] == expected
+
+
+def test_response_text_is_redacted():
+    settings = {"prv.fake.api": {"secret_env": "FAKE_KEY"}}
+    connector = FakeConnector(API, text="the key is sk-fake-123456")
+    setup = Setup(connector, settings=settings, environ={"FAKE_KEY": "sk-fake-123456"})
+    setup.acknowledge(connector)
+    result = setup.gateway.call(setup.request())
+    assert "sk-fake-123456" not in result.response.text
+
+
+def test_connector_cannot_read_another_connectors_secret():
+    settings = {"prv.fake.api": {"secret_env": "FAKE_KEY"}, "prv.other.api": {"secret_env": "OTHER_KEY"}}
+    snooping = FakeConnector(API, secret_seen="prv.other.api")
+    setup = Setup(snooping, settings=settings, environ={"FAKE_KEY": "a", "OTHER_KEY": "b"})
+    setup.acknowledge(snooping)
+    with pytest.raises(GatewayError) as info:
+        setup.gateway.call(setup.request())
+    assert info.value.code == "UNAVAILABLE" and "own secret" in info.value.message
+
+
+@pytest.mark.parametrize("usage", [(-5, 0, 10), (1.5, 0, 10), ("100", 0, 10)])
+def test_invalid_usage_from_a_connector_is_metered_as_estimated(usage):
+    connector = FakeConnector(API, usage=usage)
+    setup = Setup(connector)
+    setup.acknowledge(connector)
+    result = setup.gateway.call(setup.request())
+    assert result.cost["basis"] == "estimated" and result.cost["tokens_in"] == result.estimate.tokens_in
+    setup.ledger.append(new_event("RESULT", task=setup.task, contract=new_id("ctr"),
+                                  actor={"kind": "agent", "id": new_id("agt"), "role": "role.general.worker@0.1.0"},
+                                  body={"outcome": "FAILED", "error": {"code": "API_ERROR", "message": "x"}},
+                                  cost=result.cost))
+
+
+def test_api_connector_never_borrows_another_vendors_price():
+    setup = ready(fake_manifest("prv.copycat.api", "api", tiers={"workhorse": "fake-model"}))
+    with pytest.raises(GatewayError) as info:
+        setup.gateway.estimate(setup.request())
+    assert "no price" in info.value.trace[0]

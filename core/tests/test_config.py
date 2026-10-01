@@ -66,3 +66,24 @@ def test_redact_removes_every_configured_secret():
     config = parse_config({"connectors": {"prv.a.api": {"secret_env": "A_KEY"}, "prv.b.api": {"secret_env": "B_KEY"}}})
     secrets = SecretResolver(config, {"A_KEY": "sk-long-secret", "B_KEY": "sk-long"})
     assert secrets.redact("failed with sk-long-secret and sk-long") == f"failed with {REDACTED} and {REDACTED}"
+
+
+
+def test_secret_pasted_as_a_value_is_rejected_without_echoing_it():
+    with pytest.raises(ValueError) as info:
+        parse_config({"connectors": {"prv.a.api": "sk-ant-api03-SECRETVALUE"}})
+    message = str(info.value)
+    assert "SECRETVALUE" not in message and "sk-ant" not in message and "'S'" not in message  # no characters echoed
+
+
+@pytest.mark.parametrize("data", [
+    {"ledger": {"url": "sqlite:///x", "password": "p"}},
+    {"routing": {"pin": {}, "fallback": True}},
+    {"routing": {"pin": {"workhorse": 7}}},
+    {"connectors": {"prv.a.api": {"secret_env": 7}}},
+    {"connectors": {"prv.a.api": {"models": {"workhorse": 7}}}},
+    {"ledger": "sqlite:///x"},
+])
+def test_config_shapes_are_checked(data):
+    with pytest.raises(ValueError):
+        parse_config(data)

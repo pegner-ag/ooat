@@ -85,7 +85,10 @@ class SqliteBackend:
             self._db.close()
             raise ValueError(f"ledger schema version {version} is newer than this code ({SCHEMA_VERSION})")
         self._db.executescript(_DDL)
-        if version == 1:  # version 2 records the gateway's estimate next to the actual cost (ADR 0010)
+        # Version 2 records the gateway's estimate (ADR 0010). Check the column, not the number, so a crash
+        # between ALTER and the version stamp, or a file from before versioning, still migrates cleanly.
+        columns = [row[1] for row in self._db.execute("PRAGMA table_info(event)")]
+        if "estimated_usd" not in columns:
             self._db.execute("ALTER TABLE event ADD COLUMN estimated_usd REAL")
         self._db.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
 
