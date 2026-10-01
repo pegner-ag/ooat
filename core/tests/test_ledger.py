@@ -252,3 +252,11 @@ def test_database_rejects_a_second_response_even_past_the_ledger_check(ledger):
     with pytest.raises(LedgerIntegrityError):
         ledger.backend.insert(_event_row(second), [])
     assert [e["id"] for e in ledger.events(types=["HIL_RESPONSE"])] == [first["id"]]
+
+
+def test_r3_response_needs_an_explicit_choice(ledger):
+    task = new_id("tsk")
+    request = ledger.append(hil_request(task, "R3", "hold"))
+    with pytest.raises(SpecValidationError, match="choice"):
+        ledger.append(new_event("HIL_RESPONSE", task=task, actor=HIL,
+                                body={"request": request["id"], "text": "Asi ano."}))

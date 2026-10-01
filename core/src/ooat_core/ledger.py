@@ -167,6 +167,8 @@ class Ledger:
             elif any(e["type"] == "HIL_RESPONSE" and e["body"]["request"] == body["request"] for e in hil):
                 errors.append(f"$.body.request: {body['request']} is already answered")
             else:
+                if request["body"].get("risk_class") == "R3" and "choice" not in body:
+                    errors.append("$.body.choice: an R3 request needs an explicit choice, not only text")
                 if "choice" in body and body["choice"] not in {o["id"] for o in request["body"]["options"]}:
                     errors.append(f"$.body.choice: {body['choice']!r} is not an option of {body['request']}")
                 # Silence may only ever apply the declared default; for R3 that is the do-not-act option.

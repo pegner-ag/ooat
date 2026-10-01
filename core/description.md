@@ -13,6 +13,9 @@ storage and state projections. Gate, gateway, workers and API are not implemente
 - `artifacts.py` — `ArtifactStore.stage()` / `.read()`; artifacts exist only through their producing event
 - `state.py` — `task_state()`, `contract_state()` computed from events
 
+Schemas are read from `spec/schemas/` in the repository, so the package works from a checkout or an editable
+install (`pip install -e core`); packaging the schemas into the wheel is release work.
+
 ## Architectural patterns
 Event sourcing: state is derived from the ledger, never stored. Ledger rules live in `Ledger`, SQL dialect
 in a backend; every backend passes `tests/test_ledger.py`.
