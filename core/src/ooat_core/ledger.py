@@ -22,7 +22,7 @@ DATA_CLASSES = frozenset({"public", "internal", "client_confidential", "personal
 _COST_COLUMNS = {
     "adapter": "adapter", "tier": "tier", "tokens_in": "tokens_in", "tokens_cached": "tokens_cached",
     "tokens_out": "tokens_out", "quota_units": "quota_units", "usd": "cost_usd", "basis": "cost_basis",
-    "price_ver": "price_ver",
+    "price_ver": "price_ver", "estimated_usd": "estimated_usd",
 }
 
 

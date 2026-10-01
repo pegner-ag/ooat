@@ -76,3 +76,36 @@ def test_ledger_written_by_newer_code_is_refused(tmp_path):
     raw.close()
     with pytest.raises(ValueError, match="newer"):
         SqliteBackend(path)
+
+
+def test_version_1_ledger_is_migrated_to_record_estimates(tmp_path):
+    from ooat_core.backends import sqlite as sqlite_backend
+
+    path = tmp_path / "ledger.sqlite"
+    raw = sqlite3.connect(path)
+    version_1_ddl = sqlite_backend._DDL.replace("  price_ver     TEXT,\n  estimated_usd REAL\n", "  price_ver     TEXT\n")
+    assert version_1_ddl != sqlite_backend._DDL
+    raw.executescript(version_1_ddl)
+    raw.execute("PRAGMA user_version = 1")
+    raw.commit()
+    assert "estimated_usd" not in [row[1] for row in raw.execute("PRAGMA table_info(event)")]
+    raw.close()
+    SqliteBackend(path).close()
+    raw = sqlite3.connect(path)
+    assert "estimated_usd" in [row[1] for row in raw.execute("PRAGMA table_info(event)")]
+    assert raw.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION == 2
+    raw.close()
+
+
+def test_estimate_survives_the_round_trip():
+    from ooat_core.ids import new_id
+    from ooat_core.ledger import Ledger, new_event
+
+    ledger = Ledger.open("sqlite:///:memory:")
+    event = new_event("RESULT", task=new_id("tsk"), contract=new_id("ctr"),
+                      actor={"kind": "agent", "id": new_id("agt"), "role": "role.general.worker@0.1.0"},
+                      body={"outcome": "FAILED", "error": {"code": "UNAVAILABLE", "message": "x"}},
+                      cost={"usd": 0.0, "basis": "estimated", "estimated_usd": 0.25})
+    ledger.append(event)
+    assert ledger.events()[0]["cost"]["estimated_usd"] == 0.25
+    ledger.close()
