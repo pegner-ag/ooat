@@ -305,3 +305,33 @@ def test_a_fallback_answer_without_a_model_version_is_a_charged_api_error():
     with pytest.raises(GatewayError) as info:
         setup.gateway.decide(setup.request())
     assert info.value.code == "API_ERROR" and info.value.cost["adapter"] == "prv.fake.api"
+
+
+# Personal-data pre-scan (design 04 §4, ADR 0011) ----------------------------------------------------------------
+
+def test_personal_data_in_an_internal_state_never_reaches_jev():
+    jev = FakeDecisionConnector(answers=jev_answers)
+    setup = Setup(jev)
+    with pytest.raises(GatewayError) as info:
+        setup.gateway.decide(setup.request(state="Shrň smlouvu, kontakt jan.novak@example.cz."))
+    assert info.value.code == "NOT_PERMITTED" and jev.calls == []
+    assert "pre-scan found personal data: internal raised to personal" in info.value.trace
+
+
+def test_personal_data_in_a_question_is_found_too():
+    jev = FakeDecisionConnector(answers=jev_answers)
+    setup = Setup(jev)
+    question = DecisionQuestion("noul", "Does the output mention +420 777 123 456?")
+    with pytest.raises(GatewayError):
+        setup.gateway.decide(setup.request(questions={"a1.1": question}))
+    assert jev.calls == []
+
+
+def test_a_model_request_with_personal_data_goes_only_where_personal_is_allowed():
+    allowed = economy()
+    setup = Setup(allowed, classes=("public", "internal"))
+    request = ModelRequest(tier="economy", prompt="IBAN CZ65 0800 0000 1920 0014 5399", data_class="internal",
+                           task=setup.task)
+    with pytest.raises(GatewayError, match="NOT_PERMITTED"):
+        setup.gateway.call(request)
+    assert allowed.calls == []

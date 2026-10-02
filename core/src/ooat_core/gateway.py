@@ -3,6 +3,7 @@
 Every call is estimated, routed (data class, acknowledgement, automation, quota, price), budget-checked, metered
 and returned with a cost record for the caller's event. Connector state is read from the ledger (ADR 0010).
 Model requests go to model connectors (`call`), typed decisions to decision connectors (`decide`, ADR 0011).
+Before routing, a local pre-scan raises the data class of any request that carries personal data (pii.py).
 """
 
 import dataclasses
@@ -20,6 +21,7 @@ from .connectors.registry import Registry
 from .decisions import (check_questions, checked_answers, fallback_prompt, merged_answers, parse_fallback,
                         with_reversed_choices)
 from .ledger import DATA_CLASSES, Ledger, new_event
+from .pii import raised_class
 from .routing import Price, RoutingPolicy
 from .credentials_env import SecretResolver
 
@@ -108,6 +110,14 @@ class _OwnSecret:
         if connector_id != self._connector_id:
             raise ConnectorError("UNAVAILABLE", f"{self._connector_id} may only read its own secret")
         return self._resolver.get(connector_id)
+
+
+def _outgoing_text(request: ModelRequest | DecisionRequest) -> str:
+    """Everything a connector would send to the provider, for the personal-data pre-scan."""
+    if isinstance(request, DecisionRequest):
+        questions = {key: dataclasses.asdict(question) for key, question in request.questions.items()}
+        return request.state + "\n" + json.dumps(questions, ensure_ascii=False)
+    return request.system + "\n" + request.prompt
 
 
 def _token_estimate(request: ModelRequest | DecisionRequest) -> tuple[int, int]:
@@ -256,9 +266,15 @@ class Gateway:
     def _route(self, request: ModelRequest | DecisionRequest, kind: str = "model") -> _Candidate:
         if request.data_class not in DATA_CLASSES:
             raise ValueError(f"unknown data class: {request.data_class}")
+        candidates, trace, cooling = [], [], set()
+        # The pre-scan runs before any connector is chosen, so a declared class can never send personal data
+        # where the operator did not allow it. It only raises the class (design 04 §4, ADR 0011).
+        effective = raised_class(request.data_class, _outgoing_text(request))
+        if effective != request.data_class:
+            trace.append(f"pre-scan found personal data: {request.data_class} raised to {effective}")
+            request = dataclasses.replace(request, data_class=effective)
         events = self._ledger.events(types=_STATE_EVENTS)
         acknowledged, cooldowns = acknowledgements(events), self._cooldowns(events)
-        candidates, trace, cooling = [], [], set()
         for connector_id in self._registry.ids(kind):
             connector = self._registry.get(connector_id)
             reason = self._exclusion(connector, request, acknowledged.get(connector_id), cooldowns)
