@@ -56,3 +56,12 @@
 - [ ] The gateway says "not allowed by the manifest" when the real cause is an expired responsibility; name it.
 - [ ] `checked_classes` tests `no_training` by truthiness; use `is True` like the gateway and `may_extend()`.
 - [ ] Spec v0.2 revision (`tasks/spec/`) must carry ADR 0011 and ADR 0012 into spec §2, §4, §6, §8, §9 and §11.
+
+### From the final review of plan 04c (task runtime)
+- [ ] When the critic pauses, record the `RESULT FAILED` under the runtime actor, not the worker agent.
+- [ ] A re-run acceptance check reuses a decision gate already recorded for the same document instead of paying
+      for it again (rating then shows no duplicates).
+- [ ] `ooat task rate`: validate each typed correction at once (a choice option must exist; a yes/no decision
+      takes 0 or 1) instead of failing after the last prompt.
+- [ ] Owner decision pending: repeated provider failures are charged against the contract budget and can end a
+      paused task as `ABSTAIN_BUDGET`.
