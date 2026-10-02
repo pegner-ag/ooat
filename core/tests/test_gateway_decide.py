@@ -335,3 +335,12 @@ def test_a_model_request_with_personal_data_goes_only_where_personal_is_allowed(
     with pytest.raises(GatewayError, match="NOT_PERMITTED"):
         setup.gateway.call(request)
     assert allowed.calls == []
+
+
+def test_personal_data_on_a_new_line_of_a_question_is_found():
+    jev = FakeDecisionConnector(answers=jev_answers)
+    setup = Setup(jev)
+    question = DecisionQuestion("noul", "Was the payment sent to\nCZ65 0800 0000 1920 0014 5399?")
+    with pytest.raises(GatewayError):
+        setup.gateway.decide(setup.request(questions={"a1.1": question}))
+    assert jev.calls == []

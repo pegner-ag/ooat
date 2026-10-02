@@ -114,9 +114,12 @@ class _OwnSecret:
 
 def _outgoing_text(request: ModelRequest | DecisionRequest) -> str:
     """Everything a connector would send to the provider, for the personal-data pre-scan."""
-    if isinstance(request, DecisionRequest):
-        questions = {key: dataclasses.asdict(question) for key, question in request.questions.items()}
-        return request.state + "\n" + json.dumps(questions, ensure_ascii=False)
+    if isinstance(request, DecisionRequest):  # raw texts: a JSON escape turns a newline into "\\n" and hides words
+        parts = [request.state]
+        for question in request.questions.values():
+            criteria = question.criteria or {}
+            parts += [question.instructions, *(criteria.values() if isinstance(criteria, dict) else criteria)]
+        return "\n".join(parts)
     return request.system + "\n" + request.prompt
 
 

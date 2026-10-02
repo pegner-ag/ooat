@@ -19,7 +19,7 @@ from .gateway import Gateway, GatewayError
 from .ledger import Ledger, new_event
 from .pii import higher_class, raised_class
 from .state import task_state
-from .thresholds import GATE_EVENTS, decision_point, threshold
+from .thresholds import GATE_EVENTS, acts_alone, decision_point, threshold
 
 ACTOR = {"kind": "system", "id": "ooat-gate"}
 WORKER_TIER = "workhorse"
@@ -80,6 +80,7 @@ class TaskFacts:
     budget_questions: int  # budget questions the Gate has asked
     narrowed: bool  # the operator narrowed the scope and the Gate has not decided again since
     narrowings: int  # how often the scope was narrowed; each halves the output prior of the estimate
+    decided: list  # decision records of every earlier TOPOLOGY_DECIDED: a raised class survives later rounds
 
 
 def task_value_usd(body: dict, settings: GateSettings) -> float | None:
@@ -116,13 +117,17 @@ def task_facts(events: list[dict], settings: GateSettings = GateSettings()) -> T
     requests = {e["id"]: e for e in events if _offers(e, "clarify") or _offers(e, "raise_budget")}
     texts, narrowings, budget = [], [], body.get("budget_usd", settings.default_budget_usd)
     run_as_is = refused = expired = narrowed = False
+    decided = []
     for event in events:
         if event["type"] == "TOPOLOGY_DECIDED":
             narrowed = False  # the Gate has decided on the narrowed scope
+            decided += event["body"].get("decisions", [])
         if event["type"] != "HIL_RESPONSE" or event["body"]["request"] not in requests:
             continue
         answer, request = event["body"], requests[event["body"]["request"]]
         choice = answer.get("choice")
+        if choice is None and _offers(request, "raise_budget"):
+            choice = "narrow_scope"  # the question asks for the narrowed scope as text
         if choice == "narrow_scope":
             narrowings += [answer["text"]] if answer.get("text") else []
             narrowed = True
@@ -137,23 +142,22 @@ def task_facts(events: list[dict], settings: GateSettings = GateSettings()) -> T
     return TaskFacts(submitted["id"], task_text(body, texts, narrowings), criteria, body.get("data_class", "internal"),
                      body.get("risk_class", DEFAULT_RISK_CLASS), budget, task_value_usd(body, settings),
                      sum(_offers(e, "clarify") for e in events), run_as_is, refused, expired,
-                     sum(_offers(e, "raise_budget") for e in events), narrowed, len(narrowings))
+                     sum(_offers(e, "raise_budget") for e in events), narrowed, len(narrowings), decided)
 
 
-def data_class_for(facts: TaskFacts, records: list[dict]) -> str:
-    """The declared class, raised by the pre-scan and by a confident A10 answer; never lowered (ADR 0011)."""
+def data_class_for(facts: TaskFacts, records: list[dict] = ()) -> str:
+    """The declared class, raised by the pre-scan and by every confident A10 answer of this and earlier rounds;
+    never lowered (ADR 0011)."""
     data_class = raised_class(facts.declared, facts.state)
-    a10 = next((r for r in records if r["question"] == "a10"), None)
-    if a10 is not None and a10["confidence"] >= a10["threshold"]:
-        data_class = higher_class(data_class, a10["answer"])
+    for record in [*facts.decided, *records]:
+        if record["question"] == "a10" and acts_alone(record["confidence"], record["threshold"]):
+            data_class = higher_class(data_class, record["answer"])
     return data_class
 
 
 def gated_data_class(events: list[dict], settings: GateSettings = GateSettings()) -> str:
-    """The data class the Gate decided for the task, recomputed from its last TOPOLOGY_DECIDED."""
-    decided = [e for e in events if e["type"] == "TOPOLOGY_DECIDED"]
-    records = decided[-1]["body"].get("decisions", []) if decided else []
-    return data_class_for(task_facts(events, settings), records)
+    """The data class the Gate decided for the task, recomputed from all its TOPOLOGY_DECIDED events."""
+    return data_class_for(task_facts(events, settings))
 
 
 def unclear_criteria(criteria: list[str], records: list[dict]) -> list[str]:
@@ -162,7 +166,7 @@ def unclear_criteria(criteria: list[str], records: list[dict]) -> list[str]:
     unclear = []
     for number, criterion in enumerate(criteria, 1):
         record = answers.get(f"a1.{number}")
-        if record is None or record["confidence"] < record["threshold"] or record["answer"] < 0.5:
+        if record is None or not acts_alone(record["confidence"], record["threshold"]) or record["answer"] < 0.5:
             unclear.append(criterion)
     return unclear
 
@@ -204,9 +208,9 @@ class Gate:
             return self._close(task, facts.declared, facts.budget_usd, "CANCELLED",
                                "The operator chose not to run the task.")
         criteria, budget, value = facts.criteria, facts.budget_usd, facts.value_usd
-        records, cost = [], None
-        if criteria or facts.run_as_is:  # without any criterion the Gate asks the operator first (design 04 §4)
-            records, cost = self._ask(task, facts.state, criteria, facts.declared, facts.risk_class,
+        records, cost, asked = [], None, bool(criteria or facts.run_as_is)
+        if asked:  # without any criterion the Gate asks the operator first (design 04 §4)
+            records, cost = self._ask(task, facts.state, criteria, data_class_for(facts), facts.risk_class,
                                       ask_a1=not facts.run_as_is)
         data_class = data_class_for(facts, records)
         rules = ["A10"] if data_class != facts.declared else []
@@ -219,6 +223,12 @@ class Gate:
         try:
             estimate = self._estimate(task, facts.state, criteria, data_class, facts.narrowings)
         except GatewayError as error:
+            if error.code != "NOT_PERMITTED":  # a quota cool-down passes: the task stays SUBMITTED for a retry
+                if cost is not None:
+                    self._ledger.append(new_event("DECISION", task=task, actor=ACTOR, cost=cost, body={
+                        "decision": f"Gate stopped before deciding ({error.code}); it runs again later.",
+                        "rationale": error.message[:500] or error.code}))
+                raise
             missing = f"no permitted route for {data_class} data: {error.message}"
             self._decided(task, "T0", rules, [{"topology": "T2", "eliminated_by": rules or ["A10"]}], decided)
             return self._close(task, data_class, budget, "CLOSED_ABSTAINED", "Not run: no permitted route.", missing)
@@ -238,7 +248,9 @@ class Gate:
                            f"checkable: " + ("none were given" if unclear is None else "; ".join(unclear)))
                 return self._close(task, data_class, budget, "CLOSED_ABSTAINED", "Not run: unclear criteria.",
                                    missing, estimate)
-            request = self._hil(task, _clarifying_question(unclear), CLARIFY_OPTIONS, "clarify", facts.submitted)
+            failed = asked and not records  # the decision tier did not answer at all
+            request = self._hil(task, _clarifying_question(unclear, failed), CLARIFY_OPTIONS, "clarify",
+                                facts.submitted)
             return GateOutcome("ask", "T0", data_class, budget, estimate, request=request["id"])
 
         if estimate > budget and facts.budget_questions >= MAX_BUDGET_QUESTIONS:
@@ -339,7 +351,11 @@ class Gate:
                    if e["actor"] == ACTOR)
 
 
-def _clarifying_question(unclear: list[str] | None) -> str:
+def _clarifying_question(unclear: list[str] | None, failed: bool = False) -> str:
+    if failed:
+        listed = "; ".join(f"{n}) {c}" for n, c in enumerate(unclear, 1))
+        return (f"The acceptance criteria could not be checked automatically (the decision tier did not answer): "
+                f"{listed}. Reply with a clarification as text, run it as it is, or do not run it.")
     if unclear is None:
         return ("The task has no acceptance criteria, so nobody could tell when it is done. Reply with the criteria "
                 "as text, run it as it is, or do not run it.")

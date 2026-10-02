@@ -57,3 +57,14 @@ def test_a_long_attachment_is_scanned_in_linear_time(filler):
     started = time.monotonic()
     assert "email" in scan(text)
     assert time.monotonic() - started < 3.0  # about 0.2 s; the quadratic pattern took minutes
+
+
+@pytest.mark.parametrize("code", ["CZ87 G9DP MRCG 629B E2U6 6MR2 6846", "CZ89 BOFB CIXG Y29D B8P5 QA3E 68F7",
+                                  "CZ50 MLZK RUYK QH7D X297 GQ8Z XQYX"])
+def test_reference_codes_that_look_like_an_iban_are_not_flagged(code):
+    assert "iban" not in scan(f"Reference {code}.")
+
+
+@pytest.mark.parametrize("text", ["Pay DE89 3704 0044 0532 0130 00 now.", "Pay NO93 8601 1117 947 KB now."])
+def test_ibans_of_other_countries_are_found_with_a_known_length_or_at_a_word_end(text):
+    assert "iban" in scan(text)

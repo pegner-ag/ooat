@@ -24,16 +24,32 @@ _CARD = re.compile(r"(?<!\d)\d(?:[ -]?\d){12,18}(?!\d)")
 _BIRTH_NUMBER = re.compile(r"(?<!\d)(\d{2})(\d{2})(\d{2})/(\d{3,4})(?!\d)")
 
 
+# IBAN length and whether the account part is digits only, for the countries an operator here meets most.
+# Checking every prefix length instead flagged one random uppercase reference code in seven.
+_IBAN_FORMAT = {"CZ": (24, True), "SK": (24, True), "DE": (22, True), "AT": (20, True), "PL": (28, True),
+                "HU": (28, True), "ES": (24, True), "BE": (16, True), "GB": (22, False), "FR": (27, False),
+                "IT": (27, False), "NL": (18, False), "CH": (21, False)}
+
+
+def _mod97_ok(candidate: str) -> bool:
+    digits = "".join(str(int(char, 36)) for char in candidate[4:] + candidate[:4])
+    return int(digits) % 97 == 1
+
+
 def _iban_ok(text: str) -> bool:
-    """mod 97 on every length from 15 to 34 characters: the pattern is greedy, so a following uppercase word
-    ("... 5399 KB") is part of the match and only a shorter prefix is the IBAN."""
+    """The pattern is greedy, so a following uppercase word ("... 5399 KB") is part of the match. A known country
+    is checked at its own length and format; another only where a word ends inside the match."""
     compact = text.replace(" ", "")
-    for length in range(15, min(len(compact), 34) + 1):
+    known = _IBAN_FORMAT.get(compact[:2])
+    if known is not None:
+        length, numeric = known
         candidate = compact[:length]
-        digits = "".join(str(int(char, 36)) for char in candidate[4:] + candidate[:4])
-        if int(digits) % 97 == 1:
-            return True
-    return False
+        return len(candidate) == length and (not numeric or candidate[4:].isdigit()) and _mod97_ok(candidate)
+    ends, total = [], 0
+    for word in text.split(" "):
+        total += len(word)
+        ends.append(total)
+    return any(15 <= end <= 34 and _mod97_ok(compact[:end]) for end in ends)
 
 
 def _luhn_ok(text: str) -> bool:

@@ -28,6 +28,12 @@ class RatedDecision:
     correct: bool
 
 
+def acts_alone(confidence: float, theta: float) -> bool:
+    """θ = 1 means a decision never acts alone (fallback before rating, R2/R3, no qualifying θ): a self-stated
+    confidence of 1.0 must not pass it."""
+    return theta < 1.0 and confidence >= theta
+
+
 def decision_point(event_type: str, question: str) -> str:
     """Gate questions "a1.2", "a10" belong to their rule; every acceptance criterion to "acceptance"."""
     return "acceptance" if event_type in GATE_EVENTS else question.split(".")[0]

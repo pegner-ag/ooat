@@ -12,7 +12,7 @@ from ooat_core.connectors import ConnectorError, DecisionAnswer, jurisdiction_fi
 from ooat_core.connectors.registry import Registry
 from ooat_core.credentials_env import SecretResolver
 from ooat_core.gate import Gate, GateSettings, gated_data_class, task_facts
-from ooat_core.gateway import Gateway
+from ooat_core.gateway import Gateway, GatewayError
 from ooat_core.ids import new_id
 from ooat_core.ledger import Ledger, new_event
 from ooat_core.routing import RoutingPolicy
@@ -386,3 +386,58 @@ def test_after_three_budget_questions_a_task_still_over_budget_is_closed():
     outcome = setup.gate.run(task)
     assert outcome.closed == "CLOSED_ABSTAINED"
     assert "after 3 budget questions" in setup.events(task, "TASK_CLOSED")[0]["body"]["missing"]
+
+
+# Final review of plan 04b ---------------------------------------------------------------------------------------
+
+def test_a_self_stated_certainty_of_the_fallback_never_acts_alone():
+    sure = json.loads(fallback_reply())
+    sure["a1.1"] = {"p_true": 1.0}
+    setup = GateSetup(jev_error=ConnectorError("UNAVAILABLE", "HTTP 529"), worker_text=json.dumps(sure))
+    assert setup.gate.run(setup.submit()).action == "ask"
+
+
+def test_an_r2_task_never_runs_on_a_decision_alone_even_at_certainty():
+    setup = GateSetup(answers=confident(**{"a1.1": DecisionAnswer("noul", 1.0, 1.0)}))
+    assert setup.gate.run(setup.submit(risk_class="R2")).action == "ask"
+
+
+def test_a_quota_cool_down_leaves_the_task_submitted_instead_of_closing_it():
+    setup = GateSetup()
+    task = setup.submit()
+    setup.ledger.append(new_event("QUOTA_WARNING", task=task, actor=GATE, body={
+        "adapter": "prv.fake.api", "utilisation": 1.0, "window_resets_at": "2026-10-02T13:00:00Z"}))
+    with pytest.raises(GatewayError) as info:
+        setup.gate.run(task)
+    assert info.value.code == "QUOTA_EXHAUSTED"
+    assert task_state(setup.ledger.events(task=task)) == "SUBMITTED" and setup.events(task, "TASK_CLOSED") == []
+    assert [e["cost"]["adapter"] for e in setup.events(task, "DECISION")] == ["prv.fakejev.api"]  # cost kept
+
+
+def test_a_class_raised_in_an_earlier_round_is_kept_and_used_for_the_next_one():
+    setup = GateSetup(answers=confident(**{"a1.1": DecisionAnswer("noul", 0.2, 0.8),
+                                           "a10": DecisionAnswer("choice", "client_confidential", 0.95)}))
+    task = setup.submit()
+    first = setup.gate.run(task)
+    assert (first.action, first.data_class) == ("ask", "client_confidential")
+    answer(setup, task, first.request, text="Stačí 300 slov.")
+    second = setup.gate.run(task)
+    assert second.data_class == "client_confidential" and len(setup.jev.calls) == 1  # round 2 never reached Jev
+    assert gated_data_class(setup.ledger.events(task=task)) == "client_confidential"
+
+
+def test_a_text_only_answer_to_the_budget_question_narrows_the_scope():
+    setup = GateSetup()
+    task = setup.submit(budget_usd=0.001)
+    first = setup.gate.run(task)
+    answer(setup, task, first.request, text="Jen první kapitola.")
+    facts = task_facts(setup.ledger.events(task=task))
+    assert facts.narrowed and facts.criteria == ["Shrnutí má nejvýše 300 slov."]
+    setup.gate.run(task)  # a GATED task with a narrowed scope goes back to the Gate
+
+
+def test_when_the_decision_tier_fails_the_operator_is_told_so():
+    setup = GateSetup(jev_error=ConnectorError("UNAVAILABLE", "HTTP 529"), worker_text="Not JSON.")
+    task = setup.submit()
+    setup.gate.run(task)
+    assert "could not be checked automatically" in setup.events(task, "HIL_REQUEST")[0]["body"]["question"]
