@@ -14,7 +14,8 @@ written for a sub-project only when the ones it depends on are done, so it can u
 | 01c | First-run setup `ooat init`: detect available databases, ask, write config, install only the chosen driver (ADR 0008); later also adapter acknowledgement and notifier choice | 01 | later |
 | 02 | Catalog runtime: load and resolve families/roles/capabilities (linter rules from `spec/README.md`), 15 capabilities, 5 roles, eval sets | 01, task-04 seed tasks | later |
 | 03 | Provider gateway — design: `task-03-provider-gateway/design.md` (ADR 0010). Plans: 03a gateway core + connector contract (done), 03b connectors (Claude Code CLI, Codex CLI, Anthropic API) (done), 03c `ooat connectors` + consequences card (done) | 01 | done |
-| 04 | Task runtime T0–T2 — design: `task-04-task-runtime/design.md` (ADR 0011). Plans: 04a decision layer (Jev connector, `Gateway.decide`), 04b Topology Gate T0–T2 with pre-start estimate, 04c `ooat task` / `ooat hil` commands, worker, acceptance, closing, rating | 01–03 | design |
+| 03e | Operator responsibility for client and personal data (ADR 0012) — design and plan: `task-03e-operator-data-responsibility/` | 03 | plan |
+| 04 | Task runtime T0–T2 — design: `task-04-task-runtime/design.md` (ADR 0011). Plans: 04a decision layer (done), 04b Topology Gate T0–T2 (done), 04c `ooat task` / `ooat hil` commands, worker, acceptance, closing, rating | 01–03, 03e | in progress |
 | 05 | REST intake and Telegram bot (tasks per project), HIL notifier with one-tap answers, dashboard: HIL queue, rating queue, exceptions, tasks | 04 | later |
 | 06 | Baseline: eval runner, 5 seed tasks at T2 with cost, HIL hours and acceptance | 02–05 | later |
 
