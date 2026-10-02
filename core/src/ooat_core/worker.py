@@ -36,6 +36,7 @@ class WorkerOutput:
     abstention: dict | None  # a valid ABSTAIN body: outcome, reason, missing, confidence
     cost: dict
     model: str
+    invalid: str | None = None  # why a reply in the abstention form was malformed (INVALID_OUTPUT)
 
 
 def worker_system() -> str:
@@ -94,10 +95,14 @@ def parse_abstention(text: str) -> dict | None:
 def run_worker(gateway: Gateway, *, task: str, contract: str | None, data_class: str, state: str,
                attachments: list[Attachment] = (), feedback: list[str] = (),
                expected_output_tokens: int = 2000, max_output_tokens: int = 8000) -> WorkerOutput:
-    """One attempt. GatewayError passes to the caller, which records it as a failure or an abstention."""
+    """One attempt. GatewayError passes to the caller, which records it as a failure or an abstention; a
+    malformed abstention comes back as `invalid`, with the cost of the call that produced it."""
     result = gateway.call(ModelRequest(
         tier=WORKER_TIER, prompt=worker_prompt(state, attachments, feedback), system=worker_system(),
         data_class=data_class, max_output_tokens=max_output_tokens, expected_output_tokens=expected_output_tokens,
         task=task, contract=contract))
-    abstention = parse_abstention(result.response.text)
+    try:
+        abstention = parse_abstention(result.response.text)
+    except InvalidOutput as error:
+        return WorkerOutput(None, None, result.cost, result.response.model, invalid=str(error))
     return WorkerOutput(None if abstention else result.response.text, abstention, result.cost, result.response.model)

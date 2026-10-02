@@ -88,3 +88,10 @@ def test_a_malformed_abstention_is_invalid_output(reply):
 @pytest.mark.parametrize("reply", ['{"title": "Report", "rows": []}', "Plain text answer.", "{not json"])
 def test_anything_else_is_a_deliverable(reply):
     assert parse_abstention(reply) is None
+
+
+def test_a_malformed_abstention_from_the_model_comes_back_as_invalid_with_its_cost():
+    gateway, _ = gateway_with('{"abstain": "UNKNOWN", "reason": "r"}')
+    output = run_worker(gateway, task=new_id("tsk"), contract=None, data_class="internal", state="Goal: x")
+    assert output.text is None and output.abstention is None and "confidence" in output.invalid
+    assert output.cost["usd"] > 0
