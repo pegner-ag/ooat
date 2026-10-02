@@ -5,7 +5,8 @@
     {
       "id": "general", "name": "General fallback", "target": 1,
       "capabilities": [
-        {"id": "cap.general.complete_task", "impl": "llm", "summary": "Completes a task end to end as one general-purpose agent (T2 default) when no specialised capability fits."}
+        {"id": "cap.general.complete_task", "impl": "llm", "summary": "Completes a task end to end as one general-purpose agent (T2 default) when no specialised capability fits."},
+        {"id": "cap.general.check_criterion", "impl": "decision", "summary": "Decides whether a delivered output meets one acceptance criterion of its task."}
       ]
     },
     {

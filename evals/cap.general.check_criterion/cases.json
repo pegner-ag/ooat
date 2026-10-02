@@ -1,0 +1,14 @@
+[
+  {
+    "id": "met",
+    "output": "The contract ends on 31 December 2027.",
+    "criterion": "States the date the contract ends.",
+    "expect": 1
+  },
+  {
+    "id": "unmet",
+    "output": "The contract is about a company website.",
+    "criterion": "States the date the contract ends.",
+    "expect": 0
+  }
+]

@@ -1,0 +1,7 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Task text",
+  "description": "Goal, expected output, acceptance criteria and clarifications as the worker sees them.",
+  "type": "string",
+  "minLength": 1
+}

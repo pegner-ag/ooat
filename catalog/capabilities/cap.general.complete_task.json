@@ -1,0 +1,22 @@
+{
+  "id": "cap.general.complete_task",
+  "version": "0.1.0",
+  "status": "draft",
+  "summary": "Completes a task end to end as one general-purpose agent (T2) and delivers it as a Markdown document.",
+  "i18n": {"cs": {"summary": "Splní úlohu jako jeden obecný agent (T2) a odevzdá ji jako dokument v Markdownu."}},
+  "impl": "llm",
+  "input_schema": "schemas/task_text.v1.json",
+  "output_schema": "schemas/markdown_document.v1.json",
+  "acceptance": [
+    {"id": "not_empty", "type": "deterministic", "check": "jsonschema"},
+    {"id": "task_criteria", "type": "decision", "capability": "cap.general.check_criterion"}
+  ],
+  "model_policy": {
+    "tier": "workhorse",
+    "max_attempts": 2,
+    "data_classes_allowed": ["public", "internal", "client_confidential", "personal"]
+  },
+  "cost_card": {"prior": {"tokens_out_p50": 2000, "p_accept": 0.7}, "observed": {"n": 0}},
+  "abstain_conditions": ["The task needs information that is neither in the task nor in its attachments"],
+  "eval_set": "evals/cap.general.complete_task/"
+}
