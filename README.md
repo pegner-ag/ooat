@@ -17,8 +17,8 @@ action waiting for a named human.
 ## Status
 
 Early F1 (spec draft v0.1): JSON Schemas, the starter catalog taxonomy, the ledger, the provider gateway with
-three model connectors and one decision connector (Jev), and the `ooat connectors` command exist; the task
-runtime (Gate, workers) does not yet.
+three model connectors and one decision connector (Jev), the `ooat connectors` command and the Topology Gate
+for T0–T2 exist; workers and the task commands do not yet.
 Decision records are in `docs/adr/`.
 
 ## First steps

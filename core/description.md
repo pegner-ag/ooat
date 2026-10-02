@@ -4,7 +4,8 @@
 Reference runtime of OOAT. Currently: identifiers, OOA Spec validation, the append-only ledger, artifact
 storage, state projections and the provider gateway core (connector contract, registry, routing, budgets,
 metering, typed decisions with a text-model fallback), the connector contract used by the packages in
-`adapters/`, and the `ooat connectors` operator command. Gate, workers and API are not implemented yet.
+`adapters/`, the `ooat connectors` operator command, and the Topology Gate for T0–T2. Workers, task commands
+and API are not implemented yet.
 
 ## Key components
 - `ids.py` — `new_id(prefix)`, ULIDs, `parse_artifact_ref()`
@@ -21,6 +22,16 @@ metering, typed decisions with a text-model fallback), the connector contract us
   the wrong kind) without using them
 - `decisions.py` — `check_questions()`, `with_reversed_choices()` (order-swap check), `checked_answers()`,
   `merged_answers()`, and the text-model fallback `fallback_prompt()` / `parse_fallback()` (ADR 0011)
+- `pii.py` — `scan()` / `raised_class()`: local pre-scan for e-mail, phone, IBAN, card and birth numbers; the
+  gateway runs it before routing and raises the data class to `personal` on a hit, never lowering it
+- `thresholds.py` — `threshold()`: θ per decision point, engine and model version from TASK_RATED verdicts on
+  decision records (interim 0.8 for a decision connector, 1 for the text fallback; floor 0.8 until 20 ratings)
+- `gate.py` — `Gate.run(task)`: step A as one decision batch (A1 per criterion, A4, A5, A7, A10), data class
+  raised by pre-scan and a confident A10, estimate of worker plus acceptance checks, then T0 (closed: no permitted
+  route, not worth its value, unclear after 3 clarifications, over budget after 3 budget questions, unanswered
+  for 48 h, cancelled), a clarifying `HIL_REQUEST` (clarify / run as it is / do not run) or a budget one (raise /
+  narrow the scope / do not run), or T2. `task_facts()` and `gated_data_class()` read the task and the
+  operator's answers back for the runtime
 - `config.py` — `load_config()` for `ooat.toml`: ledger URL, per-tier pins, connector settings; no secrets,
   no enablement
 - `credentials_env.py` — `SecretResolver`: values from named environment variables, `redact()`
@@ -49,5 +60,5 @@ in a backend; every backend passes `tests/test_ledger.py`.
 
 ## Public API
 `Ledger.open(url)`, `new_event()`, `ArtifactStore`, `BlobStore`, `task_state()`, `contract_state()`, `validate()`,
-`Gateway`, `Registry.discover()`, `load_config()`, `load_routing()`, `SecretResolver`, `connector_admin`, the `ooat`
-console script.
+`Gateway`, `Gate`, `task_facts()`, `threshold()`, `Registry.discover()`, `load_config()`, `load_routing()`,
+`SecretResolver`, `connector_admin`, the `ooat` console script.
