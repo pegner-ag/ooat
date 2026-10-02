@@ -21,17 +21,21 @@
   owner 2026-10-02).
 - Every Gate `HIL_REQUEST` is blocking, has a 48-hour deadline and defaults to `do_not_run`. Silence until the
   deadline closes the task as `CLOSED_ABSTAINED` (spec §8); choosing "do not run" closes it as `CANCELLED`.
+- A task without a risk class is judged as R1 (`DEFAULT_RISK_CLASS`), the stricter tolerance, never R0.
 - Value classes A = 1000, B = 300, C = 50 USD; `v_min` = 15 USD (A3); default task budget 2 USD; output prior 2,000 tokens; HIL deadline 48 h — all in `GateSettings`, read from `ooat.toml` in 04c.
 - Every cost the Gate causes is in the ledger: the successful decision call on `TOPOLOGY_DECIDED.cost`, a charged failure on a `DECISION` event.
 - Code, comments and docs in English; lines at most 120 characters.
 
-**Decisions this plan takes within the design** (the owner may overrule them):
+**Decisions this plan takes within the design** (owner confirmed 1–5 and the narrowing option on 2026-10-02; 6–8 follow the review of PR #9):
 1. The budget question offers "raise the budget", "narrow the scope" (answer with text) and "do not run" (owner, 2026-10-02). Narrowing returns the GATED task to the Gate, recorded as an amendment of ADR 0009; the narrowed scope joins the task text but never becomes an acceptance criterion.
 2. A10 is one choice question over the five data classes (the design listed a choice and a noul; the choice already answers both).
 3. Route and value are checked before A1, so a task that can never run, or is not worth its cost, is closed without asking the operator anything.
 4. A task without acceptance criteria asks the operator without calling any model; the operator's clarifications then become its criteria.
 5. The estimate covers one attempt (worker plus acceptance checks); a retry in 04c is not included.
-6. The pre-scan runs in the gateway for every request, also the worker's (review of PR #8: data classes are enforced in the gateway). With the reference `routing.json`, which requires a provider contract for `personal`, a task whose text contains an e-mail address, phone number or similar is therefore closed as "no permitted route" until the operator changes the policy or removes the data.
+6. A missing risk class means R1, not R0 (review of PR #9: the safer outcome applies).
+7. Each narrowing of the scope halves the output prior of the estimate (at least 100 tokens); without that the fixed prior would keep a narrowed task over its budget (review of PR #9).
+8. A phone number without +420/+421 counts only right after a phone word (tel, telefon, mobil, phone, volejte, call): amounts and order numbers have the same nine-digit shape (review of PR #9).
+9. The pre-scan runs in the gateway for every request, also the worker's (review of PR #8: data classes are enforced in the gateway). With the reference `routing.json`, which requires a provider contract for `personal`, a task whose text contains an e-mail address, phone number or similar is therefore closed as "no permitted route" until the operator changes the policy or removes the data.
 
 ## Review Focus
 
@@ -87,6 +91,8 @@ from ooat_core.pii import higher_class, raised_class, scan
     ("Pošlete to na jan.novak@example.cz, děkuji.", "email"),
     ("Volejte +420 777 123 456 po 16. hodině.", "phone"),
     ("Mobil 603123456.", "phone"),
+    ("Tel.: 777 123 456", "phone"),
+    ("Účet CZ65 0800 0000 1920 0014 5399 KB, splatnost 14 dní.", "iban"),
     ("Účet CZ65 0800 0000 1920 0014 5399 u ČS.", "iban"),
     ("Karta 4111 1111 1111 1111, platnost 12/28.", "card"),
     ("Rodné číslo 780123/0008.", "birth_number"),
@@ -99,6 +105,8 @@ def test_personal_data_with_a_checkable_form_is_found(text, kind):
 
 @pytest.mark.parametrize("text", [
     "Obrat 1 200 000 Kč za rok 2025, marže 12 %.",
+    "Rozpočet projektu je 650 000 000 Kč.",
+    "Objednávka 712345678 byla odeslána.",
     "Objednávka 123456789 ze dne 12. 3. 2026.",
     "Účet CZ65 0800 0000 1920 0014 5398 (překlep v kontrolní číslici).",
     "Číslo 4111 1111 1111 1112 neprojde Luhnem.",
@@ -212,18 +220,25 @@ ORDER = ("public", "internal", "client_confidential", "personal", "special_categ
 # an unbounded local part made a 100k-character attachment take minutes.
 _EMAIL = re.compile(r"(?<![A-Za-z0-9._%+-])[A-Za-z0-9._%+-]{1,64}@[A-Za-z0-9-]{1,63}(?:\.[A-Za-z0-9-]{1,63}){0,8}"
                     r"\.[A-Za-z]{2,24}")
-# +420/+421 numbers, or a Czech mobile (6xx/7xx) written as nine digits; amounts like 1 200 000 do not match.
-_PHONE = re.compile(r"(?<![\d+])(?:\+42[01][ ]?\d{3}[ ]?\d{3}[ ]?\d{3}|[67]\d{2}[ ]?\d{3}[ ]?\d{3})(?!\d)")
+# +420/+421 numbers anywhere; nine digits without the prefix only right after a phone word, because amounts
+# ("650 000 000 Kč") and order numbers have the same shape.
+_PHONE = re.compile(r"(?<![\d+])\+42[01][ ]?\d{3}[ ]?\d{3}[ ]?\d{3}(?!\d)"
+                    r"|(?i:\b(?:tel|telefon|mobil|mob|phone|volejte|call)\b)\.?:?[ ]{0,3}\d{3}[ ]?\d{3}[ ]?\d{3}(?!\d)")
 _IBAN = re.compile(r"\b[A-Z]{2}\d{2}(?:[ ]?[A-Z0-9]){11,30}\b")
 _CARD = re.compile(r"(?<!\d)\d(?:[ -]?\d){12,18}(?!\d)")
 _BIRTH_NUMBER = re.compile(r"(?<!\d)(\d{2})(\d{2})(\d{2})/(\d{3,4})(?!\d)")
 
 
 def _iban_ok(text: str) -> bool:
+    """mod 97 on every length from 15 to 34 characters: the pattern is greedy, so a following uppercase word
+    ("... 5399 KB") is part of the match and only a shorter prefix is the IBAN."""
     compact = text.replace(" ", "")
-    rearranged = compact[4:] + compact[:4]
-    digits = "".join(str(int(char, 36)) for char in rearranged)
-    return int(digits) % 97 == 1
+    for length in range(15, min(len(compact), 34) + 1):
+        candidate = compact[:length]
+        digits = "".join(str(int(char, 36)) for char in candidate[4:] + candidate[:4])
+        if int(digits) % 97 == 1:
+            return True
+    return False
 
 
 def _luhn_ok(text: str) -> bool:
@@ -361,8 +376,8 @@ with:
 
 - [ ] **Step 5: Run the tests to verify they pass**
 
-Run: `python -m pytest core/tests/test_pii.py core/tests/test_gateway_decide.py -q` → Expected: `53 passed`.
-Run: `python -m pytest -q` → Expected: `508 passed, 4 skipped`.
+Run: `python -m pytest core/tests/test_pii.py core/tests/test_gateway_decide.py -q` → Expected: `57 passed`.
+Run: `python -m pytest -q` → Expected: `512 passed, 4 skipped`.
 
 - [ ] **Step 6: Commit**
 
@@ -594,7 +609,7 @@ def threshold(events: Iterable[dict], point: str, engine: str, model: str, risk_
 - [ ] **Step 4: Run the tests to verify they pass**
 
 Run: `python -m pytest core/tests/test_thresholds.py -q` → Expected: `11 passed`.
-Run: `python -m pytest -q` → Expected: `519 passed, 4 skipped`.
+Run: `python -m pytest -q` → Expected: `523 passed, 4 skipped`.
 
 - [ ] **Step 5: Commit**
 
@@ -614,11 +629,11 @@ git commit -m "feat(core): confidence thresholds per decision point, engine and 
 **Interfaces:**
 - Consumes: `Gateway.decide()`, `.estimate()`, `.estimate_decision()`, `GatewayError` (04a); `raised_class`, `higher_class` (Task 1); `threshold`, `decision_point`, `GATE_EVENTS` (Task 2); `task_state()`.
 - Produces (in `ooat_core.gate`):
-  - `GateSettings(value_usd={"A": 1000.0, "B": 300.0, "C": 50.0}, v_min_usd=15.0, default_budget_usd=2.0, expected_output_tokens=2000, hil_deadline_hours=24.0)` (Task 4 changes the deadline to 48 h)
+  - `GateSettings(value_usd={"A": 1000.0, "B": 300.0, "C": 50.0}, v_min_usd=15.0, default_budget_usd=2.0, expected_output_tokens=2000, hil_deadline_hours=48.0)`
   - `GateOutcome(action: "run" | "ask" | "closed", topology, data_class, budget_usd, estimate_usd=None, request=None, closed=None)`
   - `Gate(ledger, gateway, settings=GateSettings(), clock=...)`, `Gate.run(task) -> GateOutcome`; `ValueError` unless the task is SUBMITTED
   - `task_text(body, clarifications) -> str` (the text the Gate and the worker see), `gate_questions(criteria) -> dict`, `task_value_usd(body, settings)`
-  - `ACTOR = {"kind": "system", "id": "ooat-gate"}`, `WORKER_TIER = "workhorse"`
+  - `ACTOR = {"kind": "system", "id": "ooat-gate"}`, `WORKER_TIER = "workhorse"`, `DEFAULT_RISK_CLASS = "R1"`
   - Events: `TOPOLOGY_DECIDED` (refs the submission; `cost` of the decision call; `parameters.budget_usd`, `v_usd`; `decisions[]`); a charged decision failure → `DECISION` with its cost; a task that cannot or should not run → `TOPOLOGY_DECIDED` T0 + `TASK_CLOSED` `CLOSED_ABSTAINED` with `missing`.
 
 In this task every criterion the tests use is confidently checkable; Task 4 adds what happens when one is not.
@@ -649,6 +664,7 @@ from ooat_core.state import task_state
 
 NOW = datetime(2026, 10, 2, 12, 0, tzinfo=timezone.utc)
 HIL = {"kind": "hil", "id": "operator"}
+GATE = {"kind": "system", "id": "ooat-gate"}
 POLICY = {
     "public": {"allowed": True}, "internal": {"allowed": True},
     "client_confidential": {"allowed": True, "require_no_training": True},
@@ -807,7 +823,7 @@ def test_charged_decision_failures_are_recorded_with_their_cost():
     setup.gate.run(task)
     failures = setup.events(task, "DECISION")
     assert [f["cost"]["adapter"] for f in failures] == ["prv.fake.api", "prv.fakejev.api"]
-    assert all(f["actor"] == {"kind": "system", "id": "ooat-gate"} for f in failures)
+    assert all(f["actor"] == GATE for f in failures)
 
 
 def test_the_gate_runs_only_on_a_submitted_task():
@@ -816,6 +832,32 @@ def test_the_gate_runs_only_on_a_submitted_task():
     setup.gate.run(task)
     with pytest.raises(ValueError, match="not SUBMITTED"):
         setup.gate.run(task)
+
+
+def rate_history(setup, question, outcomes):
+    """Append rated decisions of the fake decision engine: outcomes is a list of (confidence, correct)."""
+    for confidence, correct in outcomes:
+        task = new_id("tsk")
+        record = {"question": question, "engine": "prv.fakejev.api", "model": "fake-decision-1", "answer": 0.9,
+                  "confidence": confidence, "threshold": 0.8}
+        decided = setup.ledger.append(new_event("TOPOLOGY_DECIDED", task=task, actor=GATE, body={
+            "topology": "T2", "candidates": [{"topology": "T2"}], "rules_applied": [], "decisions": [record]}))
+        verdict = {"event": decided["id"], "question": question, "verdict": "confirmed" if correct else "corrected"}
+        if not correct:
+            verdict["value"] = 0
+        setup.ledger.append(new_event("TASK_RATED", task=task, actor=HIL, body={
+            "accepted": True, "value_class": "C", "decisions": [verdict]}))
+
+
+def test_a_task_without_a_risk_class_is_judged_as_r1_the_safer_default():
+    setup = GateSetup()
+    rate_history(setup, "a4", [(0.9, True)] * 19 + [(0.9, False)])  # 5 % errors: enough for R0, not for R1
+    unspecified, r0 = setup.submit(), setup.submit(risk_class="R0")
+    setup.gate.run(unspecified)
+    setup.gate.run(r0)
+    thresholds = [{r["question"]: r["threshold"] for r in setup.events(t, "TOPOLOGY_DECIDED")[0]["body"]["decisions"]}
+                  for t in (unspecified, r0)]
+    assert thresholds[0]["a4"] == 1.0 and thresholds[1]["a4"] == 0.5
 ````
 
 - [ ] **Step 2: Run the tests to verify they fail**
@@ -849,6 +891,9 @@ from .thresholds import GATE_EVENTS, decision_point, threshold
 
 ACTOR = {"kind": "system", "id": "ooat-gate"}
 WORKER_TIER = "workhorse"
+# A task that does not state its risk class is judged by the stricter R1 tolerance, never the laxer R0
+# (ADR 0011: below θ the safer outcome applies).
+DEFAULT_RISK_CLASS = "R1"
 BRANCHES = {"one": "A single line of work", "two": "Two independent parts", "many": "Three or more independent parts"}
 DATA_CLASSES = {
     "public": "Published or meant for publication",
@@ -865,7 +910,7 @@ class GateSettings:
     v_min_usd: float = 15.0  # rule A3
     default_budget_usd: float = 2.0
     expected_output_tokens: int = 2000  # prior for the worker's deliverable
-    hil_deadline_hours: float = 24.0
+    hil_deadline_hours: float = 48.0  # spec §8: CLARIFYING closes after 48 h without an answer
 
 
 @dataclass(frozen=True)
@@ -933,7 +978,7 @@ class Gate:
         criteria = list(body.get("acceptance", []))
         state = task_text(body, [])
 
-        records, cost = self._ask(task, state, criteria, declared, body.get("risk_class", "R0"))
+        records, cost = self._ask(task, state, criteria, declared, body.get("risk_class", DEFAULT_RISK_CLASS))
         answers = {r["question"]: r for r in records}
         data_class = raised_class(declared, state)
         a10 = answers.get("a10")
@@ -1028,8 +1073,8 @@ class Gate:
 
 - [ ] **Step 4: Run the tests to verify they pass**
 
-Run: `python -m pytest core/tests/test_gate.py -q` → Expected: `10 passed`.
-Run: `python -m pytest -q` → Expected: `529 passed, 4 skipped`.
+Run: `python -m pytest core/tests/test_gate.py -q` → Expected: `11 passed`.
+Run: `python -m pytest -q` → Expected: `534 passed, 4 skipped`.
 
 - [ ] **Step 5: Commit**
 
@@ -1049,17 +1094,32 @@ git commit -m "feat(core): Topology Gate step A with data-class decision and pre
 **Interfaces:**
 - Consumes: Task 3 `Gate`, `GateOutcome`, `task_text`; `HIL_REQUEST` / `HIL_RESPONSE` rules of the ledger; `task_state()` (ADR 0009).
 - Produces (in `ooat_core.gate`):
-  - `TaskFacts(submitted, state, criteria, declared, risk_class, budget_usd, value_usd, clarifications, run_as_is, refused, expired, budget_questions, narrowed)` and `task_facts(events, settings=GateSettings()) -> TaskFacts` — the runtime (04c) reads the granted budget, a refusal and an expiry from it
+  - `TaskFacts(submitted, state, criteria, declared, risk_class, budget_usd, value_usd, clarifications, run_as_is, refused, expired, budget_questions, narrowed, narrowings)` and `task_facts(events, settings=GateSettings()) -> TaskFacts` — the runtime (04c) reads the granted budget, a refusal and an expiry from it
   - `task_text(body, clarifications, narrowings=())`: narrowings appear as "Narrowed scope N: …"
   - `data_class_for(facts, records) -> str`, `gated_data_class(events, settings=GateSettings()) -> str` — the class the Gate decided, recomputed from its last `TOPOLOGY_DECIDED`
   - `unclear_criteria(criteria, records) -> list[str]`, `gate_questions(criteria, ask_a1=True)`, `MAX_CLARIFICATIONS = 3`, `MAX_BUDGET_QUESTIONS = 3`, `CLARIFY_OPTIONS`
-  - Clarifying `HIL_REQUEST`: options `clarify` (answer with text), `run_as_is`, `do_not_run` (`acts: false`); recommended `clarify`. Budget `HIL_REQUEST`: options `raise_budget` (`cost_usd` = the raised budget, 120 % of the estimate), `narrow_scope` (answer with text) and `do_not_run`; recommended `raise_budget`. Both default to `do_not_run`, deadline 48 h.
+  - Clarifying `HIL_REQUEST`: options `clarify` (answer with text), `run_as_is`, `do_not_run` (`acts: false`); recommended `clarify`. Budget `HIL_REQUEST`: options `raise_budget` (`cost_usd` = the raised budget, 120 % of the estimate rounded up to whole cents), `narrow_scope` (answer with text) and `do_not_run`; recommended `raise_budget`. Both default to `do_not_run`, deadline 48 h.
   - `Gate.run(task)` accepts a SUBMITTED task, or a GATED one whose scope the operator narrowed since the last `TOPOLOGY_DECIDED`; anything else is `ValueError`.
   - Order in `run()`: expiry (CLOSED_ABSTAINED) or refusal (CANCELLED) → step A → route and value (close) → A1 (ask, or close after 3) → budget (ask, or close after 3) → T2.
 
 - [ ] **Step 1: Write the failing tests**
 
 In `core/tests/test_gate.py`:
+
+Replace:
+
+````python
+import json
+from datetime import datetime, timezone
+````
+
+with:
+
+````python
+import json
+import math
+from datetime import datetime, timezone
+````
 
 Replace:
 
@@ -1099,13 +1159,13 @@ with:
 Replace:
 
 ````python
-        setup.gate.run(task)
+    assert thresholds[0]["a4"] == 1.0 and thresholds[1]["a4"] == 0.5
 ````
 
 with:
 
 ````python
-        setup.gate.run(task)
+    assert thresholds[0]["a4"] == 1.0 and thresholds[1]["a4"] == 0.5
 
 
 # Asking the operator: clarification (A1, ADR 0009) and budget ----------------------------------------------------
@@ -1213,12 +1273,19 @@ def test_an_estimate_above_the_budget_asks_to_raise_it():
     assert (outcome.action, outcome.topology) == ("ask", "T2") and outcome.estimate_usd > 0.001
     request = setup.events(task, "HIL_REQUEST")[0]["body"]
     raise_option = request["options"][0]
-    assert raise_option["id"] == "raise_budget" and raise_option["cost_usd"] >= outcome.estimate_usd
+    assert raise_option["id"] == "raise_budget"
+    assert raise_option["cost_usd"] == math.ceil(outcome.estimate_usd * 120) / 100  # whole cents, rounded up
     assert request["default_on_silence"] == "do_not_run"
     assert task_state(setup.ledger.events(task=task)) == "HIL_WAIT"
     answer(setup, task, outcome.request, choice="raise_budget")
     events = setup.ledger.events(task=task)
     assert task_state(events) == "GATED" and task_facts(events).budget_usd == raise_option["cost_usd"]
+
+
+def test_the_runtime_sees_the_safer_default_risk_class():
+    setup = GateSetup()
+    task = setup.submit()
+    assert task_facts(setup.ledger.events(task=task)).risk_class == "R1"
 
 
 def test_refusing_the_budget_is_visible_to_the_runtime():
@@ -1246,6 +1313,7 @@ def test_narrowing_the_scope_sends_a_gated_task_back_to_the_gate():
     assert task_state(setup.ledger.events(task=task)) == "GATED"
     second = setup.gate.run(task)
     assert "Narrowed scope 1: Jen první kapitola smlouvy." in setup.jev.calls[1].state
+    assert second.estimate_usd < first.estimate_usd * 0.6  # the output prior is halved
     assert second.action == "ask" and len(setup.events(task, "HIL_REQUEST")) == 2  # still above 0.001 USD
     assert task_facts(setup.ledger.events(task=task)).criteria == ["Shrnutí má nejvýše 300 slov."]
 
@@ -1303,6 +1371,7 @@ the answers are read back from the ledger by task_facts(), which the task runtim
 returns the task to SUBMITTED (ADR 0009); narrowing the scope returns a GATED task to the Gate (ADR 0009 amendment).
 """
 
+import math
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
@@ -1312,8 +1381,8 @@ from typing import Literal
 Replace:
 
 ````python
-ACTOR = {"kind": "system", "id": "ooat-gate"}
-WORKER_TIER = "workhorse"
+# (ADR 0011: below θ the safer outcome applies).
+DEFAULT_RISK_CLASS = "R1"
 BRANCHES = {"one": "A single line of work", "two": "Two independent parts", "many": "Three or more independent parts"}
 DATA_CLASSES = {
 ````
@@ -1321,8 +1390,8 @@ DATA_CLASSES = {
 with:
 
 ````python
-ACTOR = {"kind": "system", "id": "ooat-gate"}
-WORKER_TIER = "workhorse"
+# (ADR 0011: below θ the safer outcome applies).
+DEFAULT_RISK_CLASS = "R1"
 MAX_CLARIFICATIONS = 3  # spec rule A1, ADR 0009
 MAX_BUDGET_QUESTIONS = 3  # narrowing the scope may loop; the same limit as clarifications
 BRANCHES = {"one": "A single line of work", "two": "Two independent parts", "many": "Three or more independent parts"}
@@ -1346,22 +1415,6 @@ CLARIFY_OPTIONS = [
     {"id": "run_as_is", "label": "Run as it is", "cost_usd": 0.0},
     {"id": "do_not_run", "label": "Do not run", "cost_usd": 0.0, "acts": False},
 ]
-````
-
-Replace:
-
-````python
-    default_budget_usd: float = 2.0
-    expected_output_tokens: int = 2000  # prior for the worker's deliverable
-    hil_deadline_hours: float = 24.0
-````
-
-with:
-
-````python
-    default_budget_usd: float = 2.0
-    expected_output_tokens: int = 2000  # prior for the worker's deliverable
-    hil_deadline_hours: float = 48.0  # spec §8: CLARIFYING closes after 48 h without an answer
 ````
 
 Replace:
@@ -1394,6 +1447,7 @@ class TaskFacts:
     expired: bool  # ... by letting it expire (default applied), not by choosing
     budget_questions: int  # budget questions the Gate has asked
     narrowed: bool  # the operator narrowed the scope and the Gate has not decided again since
+    narrowings: int  # how often the scope was narrowed; each halves the output prior of the estimate
 
 
 def task_value_usd(body: dict, settings: GateSettings) -> float | None:
@@ -1477,9 +1531,9 @@ def task_facts(events: list[dict], settings: GateSettings = GateSettings()) -> T
         refused = choice == "do_not_run" or expired
     criteria = list(body.get("acceptance", [])) or texts
     return TaskFacts(submitted["id"], task_text(body, texts, narrowings), criteria, body.get("data_class", "internal"),
-                     body.get("risk_class", "R0"), budget, task_value_usd(body, settings),
+                     body.get("risk_class", DEFAULT_RISK_CLASS), budget, task_value_usd(body, settings),
                      sum(_offers(e, "clarify") for e in events), run_as_is, refused, expired,
-                     sum(_offers(e, "raise_budget") for e in events), narrowed)
+                     sum(_offers(e, "raise_budget") for e in events), narrowed, len(narrowings))
 
 
 def data_class_for(facts: TaskFacts, records: list[dict]) -> str:
@@ -1549,7 +1603,7 @@ Replace:
         criteria = list(body.get("acceptance", []))
         state = task_text(body, [])
 
-        records, cost = self._ask(task, state, criteria, declared, body.get("risk_class", "R0"))
+        records, cost = self._ask(task, state, criteria, declared, body.get("risk_class", DEFAULT_RISK_CLASS))
         answers = {r["question"]: r for r in records}
         data_class = raised_class(declared, state)
         a10 = answers.get("a10")
@@ -1597,7 +1651,7 @@ with:
 
         # A task that can never run, or is not worth its cost, is closed before the operator is asked anything.
         try:
-            estimate = self._estimate(task, facts.state, criteria, data_class)
+            estimate = self._estimate(task, facts.state, criteria, data_class, facts.narrowings)
         except GatewayError as error:
             missing = f"no permitted route for {data_class} data: {error.message}"
 ````
@@ -1646,7 +1700,8 @@ with:
                                estimate)
         self._decided(task, "T2", rules, candidates, decided)
         if estimate > budget:
-            raised = max(round(estimate * 1.2, 2), 0.01)  # a margin over the prior, which is no measurement yet
+            # a margin over the prior, which is no measurement yet; whole cents, never below the estimate
+            raised = max(math.ceil(estimate * 120) / 100, 0.01)
             question = (f"The estimated cost {estimate:.4f} USD exceeds the task budget {budget:.2f} USD. Raise the "
                         f"budget to {raised:.2f} USD, narrow the scope (answer with text), or do not run the task.")
             options = [{"id": "raise_budget", "label": f"Raise the budget to {raised:.2f} USD", "cost_usd": raised},
@@ -1665,6 +1720,34 @@ with:
                                                           task=task))
         except GatewayError as error:
             self._record_failures(task, error)
+````
+
+Replace:
+
+````python
+    # Cost before start -------------------------------------------------------------------------------------------
+
+    def _estimate(self, task, state, criteria, data_class) -> float:
+        """Worker plus acceptance checks, one attempt; raises GatewayError when no route is permitted."""
+        tokens = self._settings.expected_output_tokens
+        worker = self._gateway.estimate(ModelRequest(tier=WORKER_TIER, prompt=state, data_class=data_class,
+                                                     expected_output_tokens=tokens, task=task))
+````
+
+with:
+
+````python
+    # Cost before start -------------------------------------------------------------------------------------------
+
+    def _estimate(self, task, state, criteria, data_class, narrowings=0) -> float:
+        """Worker plus acceptance checks, one attempt; raises GatewayError when no route is permitted.
+
+        The output prior dominates the estimate, so each narrowing of the scope halves it (at least 100 tokens);
+        otherwise narrowing could never bring a task under its budget.
+        """
+        tokens = max(self._settings.expected_output_tokens // 2 ** narrowings, 100)
+        worker = self._gateway.estimate(ModelRequest(tier=WORKER_TIER, prompt=state, data_class=data_class,
+                                                     expected_output_tokens=tokens, task=task))
 ````
 
 Replace:
@@ -1726,8 +1809,8 @@ def _clarifying_question(unclear: list[str] | None) -> str:
 
 - [ ] **Step 4: Run the tests to verify they pass**
 
-Run: `python -m pytest core/tests/test_gate.py -q` → Expected: `26 passed`.
-Run: `python -m pytest -q` → Expected: `545 passed, 4 skipped`.
+Run: `python -m pytest core/tests/test_gate.py -q` → Expected: `28 passed`.
+Run: `python -m pytest -q` → Expected: `551 passed, 4 skipped`.
 
 - [ ] **Step 5: Commit**
 
@@ -1876,12 +1959,14 @@ When the Gate's estimate exceeds the task budget, its question offers "raise the
 "do not run". A `GATED` task whose budget question is answered by narrowing the scope (choice `narrow_scope` with
 text) returns to the Topology Gate, which decides again on the task text plus the narrowed scope. The task state
 stays `GATED` until the new `TOPOLOGY_DECIDED`; the Gate asks at most 3 budget questions per task, then closes it
-as `CLOSED_ABSTAINED`. Implemented in `core/src/ooat_core/gate.py` (`task_facts().narrowed`).
+as `CLOSED_ABSTAINED`. Each narrowing halves the output prior of the Gate's estimate, so narrowing can bring a
+task under its budget. Implemented in `core/src/ooat_core/gate.py` (`task_facts().narrowed`). Spec §8 (`GATED`
+row) is aligned in the v0.2 revision.
 ````
 
 - [ ] **Step 2: Check the docs match the code**
 
-Run: `python -m pytest -q` → Expected: `545 passed, 4 skipped`.
+Run: `python -m pytest -q` → Expected: `551 passed, 4 skipped`.
 Run: `git grep -n "Topology Gate for T0" -- README.md docs/description.md core/description.md` → Expected: one line in each file.
 
 - [ ] **Step 3: Commit**
