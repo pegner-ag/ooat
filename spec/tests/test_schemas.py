@@ -144,6 +144,13 @@ INVALID = [
     ("event_rating_unknown_verdict", "event", "event.task_rated.json",
      _set(["body", "decisions", 0, "verdict"], "maybe")),
     ("event_rating_without_event", "event", "event.task_rated.json", _delete(["body", "decisions", 0, "event"])),
+    # ADR 0012
+    ("event_responsibility_without_date", "event", "event.adapter_acknowledged_responsibility.json",
+     _delete(["body", "responsibility", "confirmed_on"])),
+    ("event_responsibility_region_not_a_code", "event", "event.adapter_acknowledged_responsibility.json",
+     _set(["body", "responsibility", "processing_regions"], ["Europe"])),
+    ("event_responsibility_training_stated_false", "event", "event.adapter_acknowledged_responsibility.json",
+     _set(["body", "responsibility", "no_training"], False)),
 ]
 
 

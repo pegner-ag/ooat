@@ -27,17 +27,18 @@ and API are not implemented yet.
 - `thresholds.py` — `threshold()`: θ per decision point, engine and model version from TASK_RATED verdicts on
   decision records (interim 0.8 for a decision connector, 1 for the text fallback; floor 0.8 until 20 ratings)
 - `gate.py` — `Gate.run(task)`: step A as one decision batch (A1 per criterion, A4, A5, A7, A10), data class
-  raised by pre-scan and a confident A10, estimate of worker plus acceptance checks, then T0 (closed: no permitted
+  raised by pre-scan and by any A10 answer, estimate of worker plus acceptance checks, then T0 (closed: no permitted
   route, not worth its value, unclear after 3 clarifications, over budget after 3 budget questions, unanswered
   for 48 h, cancelled), a clarifying `HIL_REQUEST` (clarify / run as it is / do not run) or a budget one (raise /
   narrow the scope / do not run), or T2. `task_facts()` and `gated_data_class()` read the task and the
   operator's answers back for the runtime
-- `config.py` — `load_config()` for `ooat.toml`: ledger URL, per-tier pins, connector settings; no secrets,
-  no enablement
+- `config.py` — `load_config()` for `ooat.toml`: ledger URL, per-tier pins, connector settings, and the
+  `[policy]` limits `blocked_countries` and `personal_data_regions` (ADR 0012); no secrets, no enablement
 - `credentials_env.py` — `SecretResolver`: values from named environment variables, `redact()`
 - `routing.py` — `RoutingPolicy` from `routing.json`: dated prices, optional tier allow-list, data-class policy
-- `gateway.py` — `Gateway.estimate()` / `.call()`: data-class guard, acknowledgement and automation rules from
-  the ledger, quota cool-down, pins, cheapest connector, contract budget, cost record with `estimated_usd`;
+- `gateway.py` — `Gateway.estimate()` / `.call()`: data-class guard (the operator's responsibility stands in
+  for a processing agreement, a region and no training; `[policy]` blocks countries and limits personal data to
+  regions), acknowledgement and automation rules from the ledger, quota cool-down, pins, cheapest connector, contract budget, cost record with `estimated_usd`;
   passes the routed model to the connector in `ModelRequest.model`. `Gateway.estimate_decision()` /
   `.decide()`: the same rules for decision connectors; every choice is asked twice with reversed options,
   answers are checked before use, and when no decision connector can answer, the `economy` text tier answers the
@@ -48,7 +49,10 @@ and API are not implemented yet.
   `jurisdiction_stale()` in `connectors/__init__.py` is the spec §9 rule 2 check shared by gateway and CLI
 - `connector_admin.py` — `connector_statuses()`, `consequences_card()`, `acknowledge()`, `disable()`: operator
   actions; state changes are `ADAPTER_ACKNOWLEDGED` / `ADAPTER_DISABLED` events by a named human;
-  `acknowledgements()` is the connector state the gateway routes on
+  `acknowledgements()` is the connector state the gateway routes on. `acknowledge(..., responsibility, today)`
+  records the operator's responsibility for client or personal data, which may carry those classes beyond the
+  manifest when training is off; `responsibility_in_force()` (12 months) and `blocked_by_policy()` serve the
+  gateway, the card and the listing
 - `operator_cli.py` — the `ooat` command: `ooat connectors list | show | enable | disable`
 
 Schemas are read from `spec/schemas/` in the repository, so the package works from a checkout or an editable

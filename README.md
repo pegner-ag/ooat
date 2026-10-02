@@ -28,6 +28,10 @@ Create `ooat.toml` in your working folder (a relative ledger path resolves next 
 ```toml
 [ledger]
 url = "sqlite:///ooat-ledger.sqlite"
+
+[policy]                          # optional limits, enforced by the gateway
+blocked_countries = ["CN"]        # no connector whose vendor or model comes from these countries
+personal_data_regions = ["eu"]    # personal data only to connectors processing in these regions
 ```
 
 ```sh
@@ -37,6 +41,11 @@ ooat connectors list                      # installed connectors and their state
 ooat connectors show prv.anthropic.api    # connection consequences card
 ooat connectors enable prv.anthropic.api --operator "Your Name"
 ```
+
+Choosing `client_confidential` or `personal` when enabling a connector asks you to take responsibility for that
+data (legal basis, processing agreement, where it is processed). OOAT records it with your name and date and asks
+again after 12 months. Text with an e-mail address, phone number or similar is treated as personal data, so allow
+`personal` on at least one connector if your tasks contain such details.
 
 `enable` and `disable` need an `ooat.toml`, so state always lands in the same ledger. Settings live in
 `ooat.toml` (ledger URL, per-tier pins, connector settings; secrets only as environment

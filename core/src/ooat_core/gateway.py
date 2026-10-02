@@ -14,7 +14,8 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
 from .config import Config
-from .connector_admin import acknowledgements
+from .connector_admin import (RESPONSIBLE_CLASSES, acknowledgements, blocked_by_policy, may_extend, provider_trains,
+                              responsibility_in_force)
 from .connectors import (ConnectorError, DecisionAnswer, DecisionRequest, ModelConnector, ModelRequest, ModelResponse,
                          jurisdiction_stale)
 from .connectors.registry import Registry
@@ -312,25 +313,47 @@ class Gateway:
             return "manual relay needs a human in the loop (sub-project 05)"
         if acknowledgement is None:
             return "not acknowledged by the operator (or disabled)"
+        blocked = blocked_by_policy(manifest, self._config)
+        if blocked:
+            return blocked
         if data_class == "special_category":
             return "special_category needs verified redaction, not available yet"
         policy = self._routing.data_class_policy[data_class]
         if not policy["allowed"]:
             return f"{data_class} is not allowed by the routing policy"
+        # The operator's responsibility (ADR 0012) stands in for what a manifest cannot state: the processing
+        # agreement, the region under it, and that training is off for this account.
+        responsibility = responsibility_in_force(acknowledgement, self._clock().date())
+        responsible = responsibility is not None and data_class in RESPONSIBLE_CLASSES
         if data_class not in manifest["data_policy"]["allowed_data_classes"]:
-            return f"{data_class} is not allowed by the manifest"
+            if not responsible:
+                return f"{data_class} is not allowed by the manifest"
+            if not may_extend(manifest, responsibility):  # a hard rule, whatever the routing policy says
+                return (f"{data_class} cannot go beyond the manifest: the provider trains on inputs or training "
+                        "is not off")
         if data_class not in acknowledgement["allowed_data_classes"]:
             return f"{data_class} was not acknowledged by the operator"
-        if policy.get("require_no_training") and manifest["data_policy"]["training_on_inputs"] is not False:
+        trains = provider_trains(manifest)
+        no_training = trains is False or (responsible and trains is None and responsibility.get("no_training") is True)
+        if policy.get("require_no_training") and not no_training:
             return f"{data_class} requires a connector that does not train on inputs"
-        if policy.get("require_known_region") and not manifest["jurisdiction"]["processing_regions"]:
+        regions = manifest["jurisdiction"]["processing_regions"] or (
+            responsibility.get("processing_regions") if responsible else None)
+        if policy.get("require_known_region") and not regions:
             return f"{data_class} requires a known processing region"
         if policy.get("require_verified_redaction"):
             return f"{data_class} requires verified redaction, not available yet"
-        if policy.get("require_contract"):  # manifests cannot state a processing agreement yet: fail closed
-            return f"{data_class} requires a provider contract, which cannot be verified yet"
-        if data_class in _PERSONAL_OR_HIGHER and jurisdiction_stale(manifest, acknowledgement, self._clock().date()):
-            return "jurisdiction changed or not verified within 12 months; acknowledge again for personal data"
+        if policy.get("require_contract") and not responsible:  # nothing else can vouch for an agreement
+            return f"{data_class} requires a provider contract: take responsibility for it when enabling the connector"
+        allowed_regions = self._config.personal_data_regions
+        if data_class in _PERSONAL_OR_HIGHER and allowed_regions is not None and (not regions or not all(
+                any(r == a or r.startswith(f"{a}-") for a in allowed_regions) for r in regions)):
+            return (f"your policy allows personal data only in {sorted(allowed_regions)}; "
+                    f"this connector processes in {regions or 'unknown regions'}")
+        # The responsibility holds "until the facts on the card change", so client data checks them too.
+        if (data_class in _PERSONAL_OR_HIGHER or responsible) and jurisdiction_stale(
+                manifest, acknowledgement, self._clock().date(), responsible):
+            return f"jurisdiction changed or not verified within 12 months; acknowledge again for {data_class} data"
         if manifest["automation_permitted"] == "not_permitted":
             return "provider terms do not permit automated use"
         if acknowledgement.get("automation_confirmed") is not True:  # absent in acknowledgements before ADR 0010

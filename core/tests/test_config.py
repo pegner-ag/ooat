@@ -30,6 +30,29 @@ def test_example_config_loads(tmp_path):
     assert config.connectors["prv.anthropic.subscription_cli"]["models"] == {"workhorse": "claude-sonnet-5-5"}
 
 
+def test_policy_limits_are_read():
+    config = parse_config({"policy": {"blocked_countries": ["CN"], "personal_data_regions": ["eu"]}})
+    assert config.blocked_countries == {"CN"} and config.personal_data_regions == {"eu"}
+    assert parse_config({}).personal_data_regions is None  # no limit unless the operator sets one
+
+
+@pytest.mark.parametrize("policy, message", [
+    ({"blocked_countries": ["china"]}, "two-letter"),
+    ({"blocked_countries": "CN"}, "two-letter"),
+    ({"personal_data_regions": ["Europe"]}, "region codes"),
+    ({"allow_everything": True}, "unknown settings"),
+])
+def test_policy_shapes_are_checked(policy, message):
+    with pytest.raises(ValueError, match=message):
+        parse_config({"policy": policy})
+
+
+def test_a_relative_ledger_keeps_the_policy(tmp_path):
+    (tmp_path / "ooat.toml").write_text('[ledger]\nurl = "sqlite:///l.sqlite"\n[policy]\nblocked_countries = ["CN"]\n',
+                                        encoding="utf-8")
+    assert load_config(tmp_path / "ooat.toml").blocked_countries == {"CN"}
+
+
 def test_empty_config_has_defaults():
     assert parse_config({}) == Config()
 

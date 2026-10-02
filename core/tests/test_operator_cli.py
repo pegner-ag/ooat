@@ -2,7 +2,7 @@ import io
 from datetime import date
 
 import pytest
-from connector_fakes import FakeConnector, fake_manifest
+from connector_fakes import JURISDICTION, FakeConnector, fake_manifest
 
 from ooat_core.operator_cli import main
 from ooat_core.connectors.registry import Registry
@@ -243,3 +243,66 @@ def test_enabled_through_the_cli_the_gateway_routes_to_it(config):
         assert gateway.call(request).cost["adapter"] == "prv.fake.api"
     finally:
         ledger.close()
+
+
+# Operator responsibility for client and personal data (ADR 0012) -----------------------------------------------
+
+def subscription(origin="US"):
+    manifest = fake_manifest("prv.fake.subscription_cli", "subscription_cli", allowed=("public", "internal"),
+                             jurisdiction=dict(JURISDICTION, processing_regions=None, verified_on=None,
+                                               model_origin_country=origin))
+    manifest["data_policy"]["training_on_inputs"] = None
+    return FakeConnector(manifest)
+
+
+def test_choosing_personal_data_asks_for_responsibility_and_records_it(config):
+    code, out = run(config, "connectors", "enable", "prv.fake.api", "--operator", "Martin",
+                    answers="public,internal,personal\nyes\nyes\nprv.fake.api\n")
+    assert code == 0 and "Do you take this responsibility?" in out and "You took responsibility" in out
+    assert state_events(config)[0]["body"]["responsibility"] == {"confirmed_on": "2026-10-01"}
+
+
+def test_declining_responsibility_changes_nothing(config):
+    code, out = run(config, "connectors", "enable", "prv.fake.api", "--operator", "Martin",
+                    answers="personal\nno\n")
+    assert code == 1 and "need your responsibility" in out and state_events(config) == []
+
+
+def test_a_subscription_gets_personal_data_with_regions_and_training_stated(config):
+    flags = ["--classes", "public,internal,personal", "--responsibility", "yes", "--regions", "us,eu",
+             "--no-training", "yes", "--automation", "yes", "--confirm", "prv.fake.subscription_cli"]
+    code, _ = run(config, "connectors", "enable", "prv.fake.subscription_cli", "--operator", "Martin", *flags,
+                  connectors=[subscription()])
+    assert code == 0
+    assert state_events(config)[0]["body"]["responsibility"] == {
+        "confirmed_on": "2026-10-01", "processing_regions": ["eu", "us"], "no_training": True}
+
+
+@pytest.mark.parametrize("flags, message", [
+    (["--regions", "us", "--no-training", "no"], "training on your inputs is switched off"),
+    (["--regions", "Europe", "--no-training", "yes"], "regions are codes"),
+])
+def test_a_subscription_without_the_needed_statements_is_refused(config, flags, message):
+    code, out = run(config, "connectors", "enable", "prv.fake.subscription_cli", "--operator", "Martin",
+                    "--classes", "personal", "--responsibility", "yes", *flags, connectors=[subscription()])
+    assert code == 1 and message in out and state_events(config) == []
+
+
+def test_list_and_show_reflect_the_policy_and_the_responsibility(config):
+    path, url = config
+    path.write_text(f'[ledger]\nurl = "{url}"\n[policy]\nblocked_countries = ["CN"]\n', encoding="utf-8")
+    connector = subscription(origin="CN")
+    run(config, "connectors", "enable", "prv.fake.subscription_cli", "--operator", "Martin", "--classes", "personal",
+        "--responsibility", "yes", "--regions", "us", "--no-training", "yes", "--automation", "yes",
+        "--confirm", "prv.fake.subscription_cli", connectors=[connector])
+    _, listing = run(config, "connectors", "list", connectors=[connector])
+    assert "blocked by your policy: model origin CN" in listing and "holds until 2027-10-01" in listing
+    _, card = run(config, "connectors", "show", "prv.fake.subscription_cli", connectors=[connector])
+    assert "Your policy:            blocked by your policy: model origin CN" in card
+
+
+def test_a_responsibility_without_any_known_region_is_refused(config):
+    code, out = run(config, "connectors", "enable", "prv.fake.subscription_cli", "--operator", "Martin",
+                    "--classes", "personal", "--responsibility", "yes", "--regions", "", "--no-training", "yes",
+                    connectors=[subscription()])
+    assert code == 1 and "need a known processing region" in out and state_events(config) == []

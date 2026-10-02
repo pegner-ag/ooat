@@ -1,6 +1,7 @@
 """`ooat` command line: operator commands. Currently `ooat connectors list | show | enable | disable`."""
 
 import argparse
+import re
 import sqlite3
 import sys
 import tomllib
@@ -14,6 +15,13 @@ from .ledger import Ledger
 
 REFUSED = 1
 CANCELLED = 130
+_REGION = re.compile(r"^[a-z]{2}(-[a-z0-9-]+)?$")
+RESPONSIBILITY = """
+Client or personal data on this connector (ADR 0012). By answering yes you state that you have a legal basis
+for it, a processing agreement with the provider that covers it, and that you know where the provider processes
+it. OOAT records your name and today's date; the statement holds for 12 months or until the facts on the card
+change. OOAT does not check it: you answer for it.
+"""
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -32,6 +40,12 @@ def _parser() -> argparse.ArgumentParser:
     enable.add_argument("--automation", choices=["yes", "no"],
                         help="whether your plan's terms allow unattended use (asked when omitted)")
     enable.add_argument("--confirm", help="the connector id, typed again to confirm (asked when omitted)")
+    enable.add_argument("--responsibility", choices=["yes", "no"],
+                        help="take responsibility for client or personal data (asked when those classes are chosen)")
+    enable.add_argument("--regions", help="comma-separated regions under your agreement, e.g. eu (asked when the "
+                                          "manifest does not know them)")
+    enable.add_argument("--no-training", dest="no_training", choices=["yes", "no"],
+                        help="training on your inputs is switched off for this account (asked when unknown)")
     disable = actions.add_parser("disable", help="disable a connector")
     disable.add_argument("connector")
     disable.add_argument("--operator", required=True)
@@ -72,7 +86,7 @@ def _run(args, stdin, stdout, registry, today) -> int:
         if connector is None:
             stdout.write(f"{args.connector} is not installed (see `ooat connectors list`).\n")
             return REFUSED
-        stdout.write(connector_admin.consequences_card(connector.manifest, today) + "\n")
+        stdout.write(connector_admin.consequences_card(connector.manifest, today, config) + "\n")
         return 0
     if config is None and args.action in ("enable", "disable"):
         # Without a config the ledger would be wherever the shell happens to be; state changes need the real one.
@@ -88,16 +102,16 @@ def _run(args, stdin, stdout, registry, today) -> int:
         return REFUSED
     try:
         if args.action == "list":
-            return _list(registry, ledger, today, stdout)
+            return _list(registry, ledger, today, config, stdout)
         if args.action == "disable":
             return _disable(args, ledger, url, stdout)
-        return _enable(args, registry, ledger, url, today, stdin, stdout)
+        return _enable(args, registry, ledger, url, today, config, stdin, stdout)
     finally:
         ledger.close()
 
 
-def _list(registry, ledger, today, stdout) -> int:
-    for status in connector_admin.connector_statuses(registry, ledger, today):
+def _list(registry, ledger, today, config, stdout) -> int:
+    for status in connector_admin.connector_statuses(registry, ledger, today, config):
         state = status.state
         if state == "enabled" and not status.unattended:
             state += ", not usable unattended"
@@ -106,6 +120,11 @@ def _list(registry, ledger, today, stdout) -> int:
         stdout.write(f"{status.id}  [{state}]{stale}\n  {status.detail}\n")
         if tiers:
             stdout.write(f"  tiers: {tiers}; unattended use per terms: {status.automation}\n")
+        if status.blocked:
+            stdout.write(f"  {status.blocked}\n")
+        if status.responsibility_until:
+            stdout.write(f"  your responsibility for client or personal data holds until "
+                         f"{status.responsibility_until}\n")
     return 0
 
 
@@ -119,7 +138,36 @@ def _disable(args, ledger, url, stdout) -> int:  # also allowed for a connector 
     return 0
 
 
-def _enable(args, registry, ledger, url, today, stdin, stdout) -> int:
+def _responsibility(args, manifest, stdin, stdout) -> tuple[dict | None, str | None]:
+    """Ask for the operator's responsibility for client or personal data: (responsibility, refusal)."""
+    stdout.write(RESPONSIBILITY)
+    taken = args.responsibility or _ask("Do you take this responsibility? (yes/no): ", stdin, stdout).lower()
+    if taken not in ("yes", "no"):
+        return None, "answer yes or no"
+    if taken == "no":
+        return None, "client_confidential and personal data need your responsibility"
+    responsibility = {}
+    if not manifest["jurisdiction"]["processing_regions"]:
+        answer = args.regions if args.regions is not None else _ask(
+            "Regions where the provider processes under your agreement (e.g. eu, us): ",
+            stdin, stdout)
+        regions = [r.strip() for r in answer.split(",") if r.strip()]
+        if not all(_REGION.match(r) for r in regions):
+            return None, "regions are codes such as eu or us"
+        if not regions:  # the gateway would never route there: say so now, not at the first task
+            return None, "client and personal data need a known processing region; state it from your agreement"
+        responsibility["processing_regions"] = sorted(set(regions))
+    if manifest["data_policy"]["training_on_inputs"] is None:
+        off = args.no_training or _ask("Is training on your inputs switched off for this account? (yes/no): ",
+                                       stdin, stdout).lower()
+        if off not in ("yes", "no"):
+            return None, "answer yes or no"
+        if off == "yes":
+            responsibility["no_training"] = True
+    return responsibility, None
+
+
+def _enable(args, registry, ledger, url, today, config, stdin, stdout) -> int:
     connector = registry.get(args.connector)
     if connector is None:
         stdout.write(f"{args.connector} is not installed (see `ooat connectors list`).\n")
@@ -132,15 +180,22 @@ def _enable(args, registry, ledger, url, today, stdin, stdout) -> int:
     except ValueError as error:
         stdout.write(f"Refused: {error}\n")
         return REFUSED
-    stdout.write(connector_admin.consequences_card(manifest, today) + "\n")
+    stdout.write(connector_admin.consequences_card(manifest, today, config) + "\n")
     default = [c for c in connector_admin.DEFAULT_CLASSES if c in manifest["data_policy"]["allowed_data_classes"]]
     if args.classes is not None:
         answer = args.classes
     else:
         hint = f" [{','.join(default)}]" if default else ""
         answer = _ask(f"\nData classes to allow{hint}: ", stdin, stdout) or ",".join(default)
+    requested = [c.strip() for c in answer.split(",") if c.strip()]
+    responsibility = None
+    if set(requested) & set(connector_admin.RESPONSIBLE_CLASSES):
+        responsibility, refusal = _responsibility(args, manifest, stdin, stdout)
+        if refusal:
+            stdout.write(f"Refused: {refusal}; nothing was changed.\n")
+            return REFUSED
     try:
-        classes = connector_admin.checked_classes(manifest, [c.strip() for c in answer.split(",") if c.strip()])
+        classes = connector_admin.checked_classes(manifest, requested, responsibility)
     except ValueError as error:
         stdout.write(f"Refused: {error}; nothing was changed.\n")
         return REFUSED
@@ -165,7 +220,7 @@ def _enable(args, registry, ledger, url, today, stdin, stdout) -> int:
         stdout.write("Confirmation did not match; nothing was changed.\n")
         return REFUSED
     try:
-        connector_admin.acknowledge(ledger, connector, operator, classes, automation)
+        connector_admin.acknowledge(ledger, connector, operator, classes, automation, responsibility, today)
     except ValueError as error:
         stdout.write(f"Refused: {error}\n")
         return REFUSED
@@ -174,6 +229,8 @@ def _enable(args, registry, ledger, url, today, stdin, stdout) -> int:
     else:
         mode = "unattended use confirmed" if automation else "not used unattended until automation is confirmed"
     stdout.write(f"{manifest['id']} enabled for {', '.join(classes)}; {mode}. Recorded in {url}.\n")
+    if responsibility is not None:
+        stdout.write(f"You took responsibility for client or personal data on it as {operator} on {today}.\n")
     return 0
 
 
