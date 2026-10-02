@@ -49,3 +49,10 @@
 - [ ] `ooat connectors enable`: say when `--regions`, `--responsibility` or `--no-training` is ignored, and check
       the classes (e.g. `special_category`) before asking for responsibility.
 - [ ] Define the region pattern once (config.py) and import it in operator_cli.py.
+
+### From the review of PR #12
+- [ ] `jurisdiction_stale(..., responsible=...)`: make the parameter required (or default False) so a caller that
+      omits it stays fail-closed; the listing passes whether a responsibility is in force.
+- [ ] The gateway says "not allowed by the manifest" when the real cause is an expired responsibility; name it.
+- [ ] `checked_classes` tests `no_training` by truthiness; use `is True` like the gateway and `may_extend()`.
+- [ ] Spec v0.2 revision (`tasks/spec/`) must carry ADR 0011 and ADR 0012 into spec §2, §4, §6, §8, §9 and §11.
