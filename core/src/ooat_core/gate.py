@@ -136,8 +136,8 @@ def task_facts(events: list[dict], settings: GateSettings = GateSettings()) -> T
         if choice == "raise_budget":
             budget = next(o["cost_usd"] for o in request["body"]["options"] if o["id"] == "raise_budget")
         run_as_is = run_as_is or choice == "run_as_is"
-        expired = answer.get("default_applied", False)
-        refused = choice == "do_not_run" or expired
+        expired = expired or answer.get("default_applied", False)  # a refusal or an expiry stays final
+        refused = refused or choice == "do_not_run" or expired
     criteria = list(body.get("acceptance", [])) or texts
     return TaskFacts(submitted["id"], task_text(body, texts, narrowings), criteria, body.get("data_class", "internal"),
                      body.get("risk_class", DEFAULT_RISK_CLASS), budget, task_value_usd(body, settings),
@@ -146,11 +146,12 @@ def task_facts(events: list[dict], settings: GateSettings = GateSettings()) -> T
 
 
 def data_class_for(facts: TaskFacts, records: list[dict] = ()) -> str:
-    """The declared class, raised by the pre-scan and by every confident A10 answer of this and earlier rounds;
-    never lowered (ADR 0011)."""
+    """The declared class, raised by the pre-scan and by every A10 answer of this and earlier rounds; never
+    lowered (ADR 0011). An A10 answer raises the class even below θ: for a data class the higher one is the safer
+    outcome, and an answer naming a lower class changes nothing anyway."""
     data_class = raised_class(facts.declared, facts.state)
     for record in [*facts.decided, *records]:
-        if record["question"] == "a10" and acts_alone(record["confidence"], record["threshold"]):
+        if record["question"] == "a10":
             data_class = higher_class(data_class, record["answer"])
     return data_class
 

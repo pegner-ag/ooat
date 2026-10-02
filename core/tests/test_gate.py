@@ -129,11 +129,6 @@ def test_a_confident_a10_raises_the_class_and_never_lowers_it():
     assert lower.gate.run(lower.submit()).data_class == "internal"
 
 
-def test_an_unsure_a10_keeps_the_declared_class():
-    setup = GateSetup(answers=confident(a10=DecisionAnswer("choice", "personal", 0.7)))
-    assert setup.gate.run(setup.submit()).data_class == "internal"
-
-
 def test_personal_data_found_by_the_pre_scan_raises_the_class_and_keeps_the_task_off_jev():
     setup = GateSetup()
     task = setup.submit(goal="Napiš odpověď panu Novákovi na jan.novak@example.cz.")
@@ -441,3 +436,19 @@ def test_when_the_decision_tier_fails_the_operator_is_told_so():
     task = setup.submit()
     setup.gate.run(task)
     assert "could not be checked automatically" in setup.events(task, "HIL_REQUEST")[0]["body"]["question"]
+
+
+def test_an_unsure_a10_that_names_a_higher_class_still_raises_it():
+    setup = GateSetup(answers=confident(a10=DecisionAnswer("choice", "client_confidential", 0.6)))
+    assert setup.gate.run(setup.submit()).data_class == "client_confidential"
+
+
+def test_a_refusal_stays_final_whatever_comes_later():
+    events = [
+        {"id": "evt_1", "type": "TASK_SUBMITTED", "actor": HIL, "body": {"goal": "x"}},
+        {"id": "evt_2", "type": "HIL_REQUEST", "actor": GATE, "body": {"options": [{"id": "clarify"}]}},
+        {"id": "evt_3", "type": "HIL_RESPONSE", "actor": HIL, "body": {"request": "evt_2", "choice": "do_not_run"}},
+        {"id": "evt_4", "type": "HIL_REQUEST", "actor": GATE, "body": {"options": [{"id": "clarify"}]}},
+        {"id": "evt_5", "type": "HIL_RESPONSE", "actor": HIL, "body": {"request": "evt_4", "text": "Later text."}},
+    ]
+    assert task_facts(events).refused

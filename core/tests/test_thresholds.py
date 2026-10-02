@@ -100,3 +100,8 @@ def test_ratings_of_unknown_decisions_are_ignored():
 def test_computed_threshold_needs_support_and_a_low_error_rate(outcomes, expected):
     rated = [RatedDecision("a1", JEV, VERSION, c, ok) for c, ok in outcomes]
     assert computed_threshold(rated, 0.05) == expected
+
+
+def test_the_default_risk_class_is_the_stricter_r1():
+    events = history("a1.1", [(0.9, True)] * 19 + [(0.9, False)])  # 5 % errors: enough for R0 only
+    assert threshold(events, "a1", JEV, VERSION) == 1.0

@@ -3,7 +3,7 @@
 ## Purpose
 OOAT is an open-source framework for multi-agent AI work in which a Topology Gate decides per task whether
 a team is worth its cost. The repository currently contains the specification and the OOA Spec v0.1 JSON Schemas with tests;
-the starter catalog holds role families and capability names only; `ooat-core` has the ledger foundation
+the starter catalog holds role families and capability names only; `ooat-core` has the ledger foundation,
 the provider gateway with model and decision connectors, and the Topology Gate for T0–T2 (no workers, task
 commands or API yet).
 

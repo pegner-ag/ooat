@@ -81,9 +81,10 @@ def computed_threshold(rated: list[RatedDecision], epsilon: float) -> float:
     return 1.0
 
 
-def threshold(events: Iterable[dict], point: str, engine: str, model: str, risk_class: str = "R0",
+def threshold(events: Iterable[dict], point: str, engine: str, model: str, risk_class: str = "R1",
               decision_engine: bool = True) -> float:
-    """θ for one key. `decision_engine` is False for the text-model fallback (ADR 0011)."""
+    """θ for one key. `decision_engine` is False for the text-model fallback (ADR 0011). Without a stated risk
+    class the stricter R1 tolerance applies, as in the Gate."""
     if risk_class not in EPSILON:
         return 1.0
     rated = [r for r in rated_decisions(events) if (r.point, r.engine, r.model) == (point, engine, model)]
