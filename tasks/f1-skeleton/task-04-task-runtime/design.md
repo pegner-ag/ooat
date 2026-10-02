@@ -148,7 +148,10 @@ which 04 does not have.
   [--value A|B|C | --value-usd N] [--budget USD] [--data-class C] [--file PATH (repeatable)]`. Files become
   `untrusted` artifacts of the task. Default data class `internal`, default budget from `ooat.toml`.
 - **Run:** in the Solo profile `submit` runs the task in the foreground: Gate → contract → worker → acceptance →
-  close. `ooat task run <id>` resumes a task after a HIL answer.
+  close. `ooat task run <id>` resumes a task after a HIL answer. From 04b: a GATED task whose budget question was
+  answered "do not run" or expired (`task_facts().refused` / `.expired`) is closed by the runtime (`CANCELLED` /
+  `CLOSED_ABSTAINED`), because the Gate does not run on a GATED task; and the runtime writes the
+  `default_applied` response when a Gate question's deadline has passed.
 - **Worker (T2):** a stable prompt prefix (family rules → role → contract) plus the task; artifacts by reference
   with previews of at most 6,000 characters. The model answers either with the deliverable or with an abstention
   in a fixed JSON form (`{"abstain": "UNKNOWN", "reason": "…", "missing": "…", "confidence": 0.x}`) → `ABSTAIN`.
