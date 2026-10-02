@@ -1,6 +1,7 @@
 """Topology Gate for T0–T2 with fake connectors (design 04 §4, ADR 0011)."""
 
 import json
+import math
 from datetime import datetime, timezone
 
 import pytest
@@ -10,7 +11,7 @@ from ooat_core.config import parse_config
 from ooat_core.connectors import ConnectorError, DecisionAnswer, jurisdiction_fingerprint
 from ooat_core.connectors.registry import Registry
 from ooat_core.credentials_env import SecretResolver
-from ooat_core.gate import Gate, GateSettings
+from ooat_core.gate import Gate, GateSettings, gated_data_class, task_facts
 from ooat_core.gateway import Gateway
 from ooat_core.ids import new_id
 from ooat_core.ledger import Ledger, new_event
@@ -139,9 +140,10 @@ def test_personal_data_found_by_the_pre_scan_raises_the_class_and_keeps_the_task
     outcome = setup.gate.run(task)
     assert outcome.data_class == "personal" and setup.jev.calls == []
     decided = setup.events(task, "TOPOLOGY_DECIDED")[0]["body"]
-    assert decided["rules_applied"] == ["A10"]
     assert {r["engine"] for r in decided["decisions"]} == {"prv.fake.api"}
     assert {r["threshold"] for r in decided["decisions"]} == {1.0}  # the fallback is not rated yet
+    # nothing the fallback says acts alone, so the operator confirms the criteria
+    assert outcome.action == "ask" and decided["rules_applied"] == ["A1", "A10"]
 
 
 def test_a_task_without_a_permitted_route_is_closed_without_running():
@@ -213,3 +215,174 @@ def test_a_task_without_a_risk_class_is_judged_as_r1_the_safer_default():
     thresholds = [{r["question"]: r["threshold"] for r in setup.events(t, "TOPOLOGY_DECIDED")[0]["body"]["decisions"]}
                   for t in (unspecified, r0)]
     assert thresholds[0]["a4"] == 1.0 and thresholds[1]["a4"] == 0.5
+
+
+# Asking the operator: clarification (A1, ADR 0009) and budget ----------------------------------------------------
+
+def answer(setup, task, request, **body):
+    setup.ledger.append(new_event("HIL_RESPONSE", task=task, actor=HIL, body={"request": request, **body}))
+
+
+def test_a_task_without_criteria_asks_the_operator_before_any_model_is_called():
+    setup = GateSetup()
+    task = setup.submit(acceptance=())
+    outcome = setup.gate.run(task)
+    assert (outcome.action, outcome.topology) == ("ask", "T0") and setup.jev.calls == []
+    decided = setup.events(task, "TOPOLOGY_DECIDED")[0]["body"]
+    assert decided["rules_applied"] == ["A1"] and decided["candidates"][0]["eliminated_by"] == ["A1"]
+    assert outcome.estimate_usd == decided["candidates"][0]["model_usd"]
+    request = setup.events(task, "HIL_REQUEST")[0]
+    assert request["id"] == outcome.request and "no acceptance criteria" in request["body"]["question"]
+    assert [o["id"] for o in request["body"]["options"]] == ["clarify", "run_as_is", "do_not_run"]
+    assert request["body"]["default_on_silence"] == "do_not_run" and request["body"]["blocking"] is True
+    assert request["body"]["deadline"] == "2026-10-04T12:00:00Z"  # 48 h (spec §8)
+    assert task_state(setup.ledger.events(task=task)) == "CLARIFYING"
+
+
+@pytest.mark.parametrize("a1", [DecisionAnswer("noul", 0.2, 0.8), DecisionAnswer("noul", 0.9, 0.7)])
+def test_a_criterion_that_is_not_confidently_checkable_is_sent_back_to_the_operator(a1):
+    setup = GateSetup(answers=confident(**{"a1.1": a1}))
+    task = setup.submit(acceptance=("Shrnutí je srozumitelné.",))
+    outcome = setup.gate.run(task)
+    assert outcome.action == "ask" and setup.worker.calls == []
+    assert "Shrnutí je srozumitelné." in setup.events(task, "HIL_REQUEST")[0]["body"]["question"]
+
+
+def test_a_clarification_goes_back_to_the_gate_with_the_answer_in_the_task_text():
+    def answers(request):
+        checkable = "Clarification 1:" in request.state
+        return confident(**{"a1.1": DecisionAnswer("noul", 0.95 if checkable else 0.2, 0.95)})(request)
+
+    setup = GateSetup(answers=answers)
+    task = setup.submit(acceptance=("Shrnutí je srozumitelné.",))
+    first = setup.gate.run(task)
+    answer(setup, task, first.request, text="Srozumitelné = bez právních termínů, nejvýše 300 slov.")
+    assert task_state(setup.ledger.events(task=task)) == "SUBMITTED"
+    second = setup.gate.run(task)
+    assert second.action == "run"
+    assert "Clarification 1: Srozumitelné = bez právních termínů" in setup.jev.calls[1].state
+
+
+def test_without_criteria_the_clarifications_become_the_criteria():
+    setup = GateSetup()
+    task = setup.submit(acceptance=())
+    first = setup.gate.run(task)
+    answer(setup, task, first.request, choice="clarify", text="Výstup je tabulka s 10 řádky.")
+    assert setup.gate.run(task).action == "run"
+    assert "a1.1" in setup.jev.calls[0].questions
+
+
+def test_run_as_is_skips_the_criteria_questions():
+    setup = GateSetup(answers=confident(**{"a1.1": DecisionAnswer("noul", 0.1, 0.9)}))
+    task = setup.submit()
+    first = setup.gate.run(task)
+    answer(setup, task, first.request, choice="run_as_is")
+    assert setup.gate.run(task).action == "run"
+    assert not any(q.startswith("a1.") for q in setup.jev.calls[1].questions)
+
+
+@pytest.mark.parametrize("response, closed", [
+    ({"choice": "do_not_run"}, "CANCELLED"),
+    ({"choice": "do_not_run", "default_applied": True}, "CLOSED_ABSTAINED"),  # silence until the deadline
+])
+def test_do_not_run_cancels_the_task_and_silence_closes_it_as_abstained(response, closed):
+    setup = GateSetup()
+    task = setup.submit(acceptance=())
+    first = setup.gate.run(task)
+    answer(setup, task, first.request, **response)
+    outcome = setup.gate.run(task)
+    assert outcome.closed == closed and task_state(setup.ledger.events(task=task)) == closed
+    assert setup.jev.calls == []
+
+
+def test_after_three_clarifications_an_unclear_task_is_closed():
+    setup = GateSetup(answers=confident(**{"a1.1": DecisionAnswer("noul", 0.1, 0.9)}))
+    task = setup.submit(acceptance=("Je to dobré.",))
+    for round_ in range(3):
+        outcome = setup.gate.run(task)
+        assert outcome.action == "ask"
+        answer(setup, task, outcome.request, text=f"Pokus {round_ + 1}.")
+    outcome = setup.gate.run(task)
+    assert outcome.closed == "CLOSED_ABSTAINED"
+    missing = setup.events(task, "TASK_CLOSED")[0]["body"]["missing"]
+    assert "after 3 clarifications" in missing and "Je to dobré." in missing
+    assert len(setup.events(task, "HIL_REQUEST")) == 3
+
+
+def test_a_failed_decision_tier_makes_the_gate_ask_instead_of_guessing():
+    setup = GateSetup(jev_error=ConnectorError("UNAVAILABLE", "HTTP 529"), worker_text="Not JSON.")
+    task = setup.submit()
+    assert setup.gate.run(task).action == "ask"
+
+
+def test_an_estimate_above_the_budget_asks_to_raise_it():
+    setup = GateSetup()
+    task = setup.submit(budget_usd=0.001)
+    outcome = setup.gate.run(task)
+    assert (outcome.action, outcome.topology) == ("ask", "T2") and outcome.estimate_usd > 0.001
+    request = setup.events(task, "HIL_REQUEST")[0]["body"]
+    raise_option = request["options"][0]
+    assert raise_option["id"] == "raise_budget"
+    assert raise_option["cost_usd"] == math.ceil(outcome.estimate_usd * 120) / 100  # whole cents, rounded up
+    assert request["default_on_silence"] == "do_not_run"
+    assert task_state(setup.ledger.events(task=task)) == "HIL_WAIT"
+    answer(setup, task, outcome.request, choice="raise_budget")
+    events = setup.ledger.events(task=task)
+    assert task_state(events) == "GATED" and task_facts(events).budget_usd == raise_option["cost_usd"]
+
+
+def test_the_runtime_sees_the_safer_default_risk_class():
+    setup = GateSetup()
+    task = setup.submit()
+    assert task_facts(setup.ledger.events(task=task)).risk_class == "R1"
+
+
+def test_refusing_the_budget_is_visible_to_the_runtime():
+    setup = GateSetup()
+    task = setup.submit(budget_usd=0.001)
+    outcome = setup.gate.run(task)
+    answer(setup, task, outcome.request, choice="do_not_run")
+    assert task_facts(setup.ledger.events(task=task)).refused
+
+
+def test_the_runtime_recomputes_the_class_the_gate_decided():
+    setup = GateSetup(answers=confident(a10=DecisionAnswer("choice", "client_confidential", 0.95)))
+    task = setup.submit()
+    outcome = setup.gate.run(task)
+    assert gated_data_class(setup.ledger.events(task=task)) == outcome.data_class == "client_confidential"
+
+
+def test_narrowing_the_scope_sends_a_gated_task_back_to_the_gate():
+    setup = GateSetup()
+    task = setup.submit(budget_usd=0.001)
+    first = setup.gate.run(task)
+    assert [o["id"] for o in setup.events(task, "HIL_REQUEST")[0]["body"]["options"]] == \
+        ["raise_budget", "narrow_scope", "do_not_run"]
+    answer(setup, task, first.request, choice="narrow_scope", text="Jen první kapitola smlouvy.")
+    assert task_state(setup.ledger.events(task=task)) == "GATED"
+    second = setup.gate.run(task)
+    assert "Narrowed scope 1: Jen první kapitola smlouvy." in setup.jev.calls[1].state
+    assert second.estimate_usd < first.estimate_usd * 0.6  # the output prior is halved
+    assert second.action == "ask" and len(setup.events(task, "HIL_REQUEST")) == 2  # still above 0.001 USD
+    assert task_facts(setup.ledger.events(task=task)).criteria == ["Shrnutí má nejvýše 300 slov."]
+
+
+def test_a_gated_task_without_a_narrowed_scope_is_not_gated_again():
+    setup = GateSetup()
+    task = setup.submit(budget_usd=0.001)
+    first = setup.gate.run(task)
+    answer(setup, task, first.request, choice="raise_budget")
+    with pytest.raises(ValueError, match="not SUBMITTED"):
+        setup.gate.run(task)
+
+
+def test_after_three_budget_questions_a_task_still_over_budget_is_closed():
+    setup = GateSetup()
+    task = setup.submit(budget_usd=0.001)
+    for round_ in range(3):
+        outcome = setup.gate.run(task)
+        assert outcome.action == "ask"
+        answer(setup, task, outcome.request, choice="narrow_scope", text=f"Ještě méně, kolo {round_ + 1}.")
+    outcome = setup.gate.run(task)
+    assert outcome.closed == "CLOSED_ABSTAINED"
+    assert "after 3 budget questions" in setup.events(task, "TASK_CLOSED")[0]["body"]["missing"]
