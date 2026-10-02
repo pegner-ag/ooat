@@ -128,12 +128,16 @@ def jurisdiction_fingerprint(manifest: dict) -> str:
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
-def jurisdiction_stale(manifest: dict, acknowledgement: dict, today: date) -> bool:
+def jurisdiction_stale(manifest: dict, acknowledgement: dict, today: date, responsible: bool = True) -> bool:
     """Spec §9 rule 2: the jurisdiction changed since acknowledgement, or was not verified within 12 months.
 
     A stale connector stays enabled but refuses personal and special-category data until acknowledged again.
+    An operator who takes responsibility (ADR 0012) checks the facts on the card that day, so the later of the
+    manifest's verified_on and the responsibility's confirmed_on counts - only for the classes the responsibility
+    covers (`responsible`); special-category data keeps the manifest's date alone.
     """
-    verified_on = manifest["jurisdiction"]["verified_on"]
-    if verified_on is None or (today - date.fromisoformat(verified_on)).days > 365:
+    confirmed_on = (acknowledgement.get("responsibility") or {}).get("confirmed_on") if responsible else None
+    dates = [d for d in (manifest["jurisdiction"]["verified_on"], confirmed_on) if d]
+    if not dates or (today - max(date.fromisoformat(d) for d in dates)).days > 365:
         return True
     return jurisdiction_fingerprint(manifest) != acknowledgement.get("jurisdiction_sha256")
