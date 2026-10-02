@@ -16,13 +16,18 @@ requires a provider contract no manifest can state, regions are mostly unknown a
    `allowed_data_classes` (for example a subscription CLI), unless the manifest says the provider trains on
    inputs. `special_category` is never covered.
 4. The operator's `[policy]` in `ooat.toml` can block countries (vendor or model origin) for every class and limit
-   personal data to listed regions. The gateway enforces it; the card and the listing show it.
+   personal and special-category data to listed regions. The gateway enforces it; the card and the listing show
+   it. A country block cannot exclude a connector whose country is unknown (the card notes it), while an unknown
+   region fails the region limit: a country block names what to avoid, a region list names what is allowed.
 
 ## Spec text this overrides
 
 - §9 "Routing enforces classes against each adapter's `allowed_data_classes`": the operator's responsibility may
   extend them for `client_confidential` and `personal` (point 3).
-- §9 rule 2: the later of the manifest's `verified_on` and the operator's `confirmed_on` counts.
+- §9 Data protection, bullet "go only to adapters whose data policy excludes training": the operator's statement
+  that training is off satisfies it for those two classes, unless the manifest says the provider trains.
+- §9 rule 2: the later of the manifest's `verified_on` and the operator's `confirmed_on` counts, for
+  `client_confidential` and `personal` only.
 - §9 reference routing policy: "a contract" is met by the operator's recorded responsibility.
 
 ## Consequences

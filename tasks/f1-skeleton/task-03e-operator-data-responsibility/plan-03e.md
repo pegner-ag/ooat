@@ -16,6 +16,7 @@
 - Responsibility covers `client_confidential` and `personal` only; `special_category` always needs verified redaction.
 - A connector whose manifest says it trains on inputs (`training_on_inputs: true`) can never carry those classes beyond its manifest.
 - Responsibility holds for 365 days from `confirmed_on`; the jurisdiction fingerprint rule (ADR 0010) still applies.
+- A blocked country cannot exclude a connector whose country is unknown (shown as a note on the card, stated in ADR 0012); an unknown region does fail the region limit.
 - `[policy]` values: `blocked_countries` = two-letter country codes (`^[A-Z]{2}$`) matched against `vendor_country` and `model_origin_country`; `personal_data_regions` = region codes (`^[a-z]{2}(-[a-z0-9-]+)?$`) matched by their first segment; unknown regions fail the limit; absent `personal_data_regions` means no limit.
 - OOAT records the operator's statements and never claims to verify them; the card says so.
 - `catalog/routing.json` is not changed.
@@ -307,7 +308,7 @@ git commit -m "feat: responsibility on ADAPTER_ACKNOWLEDGED and a [policy] table
 
 **Interfaces:**
 - Consumes: `Config.blocked_countries`, `Config.personal_data_regions` (Task 1).
-- Produces (in `ooat_core.connector_admin`): `RESPONSIBLE_CLASSES = ("client_confidential", "personal")`, `RESPONSIBILITY_DAYS = 365`; `responsibility_in_force(acknowledgement, today) -> dict | None`; `blocked_by_policy(manifest, config) -> str | None` ("blocked by your policy: model origin CN"); `checked_classes(manifest, classes, responsibility=None)`; `acknowledge(ledger, connector, operator, classes, automation_confirmed, responsibility=None, today=None)`; `consequences_card(manifest, today, config=None)` with a "Client or personal data" section and a "Your policy:" line; `connector_statuses(registry, ledger, today, config=None)` with `ConnectorStatus.responsibility_until` and `.blocked`. `jurisdiction_stale()` counts the later of `verified_on` and `responsibility.confirmed_on`.
+- Produces (in `ooat_core.connector_admin`): `RESPONSIBLE_CLASSES = ("client_confidential", "personal")`, `RESPONSIBILITY_DAYS = 365`; `responsibility_in_force(acknowledgement, today) -> dict | None`; `blocked_by_policy(manifest, config) -> str | None` ("blocked by your policy: model origin CN"); `checked_classes(manifest, classes, responsibility=None)`; `acknowledge(ledger, connector, operator, classes, automation_confirmed, responsibility=None, today=None)`; `consequences_card(manifest, today, config=None)` with a "Client or personal data" section and a "Your policy:" line; `connector_statuses(registry, ledger, today, config=None)` with `ConnectorStatus.responsibility_until` and `.blocked`. `jurisdiction_stale(manifest, acknowledgement, today, responsible=True)` counts the later of `verified_on` and `responsibility.confirmed_on`, the latter only when `responsible` (the gateway passes False for `special_category`). With a country block set, the card notes a vendor country or model origin that is unknown, because the block cannot check it.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -387,6 +388,7 @@ def test_responsibility_lasts_twelve_months_and_stands_in_for_the_verification_d
     assert responsibility_in_force(body, date(2027, 10, 2)) is None
     assert not jurisdiction_stale(connector.manifest, body, TODAY)  # the manifest itself was never verified
     assert jurisdiction_stale(connector.manifest, body, date(2027, 10, 2))
+    assert jurisdiction_stale(connector.manifest, body, TODAY, responsible=False)  # special-category data
 
 
 def test_the_operator_policy_blocks_countries_and_is_shown_on_the_card_and_in_the_listing(ledger):
@@ -396,6 +398,9 @@ def test_the_operator_policy_blocks_countries_and_is_shown_on_the_card_and_in_th
     card = consequences_card(connector.manifest, TODAY, config)
     assert "blocked by your policy: model origin CN" in card and "Personal data only processed in: eu" in card
     assert "Only when you take responsibility" in consequences_card(connector.manifest, TODAY)
+    unknown = subscription(origin=None)
+    assert "model origin unknown - your country block cannot check them" in consequences_card(
+        unknown.manifest, TODAY, config)
     acknowledge(ledger, connector, "Martin", ["personal"], True, {"no_training": True}, TODAY)
     (status,) = connector_statuses(Registry([connector]), ledger, TODAY, config)
     assert status.blocked == "blocked by your policy: model origin CN" and status.responsibility_until == "2027-10-01"
@@ -413,6 +418,22 @@ In `core/src/ooat_core/connectors/__init__.py`:
 Replace:
 
 ````python
+
+def jurisdiction_stale(manifest: dict, acknowledgement: dict, today: date) -> bool:
+    """Spec §9 rule 2: the jurisdiction changed since acknowledgement, or was not verified within 12 months.
+````
+
+with:
+
+````python
+
+def jurisdiction_stale(manifest: dict, acknowledgement: dict, today: date, responsible: bool = True) -> bool:
+    """Spec §9 rule 2: the jurisdiction changed since acknowledgement, or was not verified within 12 months.
+````
+
+Replace:
+
+````python
     A stale connector stays enabled but refuses personal and special-category data until acknowledged again.
     """
     verified_on = manifest["jurisdiction"]["verified_on"]
@@ -425,10 +446,11 @@ with:
 ````python
     A stale connector stays enabled but refuses personal and special-category data until acknowledged again.
     An operator who takes responsibility (ADR 0012) checks the facts on the card that day, so the later of the
-    manifest's verified_on and the responsibility's confirmed_on counts.
+    manifest's verified_on and the responsibility's confirmed_on counts - only for the classes the responsibility
+    covers (`responsible`); special-category data keeps the manifest's date alone.
     """
-    dates = [d for d in (manifest["jurisdiction"]["verified_on"],
-                         (acknowledgement.get("responsibility") or {}).get("confirmed_on")) if d]
+    confirmed_on = (acknowledgement.get("responsibility") or {}).get("confirmed_on") if responsible else None
+    dates = [d for d in (manifest["jurisdiction"]["verified_on"], confirmed_on) if d]
     if not dates or (today - max(date.fromisoformat(d) for d in dates)).days > 365:
         return True
 ````
@@ -637,6 +659,11 @@ with:
     if config is not None:
         blocked = blocked_by_policy(manifest, config)
         lines.append(f"Your policy:            {blocked or 'does not block this connector'}")
+        unknown = [label for label, key in (("vendor country", "vendor_country"),
+                                            ("model origin", "model_origin_country"))
+                   if jurisdiction[key] is None]
+        if config.blocked_countries and unknown and not blocked:
+            lines.append(f"  Note: {' and '.join(unknown)} unknown - your country block cannot check them")
         if config.personal_data_regions is not None:
             lines.append(f"  Personal data only processed in: {_value(sorted(config.personal_data_regions))}")
     lines += [
@@ -996,6 +1023,7 @@ Replace:
         if policy.get("require_contract"):  # manifests cannot state a processing agreement yet: fail closed
             return f"{data_class} requires a provider contract, which cannot be verified yet"
         if data_class in _PERSONAL_OR_HIGHER and jurisdiction_stale(manifest, acknowledgement, self._clock().date()):
+            return "jurisdiction changed or not verified within 12 months; acknowledge again for personal data"
 ````
 
 with:
@@ -1009,7 +1037,9 @@ with:
                 not regions or any(r.split("-")[0] not in allowed_regions for r in regions)):
             return (f"your policy allows personal data only in {sorted(allowed_regions)}; "
                     f"this connector processes in {regions or 'unknown regions'}")
-        if data_class in _PERSONAL_OR_HIGHER and jurisdiction_stale(manifest, acknowledgement, self._clock().date()):
+        if data_class in _PERSONAL_OR_HIGHER and jurisdiction_stale(manifest, acknowledgement, self._clock().date(),
+                                                                    responsible):
+            return "jurisdiction changed or not verified within 12 months; acknowledge again for personal data"
 ````
 
 - [ ] **Step 4: Run the tests to verify they pass**
