@@ -21,3 +21,6 @@
 - Jev (TypeSafe System One API): a noul answer has no `confidence` field (use max(p, 1 - p)); a score is a
   fractional position with a `legend`; the request alias `jev-latest` is answered as a version (`jev-1.13.0`),
   so `routing.json` prices both names and decisions record the version. Docs: https://docs.typesafe.ai/llms.txt
+- Regexes that scan task text (pii.py) must stay linear: an unbounded `[...]+@` local part backtracked from every
+  position, so a 100k-character attachment took minutes. Bound repeats and start tokens with a lookbehind; the
+  test `test_a_long_attachment_is_scanned_in_linear_time` guards it.
