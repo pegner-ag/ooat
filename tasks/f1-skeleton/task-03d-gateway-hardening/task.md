@@ -37,3 +37,10 @@
 - [ ] The budget comparison counts the Gate cost already spent on the task.
 - [ ] Document the pre-scan's residual gaps: lowercase IBANs, `00420…` numbers (seen as cards), phone numbers of
       other countries.
+
+### From the review of PR #10
+- [ ] Spec §4 rule A3 sends a task below `v_min` to T2 "without further calculation"; the Gate only records A3
+      and may still close or clarify. Align the code or record the deviation in the spec v0.2 revision.
+- [ ] Payment-card check: any 13–19 digit number passing Luhn (about 1 in 10, e.g. epoch-ms timestamps) raises a
+      task to `personal`; require separators or an issuer prefix.
+- [ ] An empty `narrow_scope` answer uses up a budget question without changing anything; ask again instead.

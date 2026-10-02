@@ -39,9 +39,11 @@ Chosen by decision (`docs/adr/`), not yet used in code:
 - `tasks/` — open work (To-be), one folder per task
 
 ## Configuration
-`ooat.toml` (operator preferences: ledger URL, per-tier pins, connector settings; secrets only as environment
-variable names). Connector enablement is ledger state (`ADAPTER_ACKNOWLEDGED`, `ADAPTER_DISABLED`, ADR 0010),
-written by `ooat connectors enable | disable` after the operator has read the connection consequences card.
+`ooat.toml` (operator preferences: ledger URL, per-tier pins, connector settings, `[policy]` limits on countries
+and personal-data regions; secrets only as environment variable names). Connector enablement is ledger state
+(`ADAPTER_ACKNOWLEDGED`, `ADAPTER_DISABLED`, ADR 0010), written by `ooat connectors enable | disable` after the
+operator has read the connection consequences card; for client or personal data the operator also takes
+responsibility there (legal basis, processing agreement, region; ADR 0012), renewed every 12 months.
 Prices and the data-class policy: `catalog/routing.json`. Dev dependencies: `requirements-dev.txt`, then
 `pip install -e core -e adapters/claude-code -e adapters/codex -e adapters/anthropic-api -e adapters/typesafe-jev`;
 run `python -m pytest`
