@@ -1,18 +1,20 @@
 """Connector contract (gateway design §4).
 
 Connectors are installed packages registered under the entry-point group "ooat.connectors"; ooat-core knows no
-vendor names. Model connectors are served now; tool connectors (MCP, REST, CLI tools) follow with their own contract.
+vendor names. Model connectors (kind "model") write text; decision connectors (kind "decision", ADR 0011) answer
+typed questions about a state. Tool connectors (MCP, REST, CLI tools) follow with their own contract.
 """
 
 import hashlib
 import json
 from dataclasses import dataclass
 from datetime import date
-from typing import Literal, Protocol
+from typing import ClassVar, Literal, Protocol
 
 ENTRY_POINT_GROUP = "ooat.connectors"
 # The RESULT.error.code values a connector may raise (event schema, ADR 0010).
 ERROR_CODES = frozenset({"QUOTA_EXHAUSTED", "UNAVAILABLE", "API_ERROR", "TIMEOUT"})
+CONNECTOR_KINDS = frozenset({"model", "decision"})
 
 
 @dataclass(frozen=True)
@@ -46,6 +48,48 @@ class ModelResponse:
     metering: Literal["exact", "reported", "estimated"]
 
 
+@dataclass(frozen=True)
+class DecisionQuestion:
+    """One typed question (spec §5): noul (0..1), choice (one declared option), score (position on 2-10 levels).
+
+    criteria: noul - None or {"true": ..., "false": ...}; choice - {option: description}; score - [level, ...].
+    """
+    type: Literal["noul", "choice", "score"]
+    instructions: str
+    criteria: dict | list | None = None
+
+
+@dataclass(frozen=True)
+class DecisionRequest:
+    state: str  # the text the questions are about; untrusted data, never instructions
+    questions: dict[str, DecisionQuestion]
+    data_class: str  # required, as for model requests
+    task: str | None = None
+    contract: str | None = None
+    timeout_s: float = 30
+    model: str | None = None  # set by the gateway to the routed model; connectors must use it
+    tier: ClassVar[str] = "decision"
+
+
+@dataclass(frozen=True)
+class DecisionAnswer:
+    type: str
+    value: float | str  # noul: probability of true; choice: the option; score: position 0..levels-1
+    confidence: float  # noul: max(p, 1 - p)
+    probabilities: dict[str, float] | None = None
+
+
+@dataclass(frozen=True)
+class DecisionResponse:
+    answers: dict[str, DecisionAnswer]
+    model: str  # the version that answered (e.g. "jev-1.13.0"), not an alias
+    tokens_in: int | None
+    tokens_cached: int | None
+    tokens_out: int | None
+    quota_units: float | None
+    metering: Literal["exact", "reported", "estimated"]
+
+
 class ConnectorError(Exception):
     def __init__(self, code: str, message: str, resets_at: str | None = None):
         if code not in ERROR_CODES:
@@ -67,6 +111,15 @@ class ModelConnector(Protocol):
     def detect(self) -> Detection: ...
 
     def complete(self, request: ModelRequest, secrets: SecretSource) -> ModelResponse: ...
+
+
+class DecisionConnector(Protocol):
+    kind: Literal["decision"]
+    manifest: dict  # tiers {"decision": "<model>"}
+
+    def detect(self) -> Detection: ...
+
+    def decide(self, request: DecisionRequest, secrets: SecretSource) -> DecisionResponse: ...
 
 
 def jurisdiction_fingerprint(manifest: dict) -> str:

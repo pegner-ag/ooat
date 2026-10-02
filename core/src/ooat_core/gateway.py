@@ -2,9 +2,11 @@
 
 Every call is estimated, routed (data class, acknowledgement, automation, quota, price), budget-checked, metered
 and returned with a cost record for the caller's event. Connector state is read from the ledger (ADR 0010).
+Model requests go to model connectors (`call`), typed decisions to decision connectors (`decide`, ADR 0011).
 """
 
 import dataclasses
+import json
 import math
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -12,8 +14,11 @@ from datetime import datetime, timedelta, timezone
 
 from .config import Config
 from .connector_admin import acknowledgements
-from .connectors import ConnectorError, ModelConnector, ModelRequest, ModelResponse, jurisdiction_stale
+from .connectors import (ConnectorError, DecisionAnswer, DecisionRequest, ModelConnector, ModelRequest, ModelResponse,
+                         jurisdiction_stale)
 from .connectors.registry import Registry
+from .decisions import (check_questions, checked_answers, fallback_prompt, merged_answers, parse_fallback,
+                        with_reversed_choices)
 from .ledger import DATA_CLASSES, Ledger, new_event
 from .routing import Price, RoutingPolicy
 from .credentials_env import SecretResolver
@@ -23,6 +28,9 @@ ACTOR = {"kind": "system", "id": "ooat-gateway"}
 _ACCESS_RANK = {"subscription_cli": 0, "local": 1, "api": 2, "subscription_manual": 3}
 _PERSONAL_OR_HIGHER = frozenset({"personal", "special_category"})
 _STATE_EVENTS = ["ADAPTER_ACKNOWLEDGED", "ADAPTER_DISABLED", "QUOTA_WARNING"]
+# When no decision connector can answer, the cheapest text tier answers the same typed questions (spec §6).
+FALLBACK_TIER = "economy"
+FALLBACK_TIMEOUT_S = 120
 
 
 class GatewayError(Exception):
@@ -34,6 +42,7 @@ class GatewayError(Exception):
         self.message = message
         self.trace = trace or []  # why each connector was excluded
         self.cost = cost  # cost record for the caller's event when a connector was called
+        self.fallback_from: GatewayError | None = None  # decide(): the decision tier's failure before this one
 
 
 @dataclass(frozen=True)
@@ -51,6 +60,16 @@ class GatewayResult:
     response: ModelResponse
     cost: dict
     estimate: Estimate
+
+
+@dataclass(frozen=True)
+class DecisionResult:
+    answers: dict[str, DecisionAnswer]  # one per question asked; reversed twins already folded in
+    engine: str  # the connector that answered; thresholds are calibrated per engine and model (ADR 0011)
+    model: str  # the model version the provider reported
+    cost: dict
+    estimate: Estimate
+    fallback_from: "GatewayError | None" = None  # why the decision tier could not answer, with its cost
 
 
 @dataclass(frozen=True)
@@ -91,6 +110,16 @@ class _OwnSecret:
         return self._resolver.get(connector_id)
 
 
+def _token_estimate(request: ModelRequest | DecisionRequest) -> tuple[int, int]:
+    """(tokens in, tokens out) before the call: about 4 characters per token (spec §6 prior)."""
+    if isinstance(request, DecisionRequest):
+        questions = {key: dataclasses.asdict(question) for key, question in request.questions.items()}
+        payload = json.dumps({"state": request.state, "questions": questions}, ensure_ascii=False)
+        return math.ceil(len(payload) / 4), 16 * len(request.questions)  # a typed answer is a few tokens
+    tokens_out = request.expected_output_tokens or request.max_output_tokens
+    return math.ceil(len(request.system + request.prompt) / 4), tokens_out
+
+
 class Gateway:
     def __init__(self, ledger: Ledger, registry: Registry, routing: RoutingPolicy, config: Config = Config(),
                  secrets: SecretResolver | None = None,
@@ -111,10 +140,106 @@ class Gateway:
             raise ValueError("every gateway call belongs to a task")
         candidate = self._route(request)
         self._check_budget(request, candidate.estimate)
+        response = self._invoke(request, candidate, "complete")
+        cost = self._cost(request, candidate, response)
+        self._warn_budget(request, cost["usd"])
+        return GatewayResult(response, cost, candidate.estimate)
+
+    def estimate_decision(self, request: DecisionRequest) -> Estimate:
+        """Expected cost of the decision on the engine decide() would use; no provider call."""
+        check_questions(request.questions)
+        expanded = self._expanded(request)
+        try:
+            return self._route(expanded, kind="decision").estimate
+        except GatewayError:
+            return self.estimate(self._fallback_request(expanded))
+
+    def decide(self, request: DecisionRequest) -> DecisionResult:
+        """Answer typed questions on a decision connector, or on the economy text tier when none can answer.
+
+        Every choice is also asked with its options reversed, and the answers are checked against the questions
+        before anyone may act on them (spec §6, ADR 0011). A budget refusal never falls back: the text tier costs
+        more. If the text tier cannot be tried either, the decision tier's error is raised; if it ran and failed,
+        its own error is raised with `fallback_from` set, so the caller can record both costs.
+        """
+        if request.task is None:
+            raise ValueError("every gateway call belongs to a task")
+        check_questions(request.questions)
+        expanded = self._expanded(request)
+        try:
+            return self._decide_on_connector(request, expanded)
+        except GatewayError as error:
+            if error.code == "BUDGET":
+                raise
+            failure = error
+        try:
+            result = self._decide_on_text_model(request, expanded)
+        except GatewayError as error:
+            if error.code == "BUDGET":  # the caller must see the budget, not the decision tier's failure
+                error.fallback_from = failure
+                raise
+            if error.cost is None:  # nothing ran on the text tier
+                raise GatewayError(failure.code, f"{failure.message}; fallback: {error.message}",
+                                   failure.trace + error.trace, failure.cost) from None
+            error.fallback_from = failure
+            raise
+        return dataclasses.replace(result, fallback_from=failure)
+
+    def _decide_on_connector(self, request: DecisionRequest, expanded: DecisionRequest) -> DecisionResult:
+        candidate = self._route(expanded, kind="decision")
+        self._check_budget(expanded, candidate.estimate)
+        response = self._invoke(expanded, candidate, "decide")
+        cost = self._cost(expanded, candidate, response)
+        try:
+            answers = checked_answers(expanded.questions, response.answers)
+        except ValueError as error:  # the provider answered, so the call is charged
+            raise GatewayError("API_ERROR", self._secrets.redact(f"unusable answer: {error}"), cost=cost) from None
+        except Exception as error:  # an answer object of the wrong shape must still be typed and charged
+            raise GatewayError("API_ERROR", self._secrets.redact(f"unusable answer: {type(error).__name__}"),
+                               cost=cost) from None
+        self._require_model(response.model, cost)
+        self._warn_budget(request, cost["usd"])
+        return DecisionResult(merged_answers(request.questions, answers), candidate.connector.manifest["id"],
+                              response.model, cost, candidate.estimate)
+
+    def _decide_on_text_model(self, request: DecisionRequest, expanded: DecisionRequest) -> DecisionResult:
+        result = self.call(self._fallback_request(expanded))
+        try:
+            answers = checked_answers(expanded.questions, parse_fallback(result.response.text, expanded.questions))
+        except ValueError as error:  # the model answered, so the call is charged
+            raise GatewayError("API_ERROR", self._secrets.redact(f"unusable fallback answer: {error}"),
+                               cost=result.cost) from None
+        except Exception as error:  # an answer object of the wrong shape must still be typed and charged
+            raise GatewayError("API_ERROR", self._secrets.redact(f"unusable fallback answer: {type(error).__name__}"),
+                               cost=result.cost) from None
+        self._require_model(result.response.model, result.cost)
+        return DecisionResult(merged_answers(request.questions, answers), result.cost["adapter"],
+                              result.response.model, result.cost, result.estimate)
+
+    @staticmethod
+    def _require_model(model: str, cost: dict) -> None:
+        """Thresholds are keyed by engine and model version (ADR 0011): an unnamed version cannot be acted on."""
+        if not model.strip():
+            raise GatewayError("API_ERROR", "the reply does not name the model version that answered", cost=cost)
+
+    @staticmethod
+    def _fallback_request(expanded: DecisionRequest) -> ModelRequest:
+        system, prompt = fallback_prompt(expanded)
+        options = sum(len(q.criteria) if q.type != "noul" else 1 for q in expanded.questions.values())
+        return ModelRequest(tier=FALLBACK_TIER, prompt=prompt, system=system, data_class=expanded.data_class,
+                            max_output_tokens=200 + 20 * options, task=expanded.task, contract=expanded.contract,
+                            timeout_s=max(expanded.timeout_s, FALLBACK_TIMEOUT_S))
+
+    @staticmethod
+    def _expanded(request: DecisionRequest) -> DecisionRequest:
+        return dataclasses.replace(request, questions=with_reversed_choices(request.questions))
+
+    def _invoke(self, request, candidate: "_Candidate", method: str):
+        """Run the connector with the routed model; every failure becomes a typed, redacted GatewayError."""
         connector_id = candidate.connector.manifest["id"]
         try:
             routed = dataclasses.replace(request, model=candidate.estimate.model)
-            response = candidate.connector.complete(routed, _OwnSecret(self._secrets, connector_id))
+            response = getattr(candidate.connector, method)(routed, _OwnSecret(self._secrets, connector_id))
         except ConnectorError as error:
             if error.code == "QUOTA_EXHAUSTED":
                 self._cool_down(request, candidate.connector, error.resets_at)
@@ -124,20 +249,17 @@ class Gateway:
         except Exception as error:  # a connector bug must surface as a typed, redacted failure
             raise GatewayError("API_ERROR", self._secrets.redact(f"{connector_id}: {type(error).__name__}: {error}"),
                                cost=self._failure_cost(request, candidate, True)) from None
-        response = self._sanitised(response)
-        cost = self._cost(request, candidate, response)
-        self._warn_budget(request, cost["usd"])
-        return GatewayResult(response, cost, candidate.estimate)
+        return self._sanitised(response)
 
     # Routing ------------------------------------------------------------------------------------------------
 
-    def _route(self, request: ModelRequest) -> _Candidate:
+    def _route(self, request: ModelRequest | DecisionRequest, kind: str = "model") -> _Candidate:
         if request.data_class not in DATA_CLASSES:
             raise ValueError(f"unknown data class: {request.data_class}")
         events = self._ledger.events(types=_STATE_EVENTS)
         acknowledged, cooldowns = acknowledgements(events), self._cooldowns(events)
         candidates, trace, cooling = [], [], set()
-        for connector_id in self._registry.ids():
+        for connector_id in self._registry.ids(kind):
             connector = self._registry.get(connector_id)
             reason = self._exclusion(connector, request, acknowledged.get(connector_id), cooldowns)
             if reason is None:
@@ -211,8 +333,7 @@ class Gateway:
                                     fallback=connector.manifest["access"] != "api")
         if price is None:
             return f"no price for model {model} in routing.json", None
-        tokens_in = math.ceil(len(request.system + request.prompt) / 4)
-        tokens_out = request.expected_output_tokens or request.max_output_tokens
+        tokens_in, tokens_out = _token_estimate(request)
         estimate = Estimate(connector_id, model, tokens_in, tokens_out, price.usd(tokens_in, 0, tokens_out), "prior")
         return None, _Candidate(estimate, connector, price)
 
@@ -261,8 +382,9 @@ class Gateway:
         self._ledger.append(new_event("QUOTA_WARNING", task=request.task, actor=ACTOR, body={
             "adapter": connector.manifest["id"], "utilisation": 1.0, "window_resets_at": resets_at}))
 
-    def _sanitised(self, response: ModelResponse) -> ModelResponse:
-        """Connector output is untrusted: redact secrets, drop usage numbers the ledger could not store."""
+    def _sanitised(self, response):
+        """Connector output is untrusted: redact secrets, drop usage numbers the ledger could not store.
+        Decision answers are checked separately against their questions (decisions.checked_answers)."""
         quota = response.quota_units
         if not (type(quota) in (int, float) and math.isfinite(quota) and quota >= 0):
             quota = None
@@ -271,10 +393,11 @@ class Gateway:
         if any(value is None and raw is not None for value, raw in
                zip(tokens, (response.tokens_in, response.tokens_cached, response.tokens_out))):
             tokens, metering = [None, None, None], "estimated"
-        return dataclasses.replace(response, text=self._secrets.redact(str(response.text)),
-                                   model=self._secrets.redact(str(response.model)), tokens_in=tokens[0],
-                                   tokens_cached=tokens[1], tokens_out=tokens[2], quota_units=quota,
-                                   metering=metering)
+        fields = {"model": self._secrets.redact(str(response.model)), "tokens_in": tokens[0],
+                  "tokens_cached": tokens[1], "tokens_out": tokens[2], "quota_units": quota, "metering": metering}
+        if isinstance(response, ModelResponse):
+            fields["text"] = self._secrets.redact(str(response.text))
+        return dataclasses.replace(response, **fields)
 
     def _cost(self, request: ModelRequest, candidate: _Candidate, response: ModelResponse) -> dict:
         manifest, estimate = candidate.connector.manifest, candidate.estimate

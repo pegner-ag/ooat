@@ -9,6 +9,10 @@
     "topology": "T4",
     "rules_applied": [],
     "parameters": {"v_usd": 400, "c_hil_usd_per_hour": 100, "c_fail_usd": 200},
+    "decisions": [
+      {"question": "a1.1", "engine": "prv.typesafe.api", "model": "jev-1.13.0", "answer": 0.93, "confidence": 0.93, "threshold": 0.8},
+      {"question": "a5", "engine": "prv.typesafe.api", "model": "jev-1.13.0", "answer": "many", "confidence": 0.71, "threshold": 0.8}
+    ],
     "candidates": [
       {"topology": "T2", "p_accept": 0.55, "model_usd": 4.0, "hil_hours": 0.5, "p_silent": 0.10, "eu_usd": 146},
       {"topology": "T3", "p_accept": 0.65, "model_usd": 5.5, "hil_hours": 0.4, "p_silent": 0.05, "eu_usd": 204.5},

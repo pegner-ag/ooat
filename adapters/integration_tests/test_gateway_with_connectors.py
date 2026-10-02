@@ -1,5 +1,7 @@
 """The gateway with the real connector packages and catalog/routing.json; no network, no CLI runs."""
 
+import io
+import json
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -9,10 +11,12 @@ import ooat_adapter_claude_code as claude_code
 from ooat_adapter_anthropic_api import AnthropicApiConnector
 from ooat_adapter_claude_code import ClaudeCodeConnector
 from ooat_adapter_codex import CodexConnector
+from ooat_adapter_typesafe_jev import JevConnector
 from ooat_core.config import parse_config
-from ooat_core.connectors import ModelRequest, jurisdiction_fingerprint
+from ooat_core.connectors import DecisionQuestion, DecisionRequest, ModelRequest, jurisdiction_fingerprint
 from ooat_core.connectors.cli import CliResult
 from ooat_core.connectors.registry import Registry
+from ooat_core.credentials_env import SecretResolver
 from ooat_core.gateway import Gateway, GatewayError
 from ooat_core.ids import new_id
 from ooat_core.ledger import Ledger, new_event
@@ -78,3 +82,47 @@ def test_reference_policy_refuses_client_data_until_contracts_can_be_verified(se
     assert info.value.code == "NOT_PERMITTED"
     # The API connector is acknowledged for the class and does not train on inputs: the policy itself refuses it.
     assert "prv.anthropic.api: client_confidential requires a known processing region" in info.value.trace
+
+
+# Decisions on Jev with the reference routing -------------------------------------------------------------------
+
+class Reply(io.BytesIO):
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+
+def jev_gateway(setup, opener):
+    jev = JevConnector(opener)
+    setup._ledger.append(new_event("ADAPTER_ACKNOWLEDGED", task=None, actor={"kind": "hil", "id": "operator"}, body={
+        "adapter": "prv.typesafe.api", "manifest_version": jev.manifest["version"],
+        "allowed_data_classes": ["public", "internal"], "operator": "Operator", "automation_confirmed": True,
+        "jurisdiction_sha256": jurisdiction_fingerprint(jev.manifest)}))
+    config = parse_config({"connectors": {"prv.typesafe.api": {"secret_env": "TYPESAFE_API_KEY"}}})
+    return Gateway(setup._ledger, Registry([ClaudeCodeConnector(), jev]), setup._routing, config,
+                   SecretResolver(config, {"TYPESAFE_API_KEY": "ts-test-key"}), clock=lambda: NOW)
+
+
+def decision(data_class="internal"):
+    return DecisionRequest("Shrň smlouvu.", {"a1.1": DecisionQuestion("noul", "Is the criterion checkable?")},
+                           data_class, task=new_id("tsk"))
+
+
+def test_internal_decisions_go_to_jev_at_its_list_price(setup):
+    reply = {"model": "jev-1.13.0", "answers": {"q0": {"type": "noul", "noul": 0.9}},
+             "usage": {"input_tokens": 332, "output_tokens": 18}}
+    result = jev_gateway(setup, lambda req, timeout: Reply(json.dumps(reply).encode())).decide(decision())
+    assert result.engine == "prv.typesafe.api" and result.model == "jev-1.13.0" and result.fallback_from is None
+    assert result.cost["basis"] == "exact" and result.cost["usd"] == pytest.approx(332 * 0.042 / 1e6)
+
+
+def test_personal_data_reaches_neither_jev_nor_an_unverified_subscription(setup):
+    def opener(req, timeout):
+        raise AssertionError("personal data must not be sent to Jev")
+
+    with pytest.raises(GatewayError) as info:
+        jev_gateway(setup, opener).decide(decision("personal"))
+    assert info.value.code == "NOT_PERMITTED"
+    assert "prv.typesafe.api: personal is not allowed by the manifest" in info.value.trace

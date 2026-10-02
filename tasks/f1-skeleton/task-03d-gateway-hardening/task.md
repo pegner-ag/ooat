@@ -18,3 +18,13 @@
 - [ ] Cache writes are billed at the base input price; Anthropic charges 1.25x (5-minute) or 2x (1-hour).
 - [ ] The consequences card shows both `jurisdiction.training_on_inputs` and `data_policy.training_on_inputs`
       (and `retention_days`) and flags a mismatch; today it shows only the enforced `data_policy` value.
+
+### From the final review of plan 04a (decision layer)
+- [ ] The fallback's budget check counts the cost of the failed decision-tier call, which the caller has not yet
+      appended to the ledger (small overrun possible today).
+- [ ] `estimate_decision()` reports the fallback's price when the state is too large for the decision connector
+      (move Jev's 32k-token limit into the manifest or a gateway check).
+- [ ] Measure Jev's tokens per character on Czech text; the characters / 3 estimate is unverified.
+- [ ] Document that a noul `p_true` given as a percentage is refused while choice and score are normalised.
+- [ ] Linter rule: a decision record's `answer` fits its question type (noul 0..1, score within the levels).
+- [ ] `adapters/typesafe-jev/description.md`: a connect timeout is reported as `UNAVAILABLE`, not `TIMEOUT`.

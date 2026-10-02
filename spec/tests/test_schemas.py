@@ -128,6 +128,22 @@ INVALID = [
      _delete(["body", "reason"])),
     ("event_negative_estimate", "event", "event.result_partial.json",
      _set(["cost", "estimated_usd"], -1)),
+    # ADR 0011
+    ("event_project_with_spaces", "event", "event.task_submitted.json", _set(["body", "project"], "SME AI")),
+    ("event_decision_confidence_above_one", "event", "event.topology_decided.json",
+     _set(["body", "decisions", 0, "confidence"], 1.5)),
+    ("event_decision_without_model_version", "event", "event.topology_decided.json",
+     _delete(["body", "decisions", 0, "model"])),
+    ("event_decision_bad_question_id", "event", "event.topology_decided.json",
+     _set(["body", "decisions", 0, "question"], "A1 criterion")),
+    ("event_gate_decision_without_engine", "event", "event.gate_passed.json",
+     _delete(["body", "criteria", 0, "decision", "engine"])),
+    ("event_gate_unknown_kind", "event", "event.gate_passed.json", _set(["body", "gate"], "gate.oracle.check")),
+    ("event_rating_correction_without_value", "event", "event.task_rated.json",
+     _delete(["body", "decisions", 1, "value"])),
+    ("event_rating_unknown_verdict", "event", "event.task_rated.json",
+     _set(["body", "decisions", 0, "verdict"], "maybe")),
+    ("event_rating_without_event", "event", "event.task_rated.json", _delete(["body", "decisions", 0, "event"])),
 ]
 
 

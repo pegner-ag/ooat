@@ -18,3 +18,6 @@
   allow-listed variables in `connectors/cli.py`.
 - Claude Code headless: `--bare` disables the subscription login; `--system-prompt-file` works although `--help`
   lists it only inside the `--bare` text.
+- Jev (TypeSafe System One API): a noul answer has no `confidence` field (use max(p, 1 - p)); a score is a
+  fractional position with a `legend`; the request alias `jev-latest` is answered as a version (`jev-1.13.0`),
+  so `routing.json` prices both names and decisions record the version. Docs: https://docs.typesafe.ai/llms.txt

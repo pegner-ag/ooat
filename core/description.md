@@ -3,8 +3,8 @@
 ## Purpose
 Reference runtime of OOAT. Currently: identifiers, OOA Spec validation, the append-only ledger, artifact
 storage, state projections and the provider gateway core (connector contract, registry, routing, budgets,
-metering), the connector contract used by the packages in `adapters/`, and the `ooat connectors` operator
-command. Gate, workers and API are not implemented yet.
+metering, typed decisions with a text-model fallback), the connector contract used by the packages in
+`adapters/`, and the `ooat connectors` operator command. Gate, workers and API are not implemented yet.
 
 ## Key components
 - `ids.py` — `new_id(prefix)`, ULIDs, `parse_artifact_ref()`
@@ -14,16 +14,23 @@ command. Gate, workers and API are not implemented yet.
 - `blobs.py` — SHA-256 addressed bodies, fsynced before use, safe under concurrent writes; tampering detected on read, repaired on re-put
 - `artifacts.py` — `ArtifactStore.stage()` / `.read()`; artifacts exist only through their producing event
 - `state.py` — `task_state()`, `contract_state()` computed from events
-- `connectors/` — connector contract (`ModelConnector`, `ModelRequest`, `ModelResponse`, `ConnectorError`),
-  `jurisdiction_fingerprint()`; `registry.py` discovers installed connectors (entry points `ooat.connectors`)
-  and lists broken ones without using them
+- `connectors/` — connector contract: kind `model` (`ModelConnector`, `ModelRequest`, `ModelResponse`) and kind
+  `decision` (`DecisionConnector`, `DecisionRequest`, `DecisionQuestion`, `DecisionAnswer`, `DecisionResponse`),
+  `ConnectorError`, `jurisdiction_fingerprint()`; `registry.py` discovers installed connectors (entry points
+  `ooat.connectors`), lists them by kind, and lists broken ones (bad manifest, unknown kind, a decision tier on
+  the wrong kind) without using them
+- `decisions.py` — `check_questions()`, `with_reversed_choices()` (order-swap check), `checked_answers()`,
+  `merged_answers()`, and the text-model fallback `fallback_prompt()` / `parse_fallback()` (ADR 0011)
 - `config.py` — `load_config()` for `ooat.toml`: ledger URL, per-tier pins, connector settings; no secrets,
   no enablement
 - `credentials_env.py` — `SecretResolver`: values from named environment variables, `redact()`
 - `routing.py` — `RoutingPolicy` from `routing.json`: dated prices, optional tier allow-list, data-class policy
 - `gateway.py` — `Gateway.estimate()` / `.call()`: data-class guard, acknowledgement and automation rules from
   the ledger, quota cool-down, pins, cheapest connector, contract budget, cost record with `estimated_usd`;
-  passes the routed model to the connector in `ModelRequest.model`
+  passes the routed model to the connector in `ModelRequest.model`. `Gateway.estimate_decision()` /
+  `.decide()`: the same rules for decision connectors; every choice is asked twice with reversed options,
+  answers are checked before use, and when no decision connector can answer, the `economy` text tier answers the
+  same questions (`DecisionResult.engine` and `.model` say which, `.fallback_from` why)
 - `connectors/cli.py` — `run_cli()`: vendor CLI with the prompt on stdin, in an empty temporary directory,
   typed `UNAVAILABLE` / `TIMEOUT` failures
 - `connectors/conformance.py` — `check_connector()`: the contract every connector package tests;

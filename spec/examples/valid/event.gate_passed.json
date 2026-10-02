@@ -1,0 +1,17 @@
+{
+  "id": "evt_01J9ZQ78A8K3M5N7P9Q1R3S5T7",
+  "ts": "2026-09-28T23:10:00Z",
+  "task": "tsk_01J9ZQ7A1BK3M5N7P9Q1R3S5T7",
+  "contract": "ctr_01J9ZQ7F3CK3M5N7P9Q1R3S5T7",
+  "actor": {"kind": "system", "id": "ooat-core"},
+  "type": "GATE_PASSED",
+  "refs": ["art_01J9ZQ6X9EK3M5N7P9Q1R3S5T7@v1"],
+  "body": {
+    "gate": "gate.decision.check_criterion",
+    "criteria": [
+      {"id": "c1", "passed": true, "score": 0.91,
+       "decision": {"question": "c1", "engine": "prv.typesafe.api", "model": "jev-1.13.0", "answer": 0.91, "confidence": 0.91, "threshold": 0.8}}
+    ],
+    "evidence": ["Every competitor row links at least one source."]
+  }
+}

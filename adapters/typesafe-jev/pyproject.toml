@@ -1,0 +1,18 @@
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+[project]
+name = "ooat-adapter-typesafe-jev"
+version = "0.1.0"
+description = "OOAT decision connector for TypeSafe's System One API (Jev), metered."
+readme = "description.md"
+requires-python = ">=3.12"
+license = "Apache-2.0"
+dependencies = ["ooat-core"]
+
+[project.entry-points."ooat.connectors"]
+typesafe-jev = "ooat_adapter_typesafe_jev:JevConnector"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/ooat_adapter_typesafe_jev"]

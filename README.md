@@ -17,7 +17,8 @@ action waiting for a named human.
 ## Status
 
 Early F1 (spec draft v0.1): JSON Schemas, the starter catalog taxonomy, the ledger, the provider gateway with
-three model connectors and the `ooat connectors` command exist; the task runtime (Gate, workers) does not yet.
+three model connectors and one decision connector (Jev), and the `ooat connectors` command exist; the task
+runtime (Gate, workers) does not yet.
 Decision records are in `docs/adr/`.
 
 ## First steps
@@ -30,7 +31,8 @@ url = "sqlite:///ooat-ledger.sqlite"
 ```
 
 ```sh
-python -m pip install -e core -e adapters/claude-code -e adapters/codex -e adapters/anthropic-api
+python -m pip install -e core -e adapters/claude-code -e adapters/codex -e adapters/anthropic-api \
+    -e adapters/typesafe-jev
 ooat connectors list                      # installed connectors and their state
 ooat connectors show prv.anthropic.api    # connection consequences card
 ooat connectors enable prv.anthropic.api --operator "Your Name"
