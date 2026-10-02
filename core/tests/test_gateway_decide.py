@@ -1,5 +1,6 @@
 """Gateway.decide(): decision connectors routed, metered and checked like model connectors (ADR 0011)."""
 
+import dataclasses
 from datetime import datetime, timezone
 
 import pytest
@@ -282,3 +283,25 @@ def test_the_estimate_falls_back_to_the_text_tier_too():
     setup = Setup(economy())
     estimate = setup.gateway.estimate_decision(setup.request())
     assert estimate.connector == "prv.fake.api" and estimate.model == "fake-economy"
+
+
+class NamelessDecisionConnector(FakeDecisionConnector):
+    """Answers without saying which model version did: thresholds could not be keyed (ADR 0011)."""
+
+    def decide(self, request, secrets):
+        return dataclasses.replace(super().decide(request, secrets), model="")
+
+
+def test_an_answer_without_a_model_version_is_a_charged_api_error():
+    setup = Setup(NamelessDecisionConnector(answers=jev_answers))
+    with pytest.raises(GatewayError) as info:
+        setup.gateway.decide(setup.request())
+    assert info.value.code == "API_ERROR" and "model version" in info.value.message
+    assert info.value.cost["adapter"] == "prv.fakejev.api"
+
+
+def test_a_fallback_answer_without_a_model_version_is_a_charged_api_error():
+    setup = Setup(economy(reported_model=" "))
+    with pytest.raises(GatewayError) as info:
+        setup.gateway.decide(setup.request())
+    assert info.value.code == "API_ERROR" and info.value.cost["adapter"] == "prv.fake.api"

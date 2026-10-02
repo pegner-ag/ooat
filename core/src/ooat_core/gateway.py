@@ -197,6 +197,7 @@ class Gateway:
         except Exception as error:  # an answer object of the wrong shape must still be typed and charged
             raise GatewayError("API_ERROR", self._secrets.redact(f"unusable answer: {type(error).__name__}"),
                                cost=cost) from None
+        self._require_model(response.model, cost)
         self._warn_budget(request, cost["usd"])
         return DecisionResult(merged_answers(request.questions, answers), candidate.connector.manifest["id"],
                               response.model, cost, candidate.estimate)
@@ -211,8 +212,15 @@ class Gateway:
         except Exception as error:  # an answer object of the wrong shape must still be typed and charged
             raise GatewayError("API_ERROR", self._secrets.redact(f"unusable fallback answer: {type(error).__name__}"),
                                cost=result.cost) from None
+        self._require_model(result.response.model, result.cost)
         return DecisionResult(merged_answers(request.questions, answers), result.cost["adapter"],
                               result.response.model, result.cost, result.estimate)
+
+    @staticmethod
+    def _require_model(model: str, cost: dict) -> None:
+        """Thresholds are keyed by engine and model version (ADR 0011): an unnamed version cannot be acted on."""
+        if not model.strip():
+            raise GatewayError("API_ERROR", "the reply does not name the model version that answered", cost=cost)
 
     @staticmethod
     def _fallback_request(expanded: DecisionRequest) -> ModelRequest:
