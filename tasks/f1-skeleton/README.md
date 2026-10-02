@@ -14,15 +14,18 @@ written for a sub-project only when the ones it depends on are done, so it can u
 | 01c | First-run setup `ooat init`: detect available databases, ask, write config, install only the chosen driver (ADR 0008); later also adapter acknowledgement and notifier choice | 01 | later |
 | 02 | Catalog runtime: load and resolve families/roles/capabilities (linter rules from `spec/README.md`), 15 capabilities, 5 roles, eval sets | 01, task-04 seed tasks | later |
 | 03 | Provider gateway — design: `task-03-provider-gateway/design.md` (ADR 0010). Plans: 03a gateway core + connector contract (done), 03b connectors (Claude Code CLI, Codex CLI, Anthropic API) (done), 03c `ooat connectors` + consequences card (done) | 01 | done |
-| 04 | Task runtime T0–T2: intake (CLI + REST), minimal Gate (A1, A2, A3, A10) with pre-start cost estimate and budget checkpoint (design §9), worker, deterministic acceptance, abstentions, task closing | 01–03 | later |
-| 05 | HIL and dashboard: one notifier with one-tap answers; HIL queue, rating queue, exceptions, tasks | 04 | later |
+| 04 | Task runtime T0–T2 — design: `task-04-task-runtime/design.md` (ADR 0011). Plans: 04a decision layer (Jev connector, `Gateway.decide`), 04b Topology Gate T0–T2 with pre-start estimate, 04c `ooat task` / `ooat hil` commands, worker, acceptance, closing, rating | 01–03 | design |
+| 05 | REST intake and Telegram bot (tasks per project), HIL notifier with one-tap answers, dashboard: HIL queue, rating queue, exceptions, tasks | 04 | later |
 | 06 | Baseline: eval runner, 5 seed tasks at T2 with cost, HIL hours and acceptance | 02–05 | later |
 
 ## Constraints carried into later sub-projects
 
-- The ledger does not authenticate actors. HIL identity is verified at intake and notifier (04, 05); only those
-  paths may append events with `actor.kind = hil`, so a worker can never write a human approval (R3, spec §9).
-- 04 (REST intake, up to 5 agent instances) defines the threading model of the SQLite backend
+- The ledger does not authenticate actors. In 04 the local `ooat` commands are trusted as the operator's own hand
+  (whoever can run them can also edit the ledger file); remote HIL identity (REST, Telegram) is verified in 05.
+  Only those paths may append events with `actor.kind = hil`, so a worker can never write a human approval (R3,
+  spec §9). The local `--operator` name is self-declared; revisit this trust model before any R3 gate accepts a
+  local answer.
+- 05 (REST intake, up to 5 agent instances) defines the threading model of the SQLite backend
   (`check_same_thread`, WAL, `busy_timeout`) before serving concurrent requests.
 
 ## Phase
