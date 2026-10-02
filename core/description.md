@@ -4,8 +4,9 @@
 Reference runtime of OOAT. Currently: identifiers, OOA Spec validation, the append-only ledger, artifact
 storage, state projections and the provider gateway core (connector contract, registry, routing, budgets,
 metering, typed decisions with a text-model fallback), the connector contract used by the packages in
-`adapters/`, the `ooat connectors` operator command, and the Topology Gate for T0–T2. Workers, task commands
-and API are not implemented yet.
+`adapters/`, the `ooat connectors` operator command, the Topology Gate for T0–T2, and the task runtime with
+its `ooat task` / `ooat hil` commands (one worker, acceptance checks, closing, rating). The REST API and teams
+(T3+) are not implemented yet.
 
 ## Key components
 - `ids.py` — `new_id(prefix)`, ULIDs, `parse_artifact_ref()`
@@ -53,7 +54,21 @@ and API are not implemented yet.
   records the operator's responsibility for client or personal data, which may carry those classes beyond the
   manifest when training is off; `responsibility_in_force()` (12 months) and `blocked_by_policy()` serve the
   gateway, the card and the listing
+- `catalog.py` — `load_card()`, `routing_path()`: cards and `routing.json` read from the repository's
+  `catalog/`
+- `worker.py` — `run_worker()`: the T2 worker; one workhorse call with the family rules, the role, the task,
+  untrusted attachment previews (6,000 characters) and the feedback of a failed attempt; returns a Markdown
+  document, an abstention in the fixed JSON form, or `invalid`
+- `acceptance.py` — `check_output()`: deterministic checks, one decision per criterion (θ for point
+  `acceptance`), the critic for unsure answers and for "met" on untrusted input; GATE_PASSED / GATE_FAILED events
+- `runtime.py` — `Runtime.submit()` / `.run()` / `.expire()`: intake with untrusted attachments, the Gate, one
+  contract (`cap.general.complete_task`, `role.general.worker`), two attempts, RESULT / ABSTAIN, TASK_CLOSED with
+  the four cost parts; applies a declared default when a question's deadline has passed. A provider failure
+  (quota, outage, timeout) pauses the task as RUNNING without using up an attempt; the next `run` resumes it from
+  the ledger, and `runnable()` lists the tasks that can move without the operator
+- `rating.py` — `task_decisions()`, `rate()`: TASK_RATED with the operator's verdict per decision
 - `operator_cli.py` — the `ooat` command: `ooat connectors list | show | enable | disable`
+- `task_cli.py` — `ooat task submit | run [--all] | show | rate` and `ooat hil list | answer`
 
 Schemas are read from `spec/schemas/` in the repository, so the package works from a checkout or an editable
 install (`pip install -e core`); packaging the schemas into the wheel is release work.
@@ -64,5 +79,5 @@ in a backend; every backend passes `tests/test_ledger.py`.
 
 ## Public API
 `Ledger.open(url)`, `new_event()`, `ArtifactStore`, `BlobStore`, `task_state()`, `contract_state()`, `validate()`,
-`Gateway`, `Gate`, `task_facts()`, `threshold()`, `Registry.discover()`, `load_config()`, `load_routing()`,
-`SecretResolver`, `connector_admin`, the `ooat` console script.
+`Gateway`, `Gate`, `Runtime`, `rate()`, `task_facts()`, `threshold()`, `Registry.discover()`, `load_config()`,
+`load_routing()`, `SecretResolver`, `connector_admin`, the `ooat` console script.
