@@ -31,7 +31,8 @@
    - decision records in `TOPOLOGY_DECIDED.body.decisions` and in `GATE_PASSED` / `GATE_FAILED`
      `body.criteria[].decision`;
    - `TASK_RATED.body.decisions`: a list of `{event, question, verdict, value}`, so that repeated questions are
-     rated separately. These ratings feed the thresholds.
+     rated separately. These ratings feed the thresholds;
+   - a fourth gate kind, `gate.decision.<name>`, for acceptance checks answered by the decision tier.
 
 ## Spec text this overrides
 
@@ -39,6 +40,7 @@
   connectors now act from the first task with the interim θ = 0.8. The text fallback keeps θ = 1 until it is rated.
 - §6 "Introduced in F2; F1 uses deterministic rules and the fallback": the decision tier is introduced in F1.
 - §6 and §11 "θ = 1 until 20 rated cases": replaced by the schedule in point 1.
+- §2 "Gate — Checkpoint: deterministic, critic or HIL": a gate may also be of kind `decision`.
 
 ## Consequences
 
@@ -48,6 +50,5 @@
 - Without Jev, the Gate asks the operator more often until the fallback has its own ratings.
 - Personal data that the pre-scan cannot recognise is sent to the decision provider under the class the operator
   declared. This residual risk is stated to the operator.
-- The spec v0.2 revision (`tasks/spec/`) will carry these changes into §4, §6 and §11.
-- Decided by the owner on 2026-10-01; this override of spec text needs the owner's confirmation on the pull
-  request that introduces it.
+- The spec v0.2 revision (`tasks/spec/`) will carry these changes into §2, §4, §6 and §11.
+- Decided by the owner on 2026-10-01; the override of spec text was confirmed by the owner on 2026-10-02.
