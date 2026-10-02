@@ -174,3 +174,17 @@ def test_the_operator_policy_blocks_countries_and_is_shown_on_the_card_and_in_th
     acknowledge(ledger, connector, "Martin", ["personal"], True, {"no_training": True}, TODAY)
     (status,) = connector_statuses(Registry([connector]), ledger, TODAY, config)
     assert status.blocked == "blocked by your policy: model origin CN" and status.responsibility_until == "2027-10-01"
+
+
+def test_the_confirmation_date_is_always_today_and_a_future_date_never_counts(ledger):
+    with pytest.raises(ValueError, match="unknown responsibility settings"):
+        acknowledge(ledger, subscription(), "Martin", ["personal"], True,
+                    {"no_training": True, "confirmed_on": "2099-01-01"}, TODAY)
+    assert responsibility_in_force({"responsibility": {"confirmed_on": "2099-01-01"}}, TODAY) is None
+
+
+def test_training_stated_in_the_jurisdiction_block_blocks_an_extension(ledger):
+    connector = subscription()
+    connector.manifest["jurisdiction"]["training_on_inputs"] = True
+    with pytest.raises(ValueError, match="trains on inputs"):
+        acknowledge(ledger, connector, "Martin", ["personal"], True, {"no_training": True}, TODAY)

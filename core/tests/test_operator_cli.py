@@ -299,3 +299,10 @@ def test_list_and_show_reflect_the_policy_and_the_responsibility(config):
     assert "blocked by your policy: model origin CN" in listing and "holds until 2027-10-01" in listing
     _, card = run(config, "connectors", "show", "prv.fake.subscription_cli", connectors=[connector])
     assert "Your policy:            blocked by your policy: model origin CN" in card
+
+
+def test_a_responsibility_without_any_known_region_is_refused(config):
+    code, out = run(config, "connectors", "enable", "prv.fake.subscription_cli", "--operator", "Martin",
+                    "--classes", "personal", "--responsibility", "yes", "--regions", "", "--no-training", "yes",
+                    connectors=[subscription()])
+    assert code == 1 and "need a known processing region" in out and state_events(config) == []

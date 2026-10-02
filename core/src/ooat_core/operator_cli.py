@@ -149,13 +149,14 @@ def _responsibility(args, manifest, stdin, stdout) -> tuple[dict | None, str | N
     responsibility = {}
     if not manifest["jurisdiction"]["processing_regions"]:
         answer = args.regions if args.regions is not None else _ask(
-            "Regions where the provider processes under your agreement (e.g. eu, us; empty if unknown): ",
+            "Regions where the provider processes under your agreement (e.g. eu, us): ",
             stdin, stdout)
         regions = [r.strip() for r in answer.split(",") if r.strip()]
         if not all(_REGION.match(r) for r in regions):
             return None, "regions are codes such as eu or us"
-        if regions:
-            responsibility["processing_regions"] = sorted(set(regions))
+        if not regions:  # the gateway would never route there: say so now, not at the first task
+            return None, "client and personal data need a known processing region; state it from your agreement"
+        responsibility["processing_regions"] = sorted(set(regions))
     if manifest["data_policy"]["training_on_inputs"] is None:
         off = args.no_training or _ask("Is training on your inputs switched off for this account? (yes/no): ",
                                        stdin, stdout).lower()

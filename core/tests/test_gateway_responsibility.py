@@ -128,3 +128,62 @@ def test_responsibility_never_covers_special_category_data():
     setup.enable(connector, responsibility={})
     with pytest.raises(GatewayError):
         setup.route("special_category")
+
+
+# Final review of plan 03e ---------------------------------------------------------------------------------------
+
+def lax(setup):
+    """The same setup under a routing policy without the no-training requirement."""
+    policy = {k: {key: v for key, v in rules.items() if key != "require_no_training"} for k, rules in POLICY.items()}
+    return Gateway(setup.ledger, Registry(setup.connectors),
+                   RoutingPolicy({"version": "0.1.0", "prices": PRICES, "data_class_policy": policy}),
+                   setup.config, SecretResolver(setup.config, {}), clock=lambda: setup.now)
+
+
+def test_a_provider_that_trains_is_never_extended_whatever_the_routing_policy():
+    connector = subscription()
+    setup = Setup(connector)
+    setup.enable(connector, classes=("client_confidential",), responsibility={"no_training": True,
+                                                                              "processing_regions": ["us"]})
+    connector.manifest["data_policy"]["training_on_inputs"] = True  # the provider's terms changed later
+    request = ModelRequest(tier="workhorse", prompt="x", data_class="client_confidential", task=new_id("tsk"))
+    with pytest.raises(GatewayError) as info:
+        lax(setup).estimate(request)
+    assert "trains on inputs" in info.value.trace[0]
+
+
+def test_training_stated_in_the_jurisdiction_block_counts_too():
+    connector = subscription()
+    setup = Setup(connector)
+    setup.enable(connector, responsibility={"no_training": True, "processing_regions": ["us"]})
+    connector.manifest["jurisdiction"]["training_on_inputs"] = True
+    with pytest.raises(GatewayError):
+        setup.route("personal")
+
+
+def test_an_expired_responsibility_stops_a_subscription_carrying_personal_data_beyond_its_manifest():
+    connector = subscription()
+    setup = Setup(connector, today=TODAY + timedelta(days=366))
+    setup.enable(connector, responsibility={"no_training": True, "processing_regions": ["us"]})
+    with pytest.raises(GatewayError) as info:
+        setup.route("personal")
+    assert "not allowed by the manifest" in info.value.trace[0]
+
+
+def test_changed_facts_stop_client_data_on_an_existing_responsibility():
+    connector = subscription()
+    setup = Setup(connector)
+    setup.enable(connector, classes=("client_confidential",),
+                 responsibility={"no_training": True, "processing_regions": ["us"]})
+    assert setup.route("client_confidential") == "prv.fake.subscription_cli"
+    connector.manifest["jurisdiction"]["host_entity"] = "Another Host Inc."
+    with pytest.raises(GatewayError) as info:
+        setup.route("client_confidential")
+    assert "jurisdiction changed" in info.value.trace[0]
+
+
+def test_a_sub_region_in_the_policy_matches_that_sub_region():
+    connector = subscription()
+    setup = Setup(connector, policy={"personal_data_regions": ["eu-west"]})
+    setup.enable(connector, responsibility={"no_training": True, "processing_regions": ["eu-west"]})
+    assert setup.route("personal") == "prv.fake.subscription_cli"

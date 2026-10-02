@@ -14,7 +14,8 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
 from .config import Config
-from .connector_admin import RESPONSIBLE_CLASSES, acknowledgements, blocked_by_policy, responsibility_in_force
+from .connector_admin import (RESPONSIBLE_CLASSES, acknowledgements, blocked_by_policy, may_extend, provider_trains,
+                              responsibility_in_force)
 from .connectors import (ConnectorError, DecisionAnswer, DecisionRequest, ModelConnector, ModelRequest, ModelResponse,
                          jurisdiction_stale)
 from .connectors.registry import Registry
@@ -324,13 +325,16 @@ class Gateway:
         # agreement, the region under it, and that training is off for this account.
         responsibility = responsibility_in_force(acknowledgement, self._clock().date())
         responsible = responsibility is not None and data_class in RESPONSIBLE_CLASSES
-        if data_class not in manifest["data_policy"]["allowed_data_classes"] and not responsible:
-            return f"{data_class} is not allowed by the manifest"
+        if data_class not in manifest["data_policy"]["allowed_data_classes"]:
+            if not responsible:
+                return f"{data_class} is not allowed by the manifest"
+            if not may_extend(manifest, responsibility):  # a hard rule, whatever the routing policy says
+                return (f"{data_class} cannot go beyond the manifest: the provider trains on inputs or training "
+                        "is not off")
         if data_class not in acknowledgement["allowed_data_classes"]:
             return f"{data_class} was not acknowledged by the operator"
-        no_training = manifest["data_policy"]["training_on_inputs"] is False or (
-            responsible and responsibility.get("no_training") is True
-            and manifest["data_policy"]["training_on_inputs"] is not True)
+        trains = provider_trains(manifest)
+        no_training = trains is False or (responsible and trains is None and responsibility.get("no_training") is True)
         if policy.get("require_no_training") and not no_training:
             return f"{data_class} requires a connector that does not train on inputs"
         regions = manifest["jurisdiction"]["processing_regions"] or (
@@ -342,13 +346,14 @@ class Gateway:
         if policy.get("require_contract") and not responsible:  # nothing else can vouch for an agreement
             return f"{data_class} requires a provider contract: take responsibility for it when enabling the connector"
         allowed_regions = self._config.personal_data_regions
-        if data_class in _PERSONAL_OR_HIGHER and allowed_regions is not None and (
-                not regions or any(r.split("-")[0] not in allowed_regions for r in regions)):
+        if data_class in _PERSONAL_OR_HIGHER and allowed_regions is not None and (not regions or not all(
+                any(r == a or r.startswith(f"{a}-") for a in allowed_regions) for r in regions)):
             return (f"your policy allows personal data only in {sorted(allowed_regions)}; "
                     f"this connector processes in {regions or 'unknown regions'}")
-        if data_class in _PERSONAL_OR_HIGHER and jurisdiction_stale(manifest, acknowledgement, self._clock().date(),
-                                                                    responsible):
-            return "jurisdiction changed or not verified within 12 months; acknowledge again for personal data"
+        # The responsibility holds "until the facts on the card change", so client data checks them too.
+        if (data_class in _PERSONAL_OR_HIGHER or responsible) and jurisdiction_stale(
+                manifest, acknowledgement, self._clock().date(), responsible):
+            return f"jurisdiction changed or not verified within 12 months; acknowledge again for {data_class} data"
         if manifest["automation_permitted"] == "not_permitted":
             return "provider terms do not permit automated use"
         if acknowledgement.get("automation_confirmed") is not True:  # absent in acknowledgements before ADR 0010

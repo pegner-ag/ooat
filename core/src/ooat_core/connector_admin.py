@@ -56,9 +56,26 @@ def responsibility_in_force(acknowledgement: dict | None, today: date) -> dict |
     responsibility = (acknowledgement or {}).get("responsibility")
     if responsibility is None:
         return None
-    if (today - date.fromisoformat(responsibility["confirmed_on"])).days > RESPONSIBILITY_DAYS:
+    age = (today - date.fromisoformat(responsibility["confirmed_on"])).days
+    if not 0 <= age <= RESPONSIBILITY_DAYS:  # a date in the future is not a confirmation
         return None
     return responsibility
+
+
+def provider_trains(manifest: dict) -> bool | None:
+    """True if either manifest block says the provider trains on inputs, False if the data policy says it does
+    not (and nothing says it does), None when unknown."""
+    stated = (manifest["data_policy"]["training_on_inputs"], manifest["jurisdiction"]["training_on_inputs"])
+    if True in stated:
+        return True
+    return False if stated[0] is False else None
+
+
+def may_extend(manifest: dict, responsibility: dict | None) -> bool:
+    """Whether a responsibility may carry client or personal data beyond the manifest (ADR 0012 point 3)."""
+    trains = provider_trains(manifest)
+    return responsibility is not None and trains is not True and (
+        trains is False or responsibility.get("no_training") is True)
 
 
 def blocked_by_policy(manifest: dict, config: Config | None) -> str | None:
@@ -202,7 +219,7 @@ def checked_classes(manifest: dict, data_classes: Iterable[str], responsibility:
     if any(c not in RESPONSIBLE_CLASSES for c in beyond) or (beyond and responsibility is None):
         raise ValueError(f"{manifest['id']} does not accept {beyond} (client_confidential and personal need your "
                          f"responsibility; special_category needs verified redaction)")
-    training = manifest["data_policy"]["training_on_inputs"]
+    training = provider_trains(manifest)
     if beyond and training is True:
         raise ValueError(f"{manifest['id']} trains on inputs; it cannot carry {beyond}")
     if beyond and training is None and not responsibility.get("no_training"):
@@ -231,7 +248,10 @@ def acknowledge(ledger: Ledger, connector: ModelConnector, operator: str, data_c
             raise ValueError("responsibility applies to client_confidential or personal data")
         if today is None:
             raise ValueError("responsibility needs the date it is taken")
-        body["responsibility"] = {"confirmed_on": today.isoformat(), **responsibility}
+        unknown = set(responsibility) - {"processing_regions", "no_training"}
+        if unknown:
+            raise ValueError(f"unknown responsibility settings: {sorted(unknown)} (the date is always today)")
+        body["responsibility"] = {**responsibility, "confirmed_on": today.isoformat()}
     return ledger.append(new_event("ADAPTER_ACKNOWLEDGED", task=None, actor={"kind": "hil", "id": operator},
                                    body=body))
 
