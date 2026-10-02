@@ -28,3 +28,12 @@
 - [ ] Document that a noul `p_true` given as a percentage is refused while choice and score are normalised.
 - [ ] Linter rule: a decision record's `answer` fits its question type (noul 0..1, score within the levels).
 - [ ] `adapters/typesafe-jev/description.md`: a connect timeout is reported as `UNAVAILABLE`, not `TIMEOUT`.
+
+### From the final review of plan 04b (Topology Gate)
+- [ ] `task_facts()` raises `ValueError` (not `StopIteration`) for an unknown task.
+- [ ] `TOPOLOGY_DECIDED.candidates[].eliminated_by` names the real reason when no route exists and the class was
+      not raised (today it falls back to `A10` or `A3`).
+- [ ] Compute `rated_decisions()` once per Gate batch instead of once per answer.
+- [ ] The budget comparison counts the Gate cost already spent on the task.
+- [ ] Document the pre-scan's residual gaps: lowercase IBANs, `00420…` numbers (seen as cards), phone numbers of
+      other countries.
