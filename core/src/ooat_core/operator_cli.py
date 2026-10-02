@@ -61,6 +61,14 @@ def _ask(prompt: str, stdin, stdout) -> str:
     return stdin.readline().strip()
 
 
+def _ask_or_end(prompt: str, stdin, stdout) -> str | None:
+    """Like _ask, but None when the input has ended, so the end of input is never read as an empty answer."""
+    stdout.write(prompt)
+    stdout.flush()
+    line = stdin.readline()
+    return None if line == "" else line.strip()
+
+
 def main(argv=None, stdin=None, stdout=None, registry: Registry | None = None, today=None, routing=None,
          clock=None) -> int:
     stdin, stdout = stdin or sys.stdin, stdout or sys.stdout
@@ -73,10 +81,14 @@ def main(argv=None, stdin=None, stdout=None, registry: Registry | None = None, t
                 stdout.write(refusal)
                 return REFUSED
             return task_cli.run(args, config, path, stdin, stdout, registry or Registry.discover(), routing, clock,
-                                _ask)
+                                _ask_or_end)
         return _run(args, stdin, stdout, registry, today or clock().date())
     except KeyboardInterrupt:
-        stdout.write("\nCancelled; nothing was changed.\n")
+        if args.command in ("task", "hil"):  # events may already be in the ledger: say how to go on
+            stdout.write("\nInterrupted. What was done is in the ledger; `ooat task run <id>` or "
+                         "`ooat task run --all` continues.\n")
+        else:
+            stdout.write("\nCancelled; nothing was changed.\n")
         return CANCELLED
 
 

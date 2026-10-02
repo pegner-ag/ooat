@@ -44,6 +44,26 @@ class RunOutcome:
     artifact: str | None = None  # the delivered document, when there is one
 
 
+def attachment_text(content: bytes) -> str:
+    """An attachment as text: UTF-8, or UTF-8 / UTF-16 with a byte-order mark (PowerShell 5 writes UTF-16).
+
+    Anything else is refused: the personal-data pre-scan must read the same characters the model will get, and a
+    binary file or an unmarked UTF-16 file would slip past it.
+    """
+    for bom, codec in ((b"\xef\xbb\xbf", "utf-8-sig"), (b"\xff\xfe", "utf-16"), (b"\xfe\xff", "utf-16")):
+        if content.startswith(bom):
+            break
+    else:
+        codec = "utf-8"
+    try:
+        text = content.decode(codec)
+    except UnicodeDecodeError:
+        raise ValueError("an attachment must be text in UTF-8, or UTF-16 with a byte-order mark") from None
+    if "\x00" in text:
+        raise ValueError("an attachment must be text, not a binary file")
+    return text
+
+
 def _utc(text: str) -> datetime:
     return datetime.fromisoformat(text.replace("Z", "+00:00"))
 
@@ -71,9 +91,9 @@ class Runtime:
         if acceptance:
             body["acceptance"] = [criterion.strip() for criterion in acceptance]
         declared = data_class or "internal"
-        staged = [self.artifacts.stage(content, artifact_type="attachment", untrusted=True,
-                                       data_class=raised_class(declared, content.decode("utf-8", errors="replace")))
-                  for content in files]
+        texts = [attachment_text(content) for content in files]  # stored as UTF-8, scanned as stored
+        staged = [self.artifacts.stage(text.encode("utf-8"), artifact_type="attachment", untrusted=True,
+                                       data_class=raised_class(declared, text)) for text in texts]
         task = new_id("tsk")
         actor = {"kind": "hil", "id": checked_operator(operator)}
         self.ledger.append(new_event("TASK_SUBMITTED", task=task, actor=actor, refs=[s.ref for s in staged], body=body),
@@ -151,14 +171,23 @@ class Runtime:
                        for ref in submitted["refs"]]
         for attachment in attachments:  # the Gate never saw them; the worker sends them, so they count here
             data_class = higher_class(data_class, self.ledger.artifact(attachment.ref)["data_class"])
-        resumed = True  # only the first pass of a run may re-check a document whose check was paused
+        resumed = True  # only the first pass of a run picks up a document delivered before an interruption
         while True:
             results = [e for e in self.ledger.events(task=task, types=["RESULT"]) if e.get("contract") == contract]
             last = results[-1] if results else None
-            if resumed and last is not None and last["body"]["outcome"] == "FAILED" and last["refs"]:
-                artifact = last["refs"][0]  # its acceptance check was paused: check the same document again
+            if resumed and last is not None and last["body"]["outcome"] == "PARTIAL":  # stopped before closing
+                remaining = last["body"]["remaining"]
+                return self._close(task, "CLOSED_PARTIAL", "Delivered in part.", f"Unmet criteria: {remaining}",
+                                   artifacts=last["body"]["artifacts"])
+            if resumed and last is not None and (last["body"]["outcome"] == "DONE" or (
+                    last["body"]["outcome"] == "FAILED" and last["refs"])):
+                # A document was delivered, but its check was paused or interrupted: check it again; never write
+                # a new one for it, so an interruption cannot cost an extra attempt.
+                artifact = last["refs"][0]
                 text = self.artifacts.read(artifact).decode("utf-8")
             else:
+                if self._attempts(task, contract) >= MAX_ATTEMPTS:
+                    return self._unable(task, contract, worker)
                 feedback = self._feedback(task, results, facts.criteria)
                 try:
                     output = run_worker(self.gateway, task=task, contract=contract, data_class=data_class,
@@ -178,7 +207,7 @@ class Runtime:
                                        f"The worker abstained: {output.abstention['reason']}",
                                        output.abstention["missing"])
                 staged = self.artifacts.stage(output.text.encode("utf-8"), artifact_type="markdown_document",
-                                              data_class=data_class)
+                                              data_class=raised_class(data_class, output.text))
                 artifact, text = staged.ref, output.text
                 self._event("RESULT", task, contract, worker, {"outcome": "DONE", "artifacts": [artifact]},
                             output.cost, refs=[artifact], staged=[staged])
@@ -209,7 +238,10 @@ class Runtime:
         issued = [e for e in events if e["type"] == "CONTRACT_ISSUED"]
         if issued:
             body = issued[-1]["body"]["contract"]
-            return body["id"], {"kind": "agent", "id": body["agent"], "role": ROLE}
+            worker = {"kind": "agent", "id": body["agent"], "role": ROLE}
+            if not any(e["type"] == "CLAIM" and e.get("contract") == body["id"] for e in events):
+                self.ledger.append(new_event("CLAIM", task=task, contract=body["id"], actor=worker, body={}))
+            return body["id"], worker
         contract, agent = new_id("ctr"), new_id("agt")
         worker = {"kind": "agent", "id": agent, "role": ROLE}
         self.ledger.append(new_event("CONTRACT_ISSUED", task=task, contract=contract, actor=ACTOR, body={"contract": {

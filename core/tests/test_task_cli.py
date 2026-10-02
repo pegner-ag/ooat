@@ -28,10 +28,10 @@ def env(tmp_path):
             "ledger": f"sqlite:///{ledger_path.as_posix()}"}
 
 
-def ooat(env, *argv, answers=""):
+def ooat(env, *argv, answers="", now=NOW):
     stdout = io.StringIO()
     code = main(["--config", str(env["config"]), *argv], stdin=io.StringIO(answers), stdout=stdout,
-                registry=env["registry"], routing=RoutingPolicy(routing_document()), clock=lambda: NOW)
+                registry=env["registry"], routing=RoutingPolicy(routing_document()), clock=lambda: now)
     return code, stdout.getvalue()
 
 
@@ -104,6 +104,58 @@ def test_run_all_moves_every_task_paused_by_a_provider(env):
     code, resumed = ooat(env, "task", "run", "--all")
     assert code == 0 and f"{task}: CLOSED_DONE" in resumed
     assert ooat(env, "task", "run", "--all")[1] == "No task can move without you.\n"
+
+
+def test_end_of_input_while_rating_rates_nothing(env):
+    _, out = ooat(env, "task", "submit", "--operator", "Martin", "--goal", "Shrň smlouvu.",
+                  "--acceptance", "Shrnutí má nejvýše 300 slov.")
+    task = task_id(out)
+    code, rated = ooat(env, "task", "rate", task, "--operator", "Martin", "--accepted", "yes", "--value", "B",
+                       answers="\n")  # one confirmation, then the input ends
+    assert code == 1 and "nothing was rated" in rated and events(env, task, "TASK_RATED") == []
+
+
+def test_ctrl_c_in_a_task_command_says_how_to_go_on(env, monkeypatch):
+    import ooat_core.task_cli as task_cli
+
+    def interrupted(*args, **kwargs):
+        raise KeyboardInterrupt
+    monkeypatch.setattr(task_cli, "run", interrupted)
+    code, out = ooat(env, "task", "run", "--all")
+    assert code == 130 and "ooat task run" in out and "nothing was changed" not in out
+
+
+def test_an_answer_after_the_deadline_is_refused_and_the_default_stands(env):
+    _, out = ooat(env, "task", "submit", "--operator", "Martin", "--goal", "Shrň smlouvu.")
+    request = out.split("Question ", 1)[1].split(" ", 1)[0]
+    later = datetime(2026, 10, 5, 12, 0, tzinfo=timezone.utc)
+    code, answered = ooat(env, "hil", "answer", request, "--operator", "Martin", "--text", "Pozdě.", now=later)
+    assert code == 1 and "already answered" in answered
+
+
+def test_a_missing_artifact_folder_is_reported_without_a_traceback(env):
+    import shutil
+
+    _, out = ooat(env, "task", "submit", "--operator", "Martin", "--goal", "Shrň smlouvu.",
+                  "--acceptance", "Shrnutí má nejvýše 300 slov.")
+    shutil.rmtree(env["dir"] / "ooat-blobs")
+    code, shown = ooat(env, "task", "show", task_id(out))
+    assert code == 1 and "artifact" in shown.lower() and "Traceback" not in shown
+
+
+def test_run_all_goes_on_when_one_task_is_refused(env, monkeypatch):
+    _, first = ooat(env, "task", "submit", "--operator", "Martin", "--goal", "A.", "--no-run")
+    _, second = ooat(env, "task", "submit", "--operator", "Martin", "--goal", "B.", "--acceptance", "x", "--no-run")
+    import ooat_core.runtime as runtime_module
+    real_run = runtime_module.Runtime.run
+
+    def refuse_the_first(self, task):
+        if task == task_id(first):
+            raise ValueError("broken task")
+        return real_run(self, task)
+    monkeypatch.setattr(runtime_module.Runtime, "run", refuse_the_first)
+    code, out = ooat(env, "task", "run", "--all")
+    assert code == 0 and "broken task" in out and f"{task_id(second)}: CLOSED_DONE" in out
 
 
 @pytest.mark.parametrize("argv, message", [

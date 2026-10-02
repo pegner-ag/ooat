@@ -229,3 +229,79 @@ def test_a_closed_task_stays_closed_and_an_unknown_one_is_refused(tmp_path):
     with pytest.raises(ValueError, match="unknown task"):
         setup.runtime.run("tsk_01J9ZQ7A1BK3M5N7P9Q1R3S5T7")
     assert task_state(setup.ledger.events(task=task)) == "CLOSED_DONE"
+
+
+# Final review of plan 04c ---------------------------------------------------------------------------------------
+
+def test_a_utf16_attachment_is_read_as_text_and_its_personal_data_is_found(tmp_path):
+    setup = Setup(tmp_path, classes=("public", "internal", "personal"))
+    task = setup.submit(files=["Kontakt: jan.novak@example.cz".encode("utf-16")])  # PowerShell 5 writes this
+    ref = setup.last(task, "TASK_SUBMITTED")["refs"][0]
+    assert setup.ledger.artifact(ref)["data_class"] == "personal"
+    assert setup.artifacts.read(ref).decode("utf-8") == "Kontakt: jan.novak@example.cz"
+
+
+@pytest.mark.parametrize("content", [b"\xff\xfe\x00\xd8", b"PK\x03\x04\x00\x00binary", b"\xe9t\xe9"])
+def test_an_attachment_that_is_not_text_is_refused(tmp_path, content):
+    setup = Setup(tmp_path)
+    with pytest.raises(ValueError, match="text"):
+        setup.submit(files=[content])
+
+
+def interrupted_once(monkeypatch, when):
+    """Make the n-th acceptance check raise KeyboardInterrupt, as Ctrl+C would."""
+    import ooat_core.runtime as runtime_module
+    real, calls = runtime_module.check_output, []
+
+    def check(*args, **kwargs):
+        calls.append(1)
+        if len(calls) == when:
+            raise KeyboardInterrupt
+        return real(*args, **kwargs)
+    monkeypatch.setattr(runtime_module, "check_output", check)
+
+
+def test_an_interruption_after_delivery_rechecks_the_document_instead_of_writing_a_new_one(tmp_path, monkeypatch):
+    setup = Setup(tmp_path)
+    task = setup.submit()
+    interrupted_once(monkeypatch, 1)
+    with pytest.raises(KeyboardInterrupt):
+        setup.runtime.run(task)
+    assert setup.runtime.run(task).state == "CLOSED_DONE"
+    assert len(setup.model.worker_prompts) == 1
+
+
+def test_an_interruption_in_the_second_check_never_leads_to_a_third_attempt(tmp_path, monkeypatch):
+    setup = Setup(tmp_path, jev=decisions(met=False))
+    task = setup.submit()
+    interrupted_once(monkeypatch, 2)
+    with pytest.raises(KeyboardInterrupt):
+        setup.runtime.run(task)
+    assert setup.runtime.run(task).state == "CLOSED_PARTIAL"
+    assert len(setup.model.worker_prompts) == 2
+
+
+def test_a_contract_issued_before_a_crash_gets_its_claim_when_the_task_resumes(tmp_path, monkeypatch):
+    setup = Setup(tmp_path)
+    task = setup.submit()
+    real_append = setup.ledger.append
+
+    def crash_at_the_claim(event, artifacts=()):
+        if event["type"] == "CLAIM":
+            raise KeyboardInterrupt
+        return real_append(event, artifacts)
+    monkeypatch.setattr(setup.ledger, "append", crash_at_the_claim)
+    with pytest.raises(KeyboardInterrupt):
+        setup.runtime.run(task)
+    monkeypatch.setattr(setup.ledger, "append", real_append)
+    assert setup.runtime.run(task).state == "CLOSED_DONE"
+    assert setup.types(task).count("CLAIM") == 1 and setup.types(task).count("CONTRACT_ISSUED") == 1
+
+
+def test_personal_data_the_model_writes_into_the_document_raises_its_class(tmp_path):
+    model = ScriptedModel(["# Odpověď\n\nNapište na jan.novak@example.cz."])
+    setup = Setup(tmp_path, model=model, classes=("public", "internal", "personal"))
+    task = setup.submit()
+    setup.runtime.run(task)
+    document = setup.last(task, "RESULT")["body"]["artifacts"][0]
+    assert setup.ledger.artifact(document)["data_class"] == "personal"

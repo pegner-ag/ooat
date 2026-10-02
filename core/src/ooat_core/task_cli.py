@@ -104,6 +104,9 @@ def run(args, config, path, stdin, stdout, registry, routing, clock, ask) -> int
     except GatewayError as error:  # e.g. a quota cool-down: the task stays where it was
         stdout.write(f"Not now ({error.code}): {error.message}\n")
         return REFUSED
+    except (OSError, KeyError) as error:  # e.g. the artifact folder was moved or deleted
+        stdout.write(f"Artifact store problem ({type(error).__name__}): {error}; check [ledger] blobs.\n")
+        return REFUSED
     finally:
         ledger.close()
 
@@ -155,6 +158,8 @@ def _run_task(args, ledger, runtime, stdin, stdout, ask) -> int:
             _report(task, runtime.run(task), ledger, stdout)
         except GatewayError as error:  # one provider down must not stop the others
             stdout.write(f"{task}: not now ({error.code}): {error.message}\n")
+        except ValueError as error:  # neither may one task the ledger refuses
+            stdout.write(f"{task}: refused: {error}\n")
     return 0
 
 
@@ -193,6 +198,8 @@ def _rate(args, ledger, runtime, stdin, stdout, ask) -> int:
             continue
         answer = ask(f"{decision.kind} {decision.question}: answered {decision.answer} (confidence "
                      f"{decision.confidence:.2f}). Enter = confirm, '-' = skip, or the right answer: ", stdin, stdout)
+        if answer is None:  # the input ended: confirming the rest silently would distort the calibration
+            raise ValueError("the input ended before every decision was answered; nothing was rated")
         if answer == "":
             verdicts[key] = "confirmed"
         elif answer != "-":
@@ -221,6 +228,9 @@ def _hil_answer(args, ledger, runtime, stdin, stdout, ask) -> int:
     request = next((e for e in ledger.events(types=["HIL_REQUEST"]) if e["id"] == args.request), None)
     if request is None:
         raise ValueError(f"no question {args.request}")
+    runtime.expire(request["task"])  # past its deadline the default has applied; a late answer must not win
+    if any(e["body"]["request"] == args.request for e in ledger.events(task=request["task"], types=["HIL_RESPONSE"])):
+        raise ValueError(f"{args.request} is already answered (after its deadline the default applies)")
     body = {"request": args.request}
     if args.choice is not None:
         body["choice"] = args.choice
