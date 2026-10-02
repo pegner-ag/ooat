@@ -44,3 +44,8 @@
 - [ ] Payment-card check: any 13–19 digit number passing Luhn (about 1 in 10, e.g. epoch-ms timestamps) raises a
       task to `personal`; require separators or an issuer prefix.
 - [ ] An empty `narrow_scope` answer uses up a budget question without changing anything; ask again instead.
+
+### From the final review of plan 03e (operator responsibility)
+- [ ] `ooat connectors enable`: say when `--regions`, `--responsibility` or `--no-training` is ignored, and check
+      the classes (e.g. `special_category`) before asking for responsibility.
+- [ ] Define the region pattern once (config.py) and import it in operator_cli.py.
