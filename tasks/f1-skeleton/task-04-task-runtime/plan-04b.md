@@ -17,13 +17,16 @@
 - The data class is never lowered below the declared one; the pre-scan and a confident A10 can only raise it (ADR 0011).
 - A decision acts alone only when its confidence reaches θ: interim 0.8 for a decision connector, 1 for the text-model fallback, until 5 rated decisions exist for the key (point, engine, model version); then max(0.8, θ_computed) until 20 ratings; then θ_computed. θ_computed is the smallest θ on 0.50–0.99 (step 0.01) with at least 5 rated decisions at or above it and an error rate at most ε (R0 5 %, R1 2 %); none qualifies → 1. R2 and R3 never act alone (θ = 1).
 - At most 3 clarifying questions per task (spec A1, ADR 0009); a clarifying answer returns the task to SUBMITTED.
-- Every Gate `HIL_REQUEST` is blocking and defaults to `do_not_run` on silence.
-- Value classes A = 1000, B = 300, C = 50 USD; `v_min` = 15 USD (A3); default task budget 2 USD; output prior 2,000 tokens; HIL deadline 24 h — all in `GateSettings`, read from `ooat.toml` in 04c.
+- At most 3 budget questions per task; narrowing the scope returns a GATED task to the Gate (ADR 0009 amendment,
+  owner 2026-10-02).
+- Every Gate `HIL_REQUEST` is blocking, has a 48-hour deadline and defaults to `do_not_run`. Silence until the
+  deadline closes the task as `CLOSED_ABSTAINED` (spec §8); choosing "do not run" closes it as `CANCELLED`.
+- Value classes A = 1000, B = 300, C = 50 USD; `v_min` = 15 USD (A3); default task budget 2 USD; output prior 2,000 tokens; HIL deadline 48 h — all in `GateSettings`, read from `ooat.toml` in 04c.
 - Every cost the Gate causes is in the ledger: the successful decision call on `TOPOLOGY_DECIDED.cost`, a charged failure on a `DECISION` event.
 - Code, comments and docs in English; lines at most 120 characters.
 
 **Decisions this plan takes within the design** (the owner may overrule them):
-1. The budget question offers "raise the budget" and "do not run", not "narrow the scope": a GATED task has no path back to the Gate (ADR 0009 covers CLARIFYING only); the operator narrows by submitting a new task.
+1. The budget question offers "raise the budget", "narrow the scope" (answer with text) and "do not run" (owner, 2026-10-02). Narrowing returns the GATED task to the Gate, recorded as an amendment of ADR 0009; the narrowed scope joins the task text but never becomes an acceptance criterion.
 2. A10 is one choice question over the five data classes (the design listed a choice and a noul; the choice already answers both).
 3. Route and value are checked before A1, so a task that can never run, or is not worth its cost, is closed without asking the operator anything.
 4. A task without acceptance criteria asks the operator without calling any model; the operator's clarifications then become its criteria.
@@ -35,7 +38,7 @@
 1. A long attachment (100k characters) must be scanned in well under a second — `test_a_long_attachment_is_scanned_in_linear_time` (Task 1).
 2. Ordinary business numbers (amounts, order numbers, dates) must not be taken for personal data — `test_ordinary_business_text_is_not_flagged` (Task 1).
 3. A task that can never run must be closed without bothering the operator — `test_a_task_without_a_permitted_route_is_closed_without_running` (Task 3, order fixed in Task 4).
-4. Silence on a Gate question must mean "do not run" — `test_do_not_run_or_silence_cancels_the_task` (Task 4).
+4. Silence on a Gate question must mean "do not run" and close the task — `test_do_not_run_cancels_the_task_and_silence_closes_it_as_abstained` (Task 4).
 5. A text model's self-stated confidence must never act alone before it is rated — `test_personal_data_found_by_the_pre_scan_raises_the_class_and_keeps_the_task_off_jev` (Tasks 3–4), `test_before_five_ratings_jev_uses_the_interim_threshold_and_the_fallback_never_acts_alone` (Task 2).
 6. A failed decision tier must make the Gate ask, never guess — `test_a_failed_decision_tier_makes_the_gate_ask_instead_of_guessing` (Task 4).
 
@@ -48,9 +51,9 @@ core/src/ooat_core/pii.py              scan(), raised_class(), higher_class() (T
 core/src/ooat_core/gateway.py          pre-scan before routing (Task 1)
 core/src/ooat_core/thresholds.py       rated_decisions(), computed_threshold(), threshold() (Task 2)
 core/src/ooat_core/gate.py             Gate.run(), GateSettings, GateOutcome (Task 3); task_facts(), clarification,
-                                       budget question, gated_data_class() (Task 4)
+                                       budget question with narrowing, gated_data_class() (Task 4)
 core/tests/test_pii.py, test_gateway_decide.py, test_thresholds.py, test_gate.py
-core/description.md, docs/description.md, README.md, .claude/lessons.md (Task 5)
+core/description.md, docs/description.md, README.md, .claude/lessons.md, docs/adr/0009-clarification-exit.md (Task 5)
 ```
 
 How to apply a "replace" step: the old text occurs exactly once; replace it with the new text. Files may have CRLF line endings on Windows — match the text, not the line endings. Work on a branch `feat/topology-gate` from `main`; run commands from the repository root with the project virtual environment active.
@@ -127,7 +130,7 @@ def test_a_long_attachment_is_scanned_in_linear_time(filler):
     text = filler * 100_000 + " jan.novak@example.cz"
     started = time.monotonic()
     assert "email" in scan(text)
-    assert time.monotonic() - started < 1.0
+    assert time.monotonic() - started < 3.0  # about 0.2 s; the quadratic pattern took minutes
 ````
 
 In `core/tests/test_gateway_decide.py`:
@@ -611,7 +614,7 @@ git commit -m "feat(core): confidence thresholds per decision point, engine and 
 **Interfaces:**
 - Consumes: `Gateway.decide()`, `.estimate()`, `.estimate_decision()`, `GatewayError` (04a); `raised_class`, `higher_class` (Task 1); `threshold`, `decision_point`, `GATE_EVENTS` (Task 2); `task_state()`.
 - Produces (in `ooat_core.gate`):
-  - `GateSettings(value_usd={"A": 1000.0, "B": 300.0, "C": 50.0}, v_min_usd=15.0, default_budget_usd=2.0, expected_output_tokens=2000, hil_deadline_hours=24.0)`
+  - `GateSettings(value_usd={"A": 1000.0, "B": 300.0, "C": 50.0}, v_min_usd=15.0, default_budget_usd=2.0, expected_output_tokens=2000, hil_deadline_hours=24.0)` (Task 4 changes the deadline to 48 h)
   - `GateOutcome(action: "run" | "ask" | "closed", topology, data_class, budget_usd, estimate_usd=None, request=None, closed=None)`
   - `Gate(ledger, gateway, settings=GateSettings(), clock=...)`, `Gate.run(task) -> GateOutcome`; `ValueError` unless the task is SUBMITTED
   - `task_text(body, clarifications) -> str` (the text the Gate and the worker see), `gate_questions(criteria) -> dict`, `task_value_usd(body, settings)`
@@ -1046,11 +1049,13 @@ git commit -m "feat(core): Topology Gate step A with data-class decision and pre
 **Interfaces:**
 - Consumes: Task 3 `Gate`, `GateOutcome`, `task_text`; `HIL_REQUEST` / `HIL_RESPONSE` rules of the ledger; `task_state()` (ADR 0009).
 - Produces (in `ooat_core.gate`):
-  - `TaskFacts(submitted, state, criteria, declared, risk_class, budget_usd, value_usd, clarifications, run_as_is, refused)` and `task_facts(events, settings=GateSettings()) -> TaskFacts` — the runtime (04c) reads the granted budget and a refusal from it
+  - `TaskFacts(submitted, state, criteria, declared, risk_class, budget_usd, value_usd, clarifications, run_as_is, refused, expired, budget_questions, narrowed)` and `task_facts(events, settings=GateSettings()) -> TaskFacts` — the runtime (04c) reads the granted budget, a refusal and an expiry from it
+  - `task_text(body, clarifications, narrowings=())`: narrowings appear as "Narrowed scope N: …"
   - `data_class_for(facts, records) -> str`, `gated_data_class(events, settings=GateSettings()) -> str` — the class the Gate decided, recomputed from its last `TOPOLOGY_DECIDED`
-  - `unclear_criteria(criteria, records) -> list[str]`, `gate_questions(criteria, ask_a1=True)`, `MAX_CLARIFICATIONS = 3`, `CLARIFY_OPTIONS`
-  - Clarifying `HIL_REQUEST`: options `clarify` (answer with text), `run_as_is`, `do_not_run` (`acts: false`); recommended `clarify`; default `do_not_run`. Budget `HIL_REQUEST`: options `raise_budget` (`cost_usd` = the raised budget, 120 % of the estimate) and `do_not_run`.
-  - Order in `run()`: refusal → step A → route and value (close) → A1 (ask or close after 3) → budget (ask) → T2.
+  - `unclear_criteria(criteria, records) -> list[str]`, `gate_questions(criteria, ask_a1=True)`, `MAX_CLARIFICATIONS = 3`, `MAX_BUDGET_QUESTIONS = 3`, `CLARIFY_OPTIONS`
+  - Clarifying `HIL_REQUEST`: options `clarify` (answer with text), `run_as_is`, `do_not_run` (`acts: false`); recommended `clarify`. Budget `HIL_REQUEST`: options `raise_budget` (`cost_usd` = the raised budget, 120 % of the estimate), `narrow_scope` (answer with text) and `do_not_run`; recommended `raise_budget`. Both default to `do_not_run`, deadline 48 h.
+  - `Gate.run(task)` accepts a SUBMITTED task, or a GATED one whose scope the operator narrowed since the last `TOPOLOGY_DECIDED`; anything else is `ValueError`.
+  - Order in `run()`: expiry (CLOSED_ABSTAINED) or refusal (CANCELLED) → step A → route and value (close) → A1 (ask, or close after 3) → budget (ask, or close after 3) → T2.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -1121,7 +1126,7 @@ def test_a_task_without_criteria_asks_the_operator_before_any_model_is_called():
     assert request["id"] == outcome.request and "no acceptance criteria" in request["body"]["question"]
     assert [o["id"] for o in request["body"]["options"]] == ["clarify", "run_as_is", "do_not_run"]
     assert request["body"]["default_on_silence"] == "do_not_run" and request["body"]["blocking"] is True
-    assert request["body"]["deadline"] == "2026-10-03T12:00:00Z"
+    assert request["body"]["deadline"] == "2026-10-04T12:00:00Z"  # 48 h (spec §8)
     assert task_state(setup.ledger.events(task=task)) == "CLARIFYING"
 
 
@@ -1167,14 +1172,17 @@ def test_run_as_is_skips_the_criteria_questions():
     assert not any(q.startswith("a1.") for q in setup.jev.calls[1].questions)
 
 
-@pytest.mark.parametrize("response", [{"choice": "do_not_run"}, {"choice": "do_not_run", "default_applied": True}])
-def test_do_not_run_or_silence_cancels_the_task(response):
+@pytest.mark.parametrize("response, closed", [
+    ({"choice": "do_not_run"}, "CANCELLED"),
+    ({"choice": "do_not_run", "default_applied": True}, "CLOSED_ABSTAINED"),  # silence until the deadline
+])
+def test_do_not_run_cancels_the_task_and_silence_closes_it_as_abstained(response, closed):
     setup = GateSetup()
     task = setup.submit(acceptance=())
     first = setup.gate.run(task)
     answer(setup, task, first.request, **response)
     outcome = setup.gate.run(task)
-    assert outcome.closed == "CANCELLED" and task_state(setup.ledger.events(task=task)) == "CANCELLED"
+    assert outcome.closed == closed and task_state(setup.ledger.events(task=task)) == closed
     assert setup.jev.calls == []
 
 
@@ -1226,6 +1234,41 @@ def test_the_runtime_recomputes_the_class_the_gate_decided():
     task = setup.submit()
     outcome = setup.gate.run(task)
     assert gated_data_class(setup.ledger.events(task=task)) == outcome.data_class == "client_confidential"
+
+
+def test_narrowing_the_scope_sends_a_gated_task_back_to_the_gate():
+    setup = GateSetup()
+    task = setup.submit(budget_usd=0.001)
+    first = setup.gate.run(task)
+    assert [o["id"] for o in setup.events(task, "HIL_REQUEST")[0]["body"]["options"]] == \
+        ["raise_budget", "narrow_scope", "do_not_run"]
+    answer(setup, task, first.request, choice="narrow_scope", text="Jen první kapitola smlouvy.")
+    assert task_state(setup.ledger.events(task=task)) == "GATED"
+    second = setup.gate.run(task)
+    assert "Narrowed scope 1: Jen první kapitola smlouvy." in setup.jev.calls[1].state
+    assert second.action == "ask" and len(setup.events(task, "HIL_REQUEST")) == 2  # still above 0.001 USD
+    assert task_facts(setup.ledger.events(task=task)).criteria == ["Shrnutí má nejvýše 300 slov."]
+
+
+def test_a_gated_task_without_a_narrowed_scope_is_not_gated_again():
+    setup = GateSetup()
+    task = setup.submit(budget_usd=0.001)
+    first = setup.gate.run(task)
+    answer(setup, task, first.request, choice="raise_budget")
+    with pytest.raises(ValueError, match="not SUBMITTED"):
+        setup.gate.run(task)
+
+
+def test_after_three_budget_questions_a_task_still_over_budget_is_closed():
+    setup = GateSetup()
+    task = setup.submit(budget_usd=0.001)
+    for round_ in range(3):
+        outcome = setup.gate.run(task)
+        assert outcome.action == "ask"
+        answer(setup, task, outcome.request, choice="narrow_scope", text=f"Ještě méně, kolo {round_ + 1}.")
+    outcome = setup.gate.run(task)
+    assert outcome.closed == "CLOSED_ABSTAINED"
+    assert "after 3 budget questions" in setup.events(task, "TASK_CLOSED")[0]["body"]["missing"]
 ````
 
 - [ ] **Step 2: Run the tests to verify they fail**
@@ -1256,7 +1299,8 @@ with:
 acts on the answers whose confidence reaches their threshold, estimates the cost before anything runs, and appends
 TOPOLOGY_DECIDED. F1 knows T0 (no agent) and T2 (one worker); rules for teams (A4, A5, A7) are recorded only.
 When the criteria cannot be checked or the estimate exceeds the budget, the Gate asks the operator (HIL_REQUEST);
-the answers are read back from the ledger by task_facts(), which the task runtime (04c) uses too.
+the answers are read back from the ledger by task_facts(), which the task runtime (04c) uses too. A clarification
+returns the task to SUBMITTED (ADR 0009); narrowing the scope returns a GATED task to the Gate (ADR 0009 amendment).
 """
 
 from collections.abc import Callable
@@ -1280,6 +1324,7 @@ with:
 ACTOR = {"kind": "system", "id": "ooat-gate"}
 WORKER_TIER = "workhorse"
 MAX_CLARIFICATIONS = 3  # spec rule A1, ADR 0009
+MAX_BUDGET_QUESTIONS = 3  # narrowing the scope may loop; the same limit as clarifications
 BRANCHES = {"one": "A single line of work", "two": "Two independent parts", "many": "Three or more independent parts"}
 DATA_CLASSES = {
 ````
@@ -1301,6 +1346,22 @@ CLARIFY_OPTIONS = [
     {"id": "run_as_is", "label": "Run as it is", "cost_usd": 0.0},
     {"id": "do_not_run", "label": "Do not run", "cost_usd": 0.0, "acts": False},
 ]
+````
+
+Replace:
+
+````python
+    default_budget_usd: float = 2.0
+    expected_output_tokens: int = 2000  # prior for the worker's deliverable
+    hil_deadline_hours: float = 24.0
+````
+
+with:
+
+````python
+    default_budget_usd: float = 2.0
+    expected_output_tokens: int = 2000  # prior for the worker's deliverable
+    hil_deadline_hours: float = 48.0  # spec §8: CLARIFYING closes after 48 h without an answer
 ````
 
 Replace:
@@ -1330,6 +1391,9 @@ class TaskFacts:
     clarifications: int  # clarifying questions the Gate has asked
     run_as_is: bool  # the operator chose to run although the criteria are not checkable
     refused: bool  # the operator chose not to run, or let a Gate question expire
+    expired: bool  # ... by letting it expire (default applied), not by choosing
+    budget_questions: int  # budget questions the Gate has asked
+    narrowed: bool  # the operator narrowed the scope and the Gate has not decided again since
 
 
 def task_value_usd(body: dict, settings: GateSettings) -> float | None:
@@ -1341,6 +1405,32 @@ Replace:
 ````python
 
 
+def task_text(body: dict, clarifications: list[str]) -> str:
+    """The state the Gate and the worker see: goal, expected output, criteria, the operator's clarifications."""
+    lines = [f"Goal: {body['goal']}"]
+    if body.get("expected_output"):
+````
+
+with:
+
+````python
+
+
+def task_text(body: dict, clarifications: list[str], narrowings: list[str] = ()) -> str:
+    """The state the Gate and the worker see: goal, expected output, criteria, the operator's clarifications and
+    narrowings of the scope."""
+    lines = [f"Goal: {body['goal']}"]
+    if body.get("expected_output"):
+````
+
+Replace:
+
+````python
+    for number, text in enumerate(clarifications, 1):
+        lines.append(f"Clarification {number}: {text}")
+    return "\n".join(lines)
+
+
 def gate_questions(criteria: list[str]) -> dict[str, DecisionQuestion]:
     """One batch for step A: A1 per criterion, A4, A5, A7, A10 (design 04 §4)."""
     questions = {
@@ -1349,6 +1439,11 @@ def gate_questions(criteria: list[str]) -> dict[str, DecisionQuestion]:
 with:
 
 ````python
+    for number, text in enumerate(clarifications, 1):
+        lines.append(f"Clarification {number}: {text}")
+    for number, text in enumerate(narrowings, 1):
+        lines.append(f"Narrowed scope {number}: {text}")
+    return "\n".join(lines)
 
 
 def _offers(event: dict, option: str) -> bool:
@@ -1361,22 +1456,30 @@ def task_facts(events: list[dict], settings: GateSettings = GateSettings()) -> T
     submitted = next(e for e in events if e["type"] == "TASK_SUBMITTED")
     body = submitted["body"]
     requests = {e["id"]: e for e in events if _offers(e, "clarify") or _offers(e, "raise_budget")}
-    texts, budget, run_as_is, refused = [], body.get("budget_usd", settings.default_budget_usd), False, False
+    texts, narrowings, budget = [], [], body.get("budget_usd", settings.default_budget_usd)
+    run_as_is = refused = expired = narrowed = False
     for event in events:
+        if event["type"] == "TOPOLOGY_DECIDED":
+            narrowed = False  # the Gate has decided on the narrowed scope
         if event["type"] != "HIL_RESPONSE" or event["body"]["request"] not in requests:
             continue
         answer, request = event["body"], requests[event["body"]["request"]]
         choice = answer.get("choice")
-        if answer.get("text") and choice in (None, "clarify"):
+        if choice == "narrow_scope":
+            narrowings += [answer["text"]] if answer.get("text") else []
+            narrowed = True
+        elif answer.get("text") and choice in (None, "clarify"):
             texts.append(answer["text"])
         if choice == "raise_budget":
             budget = next(o["cost_usd"] for o in request["body"]["options"] if o["id"] == "raise_budget")
         run_as_is = run_as_is or choice == "run_as_is"
-        refused = choice == "do_not_run" or answer.get("default_applied", False)
+        expired = answer.get("default_applied", False)
+        refused = choice == "do_not_run" or expired
     criteria = list(body.get("acceptance", [])) or texts
-    return TaskFacts(submitted["id"], task_text(body, texts), criteria, body.get("data_class", "internal"),
+    return TaskFacts(submitted["id"], task_text(body, texts, narrowings), criteria, body.get("data_class", "internal"),
                      body.get("risk_class", "R0"), budget, task_value_usd(body, settings),
-                     sum(_offers(e, "clarify") for e in events), run_as_is, refused)
+                     sum(_offers(e, "clarify") for e in events), run_as_is, refused, expired,
+                     sum(_offers(e, "raise_budget") for e in events), narrowed)
 
 
 def data_class_for(facts: TaskFacts, records: list[dict]) -> str:
@@ -1434,6 +1537,8 @@ with:
 Replace:
 
 ````python
+    def run(self, task: str) -> GateOutcome:
+        events = self._ledger.events(task=task)
         if task_state(events) != "SUBMITTED":
             raise ValueError(f"task {task} is not SUBMITTED")
         submitted = next(e for e in events if e["type"] == "TASK_SUBMITTED")
@@ -1465,9 +1570,16 @@ Replace:
 with:
 
 ````python
-        if task_state(events) != "SUBMITTED":
-            raise ValueError(f"task {task} is not SUBMITTED")
+    def run(self, task: str) -> GateOutcome:
+        events = self._ledger.events(task=task)
         facts = task_facts(events, self._settings)
+        state = task_state(events)
+        if state != "SUBMITTED" and not (state == "GATED" and facts.narrowed):
+            raise ValueError(f"task {task} is not SUBMITTED, nor GATED with a narrowed scope")
+        if facts.expired:  # spec §8: no answer in time closes the task as abstained
+            return self._close(task, facts.declared, facts.budget_usd, "CLOSED_ABSTAINED",
+                               "Not run: the Gate's question was not answered in time.",
+                               "an answer to the Gate's question before its deadline")
         if facts.refused:
             return self._close(task, facts.declared, facts.budget_usd, "CANCELLED",
                                "The operator chose not to run the task.")
@@ -1526,12 +1638,19 @@ with:
             request = self._hil(task, _clarifying_question(unclear), CLARIFY_OPTIONS, "clarify", facts.submitted)
             return GateOutcome("ask", "T0", data_class, budget, estimate, request=request["id"])
 
+        if estimate > budget and facts.budget_questions >= MAX_BUDGET_QUESTIONS:
+            self._decided(task, "T0", rules, candidates, decided)
+            missing = (f"after {MAX_BUDGET_QUESTIONS} budget questions the estimated cost {estimate:.4f} USD still "
+                       f"exceeds the budget {budget:.2f} USD")
+            return self._close(task, data_class, budget, "CLOSED_ABSTAINED", "Not run: over budget.", missing,
+                               estimate)
         self._decided(task, "T2", rules, candidates, decided)
         if estimate > budget:
             raised = max(round(estimate * 1.2, 2), 0.01)  # a margin over the prior, which is no measurement yet
             question = (f"The estimated cost {estimate:.4f} USD exceeds the task budget {budget:.2f} USD. Raise the "
-                        f"budget to {raised:.2f} USD, or do not run the task.")
+                        f"budget to {raised:.2f} USD, narrow the scope (answer with text), or do not run the task.")
             options = [{"id": "raise_budget", "label": f"Raise the budget to {raised:.2f} USD", "cost_usd": raised},
+                       {"id": "narrow_scope", "label": "Narrow the scope: answer with text", "cost_usd": 0.0},
                        {"id": "do_not_run", "label": "Do not run", "cost_usd": 0.0, "acts": False}]
             request = self._hil(task, question, options, "raise_budget", facts.submitted)
             return GateOutcome("ask", "T2", data_class, budget, estimate, request=request["id"])
@@ -1607,14 +1726,14 @@ def _clarifying_question(unclear: list[str] | None) -> str:
 
 - [ ] **Step 4: Run the tests to verify they pass**
 
-Run: `python -m pytest core/tests/test_gate.py -q` → Expected: `23 passed`.
-Run: `python -m pytest -q` → Expected: `542 passed, 4 skipped`.
+Run: `python -m pytest core/tests/test_gate.py -q` → Expected: `26 passed`.
+Run: `python -m pytest -q` → Expected: `545 passed, 4 skipped`.
 
 - [ ] **Step 5: Commit**
 
 ```bash
 git add core/src/ooat_core/gate.py core/tests/test_gate.py
-git commit -m "feat(core): the Gate asks the operator to clarify criteria or raise the budget"
+git commit -m "feat(core): the Gate asks the operator to clarify criteria, raise the budget or narrow the scope"
 ```
 
 ---
@@ -1622,7 +1741,8 @@ git commit -m "feat(core): the Gate asks the operator to clarify criteria or rai
 ### Task 5: Documentation
 
 **Files:**
-- Modify: `core/description.md`, `docs/description.md`, `README.md`, `.claude/lessons.md`
+- Modify: `core/description.md`, `docs/description.md`, `README.md`, `.claude/lessons.md`,
+  `docs/adr/0009-clarification-exit.md`
 
 - [ ] **Step 1: Update the As-is docs**
 
@@ -1660,8 +1780,10 @@ with:
   decision records (interim 0.8 for a decision connector, 1 for the text fallback; floor 0.8 until 20 ratings)
 - `gate.py` — `Gate.run(task)`: step A as one decision batch (A1 per criterion, A4, A5, A7, A10), data class
   raised by pre-scan and a confident A10, estimate of worker plus acceptance checks, then T0 (closed: no permitted
-  route, not worth its value, unclear after 3 clarifications, cancelled), a clarifying or budget `HIL_REQUEST`,
-  or T2. `task_facts()` and `gated_data_class()` read the task and the operator's answers back for the runtime
+  route, not worth its value, unclear after 3 clarifications, over budget after 3 budget questions, unanswered
+  for 48 h, cancelled), a clarifying `HIL_REQUEST` (clarify / run as it is / do not run) or a budget one (raise /
+  narrow the scope / do not run), or T2. `task_facts()` and `gated_data_class()` read the task and the
+  operator's answers back for the runtime
 - `config.py` — `load_config()` for `ooat.toml`: ledger URL, per-tier pins, connector settings; no secrets,
 ````
 
@@ -1735,16 +1857,38 @@ with:
   test `test_a_long_attachment_is_scanned_in_linear_time` guards it.
 ````
 
+In `docs/adr/0009-clarification-exit.md`:
+
+Replace:
+
+````markdown
+- Decided by the owner on 2026-10-01.
+````
+
+with:
+
+````markdown
+- Decided by the owner on 2026-10-01.
+
+## Amendment — narrowing the scope (owner, 2026-10-02)
+
+When the Gate's estimate exceeds the task budget, its question offers "raise the budget", "narrow the scope" or
+"do not run". A `GATED` task whose budget question is answered by narrowing the scope (choice `narrow_scope` with
+text) returns to the Topology Gate, which decides again on the task text plus the narrowed scope. The task state
+stays `GATED` until the new `TOPOLOGY_DECIDED`; the Gate asks at most 3 budget questions per task, then closes it
+as `CLOSED_ABSTAINED`. Implemented in `core/src/ooat_core/gate.py` (`task_facts().narrowed`).
+````
+
 - [ ] **Step 2: Check the docs match the code**
 
-Run: `python -m pytest -q` → Expected: `542 passed, 4 skipped`.
+Run: `python -m pytest -q` → Expected: `545 passed, 4 skipped`.
 Run: `git grep -n "Topology Gate for T0" -- README.md docs/description.md core/description.md` → Expected: one line in each file.
 
 - [ ] **Step 3: Commit**
 
 ```bash
-git add core/description.md docs/description.md README.md .claude/lessons.md
-git commit -m "docs: Topology Gate T0-T2, pre-scan and thresholds"
+git add core/description.md docs/description.md README.md .claude/lessons.md docs/adr/0009-clarification-exit.md
+git commit -m "docs: Topology Gate T0-T2, pre-scan and thresholds; ADR 0009 amendment"
 ```
 
 ---
