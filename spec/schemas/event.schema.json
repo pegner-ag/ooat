@@ -444,7 +444,18 @@
         "allowed_data_classes": {"type": "array", "items": {"$ref": "common.schema.json#/$defs/data_class"}, "uniqueItems": true},
         "operator": {"description": "Name of the acknowledging operator.", "$ref": "#/$defs/text"},
         "automation_confirmed": {"description": "The operator checked that the plan terms allow unattended use (ADR 0010).", "type": "boolean"},
-        "jurisdiction_sha256": {"description": "Fingerprint of the acknowledged jurisdiction block (ADR 0010).", "type": "string", "pattern": "^[0-9a-f]{64}$"}
+        "jurisdiction_sha256": {"description": "Fingerprint of the acknowledged jurisdiction block (ADR 0010).", "type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "responsibility": {
+          "description": "The operator takes responsibility for client or personal data on this connector: legal basis, processing agreement, where it is processed (ADR 0012). In force for 12 months from confirmed_on.",
+          "type": "object",
+          "required": ["confirmed_on"],
+          "additionalProperties": false,
+          "properties": {
+            "confirmed_on": {"type": "string", "format": "date"},
+            "processing_regions": {"description": "Regions stated by the operator's agreement when the manifest does not know them.", "type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "pattern": "^[a-z]{2}(-[a-z0-9-]+)?$"}},
+            "no_training": {"description": "The operator states that training on inputs is switched off for this account.", "const": true}
+          }
+        }
       }
     },
     "body_adapter_disabled": {
