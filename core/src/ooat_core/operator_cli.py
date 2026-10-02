@@ -1,4 +1,5 @@
-"""`ooat` command line: operator commands. Currently `ooat connectors list | show | enable | disable`."""
+"""`ooat` command line: `ooat connectors list | show | enable | disable`, and the task and HIL commands of
+task_cli.py (`ooat task ...`, `ooat hil ...`)."""
 
 import argparse
 import re
@@ -8,7 +9,7 @@ import tomllib
 from datetime import datetime, timezone
 from pathlib import Path
 
-from . import connector_admin
+from . import connector_admin, task_cli
 from .config import load_config
 from .connectors.registry import Registry
 from .ledger import Ledger
@@ -50,6 +51,7 @@ def _parser() -> argparse.ArgumentParser:
     disable.add_argument("connector")
     disable.add_argument("--operator", required=True)
     disable.add_argument("--reason", required=True)
+    task_cli.add_commands(commands)
     return parser
 
 
@@ -59,26 +61,41 @@ def _ask(prompt: str, stdin, stdout) -> str:
     return stdin.readline().strip()
 
 
-def main(argv=None, stdin=None, stdout=None, registry: Registry | None = None, today=None) -> int:
+def main(argv=None, stdin=None, stdout=None, registry: Registry | None = None, today=None, routing=None,
+         clock=None) -> int:
     stdin, stdout = stdin or sys.stdin, stdout or sys.stdout
     args = _parser().parse_args(argv)
+    clock = clock or (lambda: datetime.now(timezone.utc))
     try:
-        return _run(args, stdin, stdout, registry, today or datetime.now(timezone.utc).date())
+        if args.command in ("task", "hil"):
+            config, path, refusal = _config(args)
+            if refusal is not None:
+                stdout.write(refusal)
+                return REFUSED
+            return task_cli.run(args, config, path, stdin, stdout, registry or Registry.discover(), routing, clock,
+                                _ask)
+        return _run(args, stdin, stdout, registry, today or clock().date())
     except KeyboardInterrupt:
         stdout.write("\nCancelled; nothing was changed.\n")
         return CANCELLED
 
 
-def _run(args, stdin, stdout, registry, today) -> int:
+def _config(args):
+    """(config or None, path, refusal message or None)."""
     path = Path(args.config or "ooat.toml")
     if args.config is not None and not path.exists():
         # An explicit config that is missing must not fall back to anything: a disable would land elsewhere.
-        stdout.write(f"Config file not found: {args.config}\n")
-        return REFUSED
+        return None, path, f"Config file not found: {args.config}\n"
     try:
-        config = load_config(path) if path.exists() else None
+        return (load_config(path) if path.exists() else None), path, None
     except (tomllib.TOMLDecodeError, ValueError, OSError) as error:
-        stdout.write(f"Config error in {path}: {error}\n")
+        return None, path, f"Config error in {path}: {error}\n"
+
+
+def _run(args, stdin, stdout, registry, today) -> int:
+    config, path, refusal = _config(args)
+    if refusal is not None:
+        stdout.write(refusal)
         return REFUSED
     registry = registry or Registry.discover()
     if args.action == "show":  # read-only and ledger-free
