@@ -29,8 +29,10 @@
 3. Each attempt appends `RESULT DONE` with its document (the worker delivered); the acceptance gates follow; after the second unmet attempt a final `RESULT PARTIAL` carries the unmet criteria.
 4. A malformed abstention reply is `RESULT FAILED INVALID_OUTPUT` and uses up an attempt.
 5. The critic checks all pending criteria in one workhorse call per attempt.
-6. The default answer after a deadline is written by the actor `{"kind": "hil", "id": "default-on-silence"}`; the ledger only lets it choose the request's declared default.
+6. The default answer after a deadline is written by the actor `{"kind": "hil", "id": "default-on-silence"}`; the ledger only lets it choose the request's declared default, and `checked_operator()` reserves the name so no operator can answer as it. Spec/README says only humans emit `HIL_RESPONSE`; the v0.2 revision records this one exception.
 7. Artifact bodies live in `[ledger] blobs` from `ooat.toml`, else in `ooat-blobs` next to the ledger file.
+8. Attachments are stored under the declared class raised by the pre-scan of their text, and the contract and the output document carry the highest class of task and attachments (review of PR #14).
+9. The card schemas live in `catalog/schemas/` and each card has a first eval set (`evals/<capability>/cases.json`) that covers its abstain conditions; the eval runner is sub-project 06 (review of PR #14). `cap.general.check_criterion` accepts the same classes as the worker: which engine may answer is the gateway's routing.
 
 ## Review Focus
 
@@ -38,8 +40,9 @@
 2. A question nobody answers must close the task after its deadline — `test_an_unanswered_question_expires_after_its_deadline` (Task 5).
 3. Personal data in an attachment without a permitted route must not reach any model — `test_personal_data_in_an_attachment_without_a_permitted_route_is_an_abstention` (Task 5).
 4. A malformed model reply must not crash or loop — `test_two_malformed_replies_are_failed_results_and_the_task_closes` (Task 5).
-5. A provider that is down must pause the task, not close or degrade it — `test_a_provider_outage_pauses_the_task_and_the_next_run_finishes_it`, `test_a_paused_acceptance_check_reruns_on_the_same_document` (Task 5), `test_a_critic_that_cannot_be_reached_is_no_verdict_and_pauses` (Task 4).
-6. Typing mistakes at the command line must end with a message, not a traceback — `test_mistakes_are_refused_without_a_traceback` (Task 7).
+5. A re-checked document that still fails must lead to one new attempt, never to a loop of paid checks — `test_a_rechecked_document_that_fails_gets_a_new_attempt_not_an_endless_loop` (Task 5).
+6. A provider that is down must pause the task, not close or degrade it — `test_a_provider_outage_pauses_the_task_and_the_next_run_finishes_it`, `test_a_paused_acceptance_check_reruns_on_the_same_document` (Task 5), `test_a_critic_that_cannot_be_reached_is_no_verdict_and_pauses` (Task 4).
+7. Typing mistakes at the command line must end with a message, not a traceback — `test_mistakes_are_refused_without_a_traceback` (Task 7).
 
 ---
 
@@ -64,7 +67,7 @@ How to apply a "replace" step: the old text occurs exactly once; replace it with
 ### Task 1: The first catalog cards
 
 **Files:**
-- Create: `catalog/capabilities/cap.general.complete_task.json`, `catalog/capabilities/cap.general.check_criterion.json`, `catalog/roles/role.general.worker.json`, `catalog/tests/test_cards.py`
+- Create: `catalog/capabilities/cap.general.complete_task.json`, `catalog/capabilities/cap.general.check_criterion.json`, `catalog/roles/role.general.worker.json`, `catalog/schemas/{task_text,markdown_document,output_and_criterion,noul_result}.v1.json`, `evals/cap.general.complete_task/{cases.json,contract.txt}`, `evals/cap.general.check_criterion/cases.json`, `catalog/tests/test_cards.py`
 - Modify: `catalog/taxonomy.json`
 
 **Interfaces:**
@@ -81,6 +84,7 @@ import json
 from pathlib import Path
 
 import pytest
+from jsonschema import Draft202012Validator
 
 from ooat_core.validation import validate
 
@@ -119,6 +123,24 @@ def test_decision_checks_name_existing_decision_capabilities():
         for criterion in card["acceptance"]:
             if criterion["type"] == "decision":
                 assert CAPABILITIES[criterion["capability"]]["impl"] == "decision"
+
+
+@pytest.mark.parametrize("card_id", sorted(CAPABILITIES))
+def test_referenced_schemas_exist_and_are_json_schemas(card_id):
+    card = CAPABILITIES[card_id]
+    for key in ("input_schema", "output_schema"):
+        path = CATALOG / card[key]
+        assert path.is_file(), f"{card_id}: {card[key]} is missing"
+        Draft202012Validator.check_schema(json.loads(path.read_text(encoding="utf-8")))
+
+
+@pytest.mark.parametrize("card_id", sorted(CAPABILITIES))
+def test_every_card_has_an_eval_set_that_covers_its_abstain_conditions(card_id):
+    card = CAPABILITIES[card_id]
+    cases = json.loads((CATALOG.parent / card["eval_set"] / "cases.json").read_text(encoding="utf-8"))
+    assert cases and all({"id", "expect"} <= set(case) for case in cases)
+    covered = {case.get("covers") for case in cases}
+    assert set(card.get("abstain_conditions", [])) <= covered
 ````
 
 Create `catalog/capabilities/cap.general.complete_task.json`:
@@ -161,7 +183,11 @@ Create `catalog/capabilities/cap.general.check_criterion.json`:
   "input_schema": "schemas/output_and_criterion.v1.json",
   "output_schema": "schemas/noul_result.v1.json",
   "acceptance": [{"id": "schema_valid", "type": "deterministic", "check": "jsonschema"}],
-  "model_policy": {"tier": "decision", "max_attempts": 1, "data_classes_allowed": ["public", "internal"]},
+  "model_policy": {
+    "tier": "decision",
+    "max_attempts": 1,
+    "data_classes_allowed": ["public", "internal", "client_confidential", "personal"]
+  },
   "cost_card": {"prior": {"p_accept": 0.8}, "observed": {"n": 0}},
   "eval_set": "evals/cap.general.check_criterion/"
 }
@@ -183,10 +209,129 @@ Create `catalog/roles/role.general.worker.json`:
 }
 ````
 
+Create `catalog/schemas/task_text.v1.json`:
+
+````json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Task text",
+  "description": "Goal, expected output, acceptance criteria and clarifications as the worker sees them.",
+  "type": "string",
+  "minLength": 1
+}
+````
+
+Create `catalog/schemas/markdown_document.v1.json`:
+
+````json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Markdown document",
+  "type": "string",
+  "minLength": 1,
+  "maxLength": 200000
+}
+````
+
+Create `catalog/schemas/output_and_criterion.v1.json`:
+
+````json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Output and one acceptance criterion",
+  "type": "object",
+  "required": [
+    "output",
+    "criterion"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "output": {
+      "type": "string",
+      "minLength": 1
+    },
+    "criterion": {
+      "type": "string",
+      "minLength": 1
+    }
+  }
+}
+````
+
+Create `catalog/schemas/noul_result.v1.json`:
+
+````json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Noul result",
+  "description": "Probability that the answer is yes.",
+  "type": "number",
+  "minimum": 0,
+  "maximum": 1
+}
+````
+
+Create `evals/cap.general.complete_task/cases.json`:
+
+````json
+[
+  {
+    "id": "summary_within_limit",
+    "task": {
+      "goal": "Summarise the attached contract for the managing director.",
+      "acceptance": [
+        "At most 300 words.",
+        "States the date the contract ends."
+      ],
+      "attachments": [
+        "contract.txt"
+      ]
+    },
+    "expect": "DONE"
+  },
+  {
+    "id": "abstain_without_the_contract",
+    "task": {
+      "goal": "Summarise the attached contract for the managing director.",
+      "acceptance": [
+        "At most 300 words."
+      ]
+    },
+    "expect": "ABSTAIN_UNKNOWN",
+    "covers": "The task needs information that is neither in the task nor in its attachments"
+  }
+]
+````
+
+Create `evals/cap.general.complete_task/contract.txt`:
+
+````
+Contract for work No. 12/2026 between Example Ltd and Sample s.r.o. Subject: a company website. Price: CZK 120,000. The contract ends on 31 December 2027.
+````
+
+Create `evals/cap.general.check_criterion/cases.json`:
+
+````json
+[
+  {
+    "id": "met",
+    "output": "The contract ends on 31 December 2027.",
+    "criterion": "States the date the contract ends.",
+    "expect": 1
+  },
+  {
+    "id": "unmet",
+    "output": "The contract is about a company website.",
+    "criterion": "States the date the contract ends.",
+    "expect": 0
+  }
+]
+````
+
 - [ ] **Step 2: Run the tests to verify they fail**
 
 Run: `python -m pytest catalog/tests/test_cards.py -q`
-Expected: `1 failed, 3 passed` — `KeyError: 'cap.general.check_criterion'`: the taxonomy does not list it yet.
+Expected: `1 failed, 7 passed` — `KeyError: 'cap.general.check_criterion'`: the taxonomy does not list it yet.
 
 - [ ] **Step 3: List the decision capability in the taxonomy**
 
@@ -211,13 +356,13 @@ with:
 
 - [ ] **Step 4: Run the tests to verify they pass**
 
-Run: `python -m pytest catalog -q` → Expected: `49 passed`.
-Run: `python -m pytest -q` → Expected: `608 passed, 4 skipped`.
+Run: `python -m pytest catalog -q` → Expected: `53 passed`.
+Run: `python -m pytest -q` → Expected: `612 passed, 4 skipped`.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add catalog/capabilities/cap.general.complete_task.json catalog/capabilities/cap.general.check_criterion.json catalog/roles/role.general.worker.json catalog/taxonomy.json catalog/tests/test_cards.py
+git add catalog/capabilities/cap.general.complete_task.json catalog/capabilities/cap.general.check_criterion.json catalog/roles/role.general.worker.json catalog/schemas evals/cap.general.complete_task evals/cap.general.check_criterion catalog/taxonomy.json catalog/tests/test_cards.py
 git commit -m "feat(catalog): first cards - general worker, complete_task, check_criterion"
 ```
 
@@ -449,7 +594,7 @@ def settings_from_config(config: Config) -> GateSettings:
 - [ ] **Step 4: Run the tests to verify they pass**
 
 Run: `python -m pytest core/tests/test_config.py -q` → Expected: `36 passed`.
-Run: `python -m pytest -q` → Expected: `614 passed, 4 skipped`.
+Run: `python -m pytest -q` → Expected: `618 passed, 4 skipped`.
 
 - [ ] **Step 5: Commit**
 
@@ -710,7 +855,7 @@ def run_worker(gateway: Gateway, *, task: str, contract: str | None, data_class:
 - [ ] **Step 4: Run the tests to verify they pass**
 
 Run: `python -m pytest core/tests/test_worker.py -q` → Expected: `12 passed`.
-Run: `python -m pytest -q` → Expected: `626 passed, 4 skipped`.
+Run: `python -m pytest -q` → Expected: `630 passed, 4 skipped`.
 
 - [ ] **Step 5: Commit**
 
@@ -1045,7 +1190,7 @@ def _verdicts(text: str) -> dict:
 - [ ] **Step 4: Run the tests to verify they pass**
 
 Run: `python -m pytest core/tests/test_acceptance.py -q` → Expected: `13 passed`.
-Run: `python -m pytest -q` → Expected: `639 passed, 4 skipped`.
+Run: `python -m pytest -q` → Expected: `643 passed, 4 skipped`.
 
 - [ ] **Step 5: Commit**
 
@@ -1060,7 +1205,7 @@ git commit -m "feat(core): acceptance checks - decisions per criterion, critic w
 
 **Files:**
 - Create: `core/src/ooat_core/runtime.py`, `core/tests/runtime_fakes.py`, `core/tests/test_runtime.py`
-- Modify: `core/src/ooat_core/worker.py`, `core/tests/test_worker.py`
+- Modify: `core/src/ooat_core/worker.py`, `core/tests/test_worker.py`, `core/src/ooat_core/connector_admin.py`
 
 **Interfaces:**
 - Consumes: `Gate.run()`, `task_facts()`, `gated_data_class()`, `GateSettings`, `gate.ACTOR` (04b); `run_worker()` (Task 3); `check_output()` (Task 4); `ArtifactStore`; `checked_operator()`.
@@ -1358,6 +1503,31 @@ def test_a_paused_acceptance_check_reruns_on_the_same_document(tmp_path):
     assert len(model.worker_prompts) == 1  # no new document was written
 
 
+def test_a_rechecked_document_that_fails_gets_a_new_attempt_not_an_endless_loop(tmp_path):
+    model = ScriptedModel(outages={("critic", 1): ConnectorError("TIMEOUT", "no answer")})
+    setup = Setup(tmp_path, model=model, jev=decisions(met=[True, False]))
+    task = setup.submit(files=[b"Smlouva o dilu."])  # untrusted: the first "met" goes to the critic, which is down
+    assert setup.runtime.run(task).state == "RUNNING"
+    assert setup.runtime.run(task).state == "CLOSED_PARTIAL"  # re-check unmet, one new attempt, still unmet
+    assert len(model.worker_prompts) == 2 and len(setup.jev.calls) <= 5
+
+
+def test_personal_data_in_an_attachment_raises_the_class_of_the_attachment_and_the_document(tmp_path):
+    setup = Setup(tmp_path, classes=("public", "internal", "personal"))
+    task = setup.submit(files=["Kontakt: jan.novak@example.cz".encode()])
+    outcome = setup.runtime.run(task)
+    assert outcome.state == "CLOSED_DONE"
+    attachment = setup.last(task, "TASK_SUBMITTED")["refs"][0]
+    assert setup.ledger.artifact(attachment)["data_class"] == "personal"
+    assert setup.ledger.artifact(outcome.artifact)["data_class"] == "personal"
+
+
+def test_no_operator_may_answer_as_the_silence_default(tmp_path):
+    setup = Setup(tmp_path)
+    with pytest.raises(ValueError, match="reserved"):
+        setup.runtime.submit(operator="Default-On-Silence", goal="x")
+
+
 def test_a_closed_task_stays_closed_and_an_unknown_one_is_refused(tmp_path):
     setup = Setup(tmp_path)
     task = setup.submit()
@@ -1449,6 +1619,45 @@ with:
     return WorkerOutput(None if abstention else result.response.text, abstention, result.cost, result.response.model)
 ````
 
+In `core/src/ooat_core/connector_admin.py`:
+
+Replace:
+
+````python
+
+def checked_operator(name: str) -> str:
+    """The approver's name as recorded: required, one line, no control characters."""
+    name = name.strip()
+````
+
+with:
+
+````python
+
+RESERVED_NAMES = frozenset({"default-on-silence"})  # the runtime applying a declared default (design 04 §5)
+
+
+def checked_operator(name: str) -> str:
+    """The approver's name as recorded: required, one line, no control characters, not a reserved name."""
+    name = name.strip()
+````
+
+Replace:
+
+````python
+        raise ValueError("a named operator is required")
+    if any(ord(character) < 32 or ord(character) == 127 for character in name):
+````
+
+with:
+
+````python
+        raise ValueError("a named operator is required")
+    if name.lower() in RESERVED_NAMES:
+        raise ValueError(f"{name!r} is reserved for answers OOAT applies on silence")
+    if any(ord(character) < 32 or ord(character) == 127 for character in name):
+````
+
 - [ ] **Step 4: Write the runtime**
 
 Create `core/src/ooat_core/runtime.py`:
@@ -1475,11 +1684,13 @@ from .gate import Gate, GateSettings, gated_data_class, task_facts
 from .gateway import Gateway, GatewayError
 from .ids import new_id
 from .ledger import Ledger, new_event
+from .pii import higher_class, raised_class
 from .state import task_state
 from .worker import Attachment, run_worker
 
 ACTOR = {"kind": "system", "id": "ooat-runtime"}
-SILENCE = {"kind": "hil", "id": "default-on-silence"}  # applies a request's declared default, nothing else
+# Applies a request's declared default, nothing else (the ledger checks it); no operator may use this name.
+SILENCE = {"kind": "hil", "id": "default-on-silence"}
 CAPABILITY, CAPABILITY_VERSION = "cap.general.complete_task", "0.1.0"
 ROLE = "role.general.worker@0.1.0"
 OUTPUT_SCHEMA = "schemas/markdown_document.v1.json"
@@ -1516,15 +1727,18 @@ class Runtime:
                expected_output: str | None = None, value: dict | None = None, budget_usd: float | None = None,
                data_class: str | None = None, risk_class: str | None = None,
                files: list[bytes] = ()) -> str:
-        """TASK_SUBMITTED by the named operator; files become untrusted artifacts of the task."""
+        """TASK_SUBMITTED by the named operator; files become untrusted artifacts of the task, stored under the
+        declared class raised by the personal-data pre-scan of their text."""
         body = {"goal": goal.strip()}
         optional = {"project": project, "expected_output": expected_output, "value": value, "budget_usd": budget_usd,
                     "data_class": data_class, "risk_class": risk_class}
         body |= {key: item for key, item in optional.items() if item is not None}
         if acceptance:
             body["acceptance"] = [criterion.strip() for criterion in acceptance]
-        staged = [self.artifacts.stage(content, artifact_type="attachment", data_class=data_class or "internal",
-                                       untrusted=True) for content in files]
+        declared = data_class or "internal"
+        staged = [self.artifacts.stage(content, artifact_type="attachment", untrusted=True,
+                                       data_class=raised_class(declared, content.decode("utf-8", errors="replace")))
+                  for content in files]
         task = new_id("tsk")
         actor = {"kind": "hil", "id": checked_operator(operator)}
         self.ledger.append(new_event("TASK_SUBMITTED", task=task, actor=actor, refs=[s.ref for s in staged], body=body),
@@ -1600,10 +1814,13 @@ class Runtime:
         contract, worker = self._contract(task, events, submitted, facts)
         attachments = [Attachment(ref, ref, self.artifacts.read(ref).decode("utf-8", errors="replace"))
                        for ref in submitted["refs"]]
+        for attachment in attachments:  # the Gate never saw them; the worker sends them, so they count here
+            data_class = higher_class(data_class, self.ledger.artifact(attachment.ref)["data_class"])
+        resumed = True  # only the first pass of a run may re-check a document whose check was paused
         while True:
             results = [e for e in self.ledger.events(task=task, types=["RESULT"]) if e.get("contract") == contract]
             last = results[-1] if results else None
-            if last is not None and last["body"]["outcome"] == "FAILED" and last["refs"]:
+            if resumed and last is not None and last["body"]["outcome"] == "FAILED" and last["refs"]:
                 artifact = last["refs"][0]  # its acceptance check was paused: check the same document again
                 text = self.artifacts.read(artifact).decode("utf-8")
             else:
@@ -1630,6 +1847,7 @@ class Runtime:
                 artifact, text = staged.ref, output.text
                 self._event("RESULT", task, contract, worker, {"outcome": "DONE", "artifacts": [artifact]},
                             output.cost, refs=[artifact], staged=[staged])
+            resumed = False
             try:
                 result = check_output(self.ledger, self.gateway, task=task, contract=contract, artifact=artifact,
                                       output=text, criteria=facts.criteria, data_class=data_class,
@@ -1735,13 +1953,13 @@ class Runtime:
 
 - [ ] **Step 5: Run the tests to verify they pass**
 
-Run: `python -m pytest core/tests/test_runtime.py core/tests/test_worker.py -q` → Expected: `28 passed`.
-Run: `python -m pytest -q` → Expected: `655 passed, 4 skipped`.
+Run: `python -m pytest core/tests/test_runtime.py core/tests/test_worker.py -q` → Expected: `31 passed`.
+Run: `python -m pytest -q` → Expected: `662 passed, 4 skipped`.
 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add core/src/ooat_core/runtime.py core/src/ooat_core/worker.py core/tests/runtime_fakes.py core/tests/test_runtime.py core/tests/test_worker.py
+git add core/src/ooat_core/runtime.py core/src/ooat_core/worker.py core/src/ooat_core/connector_admin.py core/tests/runtime_fakes.py core/tests/test_runtime.py core/tests/test_worker.py
 git commit -m "feat(core): task runtime - Gate, contract, two attempts, acceptance, closing, pause on outages"
 ```
 
@@ -1806,6 +2024,7 @@ def test_rating_records_confirmations_and_corrections_that_feed_the_thresholds(t
     ("a5_as_number", "correct a yes/no decision"),
     ("c1_as_word", "correct a yes/no decision"),
     ("c1_as_two", "correct a yes/no decision"),
+    ("c1_as_true", "correct a yes/no decision"),
 ])
 def test_wrong_verdicts_are_refused(tmp_path, verdicts, message):
     setup, task = closed_task(tmp_path)
@@ -1813,7 +2032,8 @@ def test_wrong_verdicts_are_refused(tmp_path, verdicts, message):
     verdicts = {"unknown_event": {("evt_01J9ZQ70A0K3M5N7P9Q1R3S5T7", "a1.1"): "confirmed"},
                 "a5_as_number": {(decisions["a5"].event, "a5"): 1},
                 "c1_as_word": {(decisions["c1"].event, "c1"): "yes"},
-                "c1_as_two": {(decisions["c1"].event, "c1"): 2}}[verdicts]
+                "c1_as_two": {(decisions["c1"].event, "c1"): 2},
+                "c1_as_true": {(decisions["c1"].event, "c1"): True}}[verdicts]
     with pytest.raises(ValueError, match=message):
         rate(setup.ledger, task, operator="Martin", accepted=True, value_class="B", verdicts=verdicts)
 
@@ -1893,7 +2113,7 @@ def rate(ledger: Ledger, task: str, *, operator: str, accepted: bool, value_clas
             rated.append({"event": key[0], "question": key[1], "verdict": "confirmed"})
             continue
         if isinstance(decision.answer, str) != isinstance(verdict, str) or (
-                not isinstance(verdict, str) and verdict not in (0, 1)):
+                not isinstance(verdict, str) and (type(verdict) is not int or verdict not in (0, 1))):
             raise ValueError(f"{key[1]}: correct a yes/no decision with 0 or 1, a choice with the right option")
         rated.append({"event": key[0], "question": key[1], "verdict": "corrected", "value": verdict})
     body = {"accepted": accepted, "value_class": value_class, "decisions": rated}
@@ -1906,8 +2126,8 @@ def rate(ledger: Ledger, task: str, *, operator: str, accepted: bool, value_clas
 
 - [ ] **Step 4: Run the tests to verify they pass**
 
-Run: `python -m pytest core/tests/test_rating.py -q` → Expected: `7 passed`.
-Run: `python -m pytest -q` → Expected: `662 passed, 4 skipped`.
+Run: `python -m pytest core/tests/test_rating.py -q` → Expected: `8 passed`.
+Run: `python -m pytest -q` → Expected: `670 passed, 4 skipped`.
 
 - [ ] **Step 5: Commit**
 
@@ -2437,7 +2657,7 @@ def _run(args, stdin, stdout, registry, today) -> int:
 - [ ] **Step 5: Run the tests to verify they pass**
 
 Run: `python -m pytest core/tests/test_task_cli.py core/tests/test_operator_cli.py -q` → Expected: `48 passed`.
-Run: `python -m pytest -q` → Expected: `672 passed, 4 skipped`.
+Run: `python -m pytest -q` → Expected: `680 passed, 4 skipped`.
 
 - [ ] **Step 6: Commit**
 
@@ -2534,7 +2754,8 @@ with:
 ````markdown
 a team is worth its cost. The repository currently contains the specification and the OOA Spec v0.1 JSON Schemas with tests;
 the starter catalog holds role families, capability names and the first cards (`cap.general.complete_task`,
-`cap.general.check_criterion`, `role.general.worker`); `ooat-core` has the ledger foundation, the provider gateway
+`cap.general.check_criterion`, `role.general.worker`) with their schemas in `catalog/schemas/` and first eval
+cases in `evals/`; `ooat-core` has the ledger foundation, the provider gateway
 with model and decision connectors, the Topology Gate for T0–T2 and the task runtime with the `ooat task` and
 `ooat hil` commands (no REST API and no teams yet).
 ````
@@ -2587,7 +2808,7 @@ ooat task rate <tsk_id> --operator "Your Name" --accepted yes --value B
 
 - [ ] **Step 2: Check**
 
-Run: `python -m pytest -q` → Expected: `672 passed, 4 skipped`.
+Run: `python -m pytest -q` → Expected: `680 passed, 4 skipped`.
 Run: `git grep -n "ooat task submit" -- README.md` → Expected: one line.
 
 - [ ] **Step 3: Commit**
