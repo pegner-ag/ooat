@@ -17,8 +17,8 @@ action waiting for a named human.
 ## Status
 
 Early F1 (spec draft v0.1): JSON Schemas, the starter catalog taxonomy, the ledger, the provider gateway with
-three model connectors and one decision connector (Jev), the `ooat connectors` command and the Topology Gate
-for T0–T2 exist; workers and the task commands do not yet.
+three model connectors and one decision connector (Jev), the `ooat connectors` command, the Topology Gate
+for T0–T2 and the task runtime (`ooat task`, `ooat hil`) exist; the REST API and teams (T3+) do not yet.
 Decision records are in `docs/adr/`.
 
 ## First steps
@@ -46,6 +46,18 @@ Choosing `client_confidential` or `personal` when enabling a connector asks you 
 data (legal basis, processing agreement, where it is processed). OOAT records it with your name and date and asks
 again after 12 months. Text with an e-mail address, phone number or similar is treated as personal data, so allow
 `personal` on at least one connector if your tasks contain such details.
+
+Then submit a task; it runs in the foreground and asks you when the Gate needs an answer:
+
+```sh
+ooat task submit --operator "Your Name" --project my-site --goal "Summarise the attached contract" \
+    --acceptance "At most 300 words" --file contract.txt
+ooat hil list                                  # questions waiting for you
+ooat hil answer <evt_id> --operator "Your Name" --text "..."
+ooat task show <tsk_id>                        # timeline, costs, the document
+ooat task run --all                            # resume tasks paused by a provider outage or quota
+ooat task rate <tsk_id> --operator "Your Name" --accepted yes --value B
+```
 
 `enable` and `disable` need an `ooat.toml`, so state always lands in the same ledger. Settings live in
 `ooat.toml` (ledger URL, per-tier pins, connector settings; secrets only as environment

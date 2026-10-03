@@ -1,0 +1,27 @@
+[
+  {
+    "id": "summary_within_limit",
+    "task": {
+      "goal": "Summarise the attached contract for the managing director.",
+      "acceptance": [
+        "At most 300 words.",
+        "States the date the contract ends."
+      ],
+      "attachments": [
+        "contract.txt"
+      ]
+    },
+    "expect": "DONE"
+  },
+  {
+    "id": "abstain_without_the_contract",
+    "task": {
+      "goal": "Summarise the attached contract for the managing director.",
+      "acceptance": [
+        "At most 300 words."
+      ]
+    },
+    "expect": "ABSTAIN_UNKNOWN",
+    "covers": "The task needs information that is neither in the task nor in its attachments"
+  }
+]

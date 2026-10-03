@@ -195,11 +195,16 @@ def consequences_card(manifest: dict, today: date, config: Config | None = None)
     return "\n".join(lines)
 
 
+RESERVED_NAMES = frozenset({"default-on-silence"})  # the runtime applying a declared default (design 04 §5)
+
+
 def checked_operator(name: str) -> str:
-    """The approver's name as recorded: required, one line, no control characters."""
+    """The approver's name as recorded: required, one line, no control characters, not a reserved name."""
     name = name.strip()
     if not name:
         raise ValueError("a named operator is required")
+    if name.lower() in RESERVED_NAMES:
+        raise ValueError(f"{name!r} is reserved for answers OOAT applies on silence")
     if any(ord(character) < 32 or ord(character) == 127 for character in name):
         raise ValueError("the operator name may not contain line breaks or control characters")
     return name

@@ -3,6 +3,7 @@ import pytest
 from ooat_core.config import Config, load_config, parse_config
 from ooat_core.connectors import ConnectorError
 from ooat_core.credentials_env import REDACTED, SecretResolver
+from ooat_core.gate import settings_from_config
 
 EXAMPLE = """
 [ledger]
@@ -51,6 +52,30 @@ def test_a_relative_ledger_keeps_the_policy(tmp_path):
     (tmp_path / "ooat.toml").write_text('[ledger]\nurl = "sqlite:///l.sqlite"\n[policy]\nblocked_countries = ["CN"]\n',
                                         encoding="utf-8")
     assert load_config(tmp_path / "ooat.toml").blocked_countries == {"CN"}
+
+
+def test_gate_values_and_the_blob_folder_are_read(tmp_path):
+    text = ('[ledger]\nurl = "sqlite:///l.sqlite"\nblobs = "blobs"\n'
+            '[gate]\ndefault_budget_usd = 0.5\nexpected_output_tokens = 1500\nvalue_usd = { C = 20 }\n')
+    (tmp_path / "ooat.toml").write_text(text, encoding="utf-8")
+    config = load_config(tmp_path / "ooat.toml")
+    assert config.blobs_dir == (tmp_path / "blobs").as_posix()
+    assert config.gate == {"default_budget_usd": 0.5, "expected_output_tokens": 1500, "value_usd": {"C": 20}}
+    settings = settings_from_config(config)
+    assert settings.default_budget_usd == 0.5 and settings.expected_output_tokens == 1500
+    assert settings.value_usd == {"A": 1000.0, "B": 300.0, "C": 20.0} and settings.hil_deadline_hours == 48.0
+
+
+@pytest.mark.parametrize("gate, message", [
+    ({"default_budget_usd": 0}, "positive number"),
+    ({"expected_output_tokens": 1.5}, "positive whole number"),
+    ({"value_usd": {"D": 1}}, "unknown settings"),
+    ({"value_usd": {"A": -1}}, "amounts in USD"),
+    ({"budget": 1}, "unknown settings"),
+])
+def test_gate_values_are_checked(gate, message):
+    with pytest.raises(ValueError, match=message):
+        parse_config({"gate": gate})
 
 
 def test_empty_config_has_defaults():
