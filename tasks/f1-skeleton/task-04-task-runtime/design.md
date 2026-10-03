@@ -151,7 +151,10 @@ which 04 does not have.
   close. `ooat task run <id>` resumes a task after a HIL answer. From 04b: a GATED task whose budget question was
   answered "do not run" or expired (`task_facts().refused` / `.expired`) is closed by the runtime (`CANCELLED` /
   `CLOSED_ABSTAINED`), because the Gate does not run on a GATED task; and the runtime writes the
-  `default_applied` response when a Gate question's deadline has passed.
+  `default_applied` response when a Gate question's deadline has passed. A provider failure (quota, outage,
+  timeout, API error) never finishes a task (owner, 2026-10-02): it is paused as RUNNING without using up an
+  attempt and resumes with the next `ooat task run <id>` or `ooat task run --all`; 05 runs paused tasks
+  automatically.
 - **Worker (T2):** a stable prompt prefix (family rules → role → contract) plus the task; artifacts by reference
   with previews of at most 6,000 characters. The model answers either with the deliverable or with an abstention
   in a fixed JSON form (`{"abstain": "UNKNOWN", "reason": "…", "missing": "…", "confidence": 0.x}`) → `ABSTAIN`.
