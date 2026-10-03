@@ -7,10 +7,14 @@ run) and the acceptance checks' (GATE_* events, every attempt). These verdicts a
 from dataclasses import dataclass
 
 from .connector_admin import checked_operator
+from .gate import BRANCHES, DATA_CLASSES
 from .ledger import Ledger, new_event
 from .runtime import CLOSED
 from .state import task_state
 from .thresholds import GATE_EVENTS
+
+
+CHOICE_OPTIONS = {"a5": set(BRANCHES), "a10": set(DATA_CLASSES)}  # the Gate's choice questions
 
 
 @dataclass(frozen=True)
@@ -36,6 +40,23 @@ def task_decisions(events: list[dict]) -> list[TaskDecision]:
     return found
 
 
+def checked_verdict(decision: TaskDecision, verdict) -> object:
+    """"confirmed", or the corrected value. Typing the answer the decision already gave is a confirmation, so it
+    is never counted as an error of the engine; a correction must fit the question."""
+    if verdict == "confirmed":
+        return verdict
+    if isinstance(decision.answer, str):
+        options = CHOICE_OPTIONS.get(decision.question)
+        if not isinstance(verdict, str) or (options is not None and verdict not in options):
+            listed = f": {', '.join(sorted(options))}" if options else ""
+            raise ValueError(f"{decision.question}: correct a choice with one of its options{listed}")
+        return "confirmed" if verdict == decision.answer else verdict
+    if type(verdict) is not int or verdict not in (0, 1):
+        raise ValueError(f"{decision.question}: correct a yes/no decision with 0 or 1, a choice with one of its "
+                         "options")
+    return "confirmed" if verdict == (1 if decision.answer >= 0.5 else 0) else verdict
+
+
 def rate(ledger: Ledger, task: str, *, operator: str, accepted: bool, value_class: str,
          verdicts: dict[tuple[str, str], object] = None, note: str | None = None) -> dict:
     """Append TASK_RATED. `verdicts` maps (event id, question) to "confirmed" or to the correct answer: 0 or 1
@@ -51,13 +72,11 @@ def rate(ledger: Ledger, task: str, *, operator: str, accepted: bool, value_clas
         decision = decisions.get(key)
         if decision is None:
             raise ValueError(f"no decision {key[1]} in event {key[0]} of task {task}")
+        verdict = checked_verdict(decision, verdict)
         if verdict == "confirmed":
             rated.append({"event": key[0], "question": key[1], "verdict": "confirmed"})
-            continue
-        if isinstance(decision.answer, str) != isinstance(verdict, str) or (
-                not isinstance(verdict, str) and (type(verdict) is not int or verdict not in (0, 1))):
-            raise ValueError(f"{key[1]}: correct a yes/no decision with 0 or 1, a choice with the right option")
-        rated.append({"event": key[0], "question": key[1], "verdict": "corrected", "value": verdict})
+        else:
+            rated.append({"event": key[0], "question": key[1], "verdict": "corrected", "value": verdict})
     body = {"accepted": accepted, "value_class": value_class, "decisions": rated}
     if note and note.strip():
         body["note"] = note.strip()

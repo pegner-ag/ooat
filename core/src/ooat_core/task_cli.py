@@ -16,7 +16,7 @@ from .credentials_env import SecretResolver
 from .gate import settings_from_config
 from .gateway import Gateway, GatewayError
 from .ledger import DATA_CLASSES, Ledger, new_event
-from .rating import rate, task_decisions
+from .rating import checked_verdict, rate, task_decisions
 from .routing import load_routing
 from .runtime import RunOutcome, Runtime
 from .state import task_state
@@ -196,14 +196,20 @@ def _rate(args, ledger, runtime, stdin, stdout, ask) -> int:
         if args.confirm_all:
             verdicts[key] = "confirmed"
             continue
-        answer = ask(f"{decision.kind} {decision.question}: answered {decision.answer} (confidence "
-                     f"{decision.confidence:.2f}). Enter = confirm, '-' = skip, or the right answer: ", stdin, stdout)
-        if answer is None:  # the input ended: confirming the rest silently would distort the calibration
-            raise ValueError("the input ended before every decision was answered; nothing was rated")
-        if answer == "":
-            verdicts[key] = "confirmed"
-        elif answer != "-":
-            verdicts[key] = int(answer) if answer in ("0", "1") else answer
+        while True:
+            answer = ask(f"{decision.kind} {decision.question}: answered {decision.answer} (confidence "
+                         f"{decision.confidence:.2f}). Enter = confirm, '-' = skip, or the right answer: ",
+                         stdin, stdout)
+            if answer is None:  # the input ended: confirming the rest silently would distort the calibration
+                raise ValueError("the input ended before every decision was answered; nothing was rated")
+            if answer == "-":
+                break
+            try:
+                verdicts[key] = checked_verdict(decision, "confirmed" if answer == "" else
+                                                int(answer) if answer in ("0", "1") else answer)
+                break
+            except ValueError as error:  # ask again rather than lose every answer typed so far
+                stdout.write(f"{error}\n")
     event = rate(ledger, args.task, operator=args.operator, accepted=args.accepted == "yes", value_class=args.value,
                  verdicts=verdicts, note=args.note)
     stdout.write(f"Rated {args.task}: {len(event['body']['decisions'])} decisions recorded.\n")

@@ -61,7 +61,6 @@
 - [ ] When the critic pauses, record the `RESULT FAILED` under the runtime actor, not the worker agent.
 - [ ] A re-run acceptance check reuses a decision gate already recorded for the same document instead of paying
       for it again (rating then shows no duplicates).
-- [ ] `ooat task rate`: validate each typed correction at once (a choice option must exist; a yes/no decision
-      takes 0 or 1) instead of failing after the last prompt.
-- [ ] Owner decision pending: repeated provider failures are charged against the contract budget and can end a
-      paused task as `ABSTAIN_BUDGET`.
+- [x] `ooat task rate`: validate each typed correction at once (done in 04c).
+- [x] Repeated provider failures charged against the contract budget: the task pauses and asks to raise it
+      (owner, 2026-10-03; done in 04c).

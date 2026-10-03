@@ -65,8 +65,10 @@ its `ooat task` / `ooat hil` commands (one worker, acceptance checks, closing, r
   contract (`cap.general.complete_task`, `role.general.worker`), two attempts, RESULT / ABSTAIN, TASK_CLOSED with
   the four cost parts; applies a declared default when a question's deadline has passed. A provider failure
   (quota, outage, timeout) pauses the task as RUNNING without using up an attempt; the next `run` resumes it from
-  the ledger, and `runnable()` lists the tasks that can move without the operator
-- `rating.py` — `task_decisions()`, `rate()`: TASK_RATED with the operator's verdict per decision
+  the ledger, and `runnable()` lists the tasks that can move without the operator. A used-up contract budget
+  (capped by the role) asks the operator to raise it or stop; a usable earlier document is kept as PARTIAL
+- `rating.py` — `task_decisions()`, `checked_verdict()`, `rate()`: TASK_RATED with the operator's verdict per
+  decision; typing the answer the decision gave counts as confirmed, a choice correction must be one of its options
 - `operator_cli.py` — the `ooat` command: `ooat connectors list | show | enable | disable`
 - `task_cli.py` — `ooat task submit | run [--all] | show | rate` and `ooat hil list | answer`
 

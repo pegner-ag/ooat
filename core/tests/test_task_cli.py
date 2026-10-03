@@ -175,3 +175,12 @@ def test_task_commands_need_a_config(tmp_path, monkeypatch):
     stdout = io.StringIO()
     assert main(["task", "run", "tsk_01J9ZQ7A1BK3M5N7P9Q1R3S5T7"], stdout=stdout, registry=Registry([])) == 1
     assert "No ooat.toml found" in stdout.getvalue() and not (tmp_path / "ooat-ledger.sqlite").exists()
+
+
+def test_an_invalid_rating_answer_is_asked_again(env):
+    _, out = ooat(env, "task", "submit", "--operator", "Martin", "--goal", "Shrň smlouvu.",
+                  "--acceptance", "Shrnutí má nejvýše 300 slov.")
+    task = task_id(out)
+    code, rated = ooat(env, "task", "rate", task, "--operator", "Martin", "--accepted", "yes", "--value", "B",
+                       answers="\n\nthree\ntwo\n\n\n\n")
+    assert code == 0 and "one of" in rated and "6 decisions recorded" in rated

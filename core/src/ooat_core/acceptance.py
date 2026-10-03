@@ -20,6 +20,8 @@ from .thresholds import GATE_EVENTS, acts_alone, threshold
 ACTOR = {"kind": "system", "id": "ooat-runtime"}
 # Provider failures that pass: the task pauses and runs again later instead of closing (owner, 2026-10-02).
 PAUSE_CODES = frozenset({"QUOTA_EXHAUSTED", "UNAVAILABLE", "TIMEOUT", "API_ERROR"})
+# A used-up contract budget is no verdict either: the runtime asks the operator to raise it (owner, 2026-10-03).
+STOP_CODES = PAUSE_CODES | {"BUDGET"}
 MAX_OUTPUT_CHARS = 200_000
 CRITIC_TIER = "workhorse"
 CRITIC_CONFIDENCE = 0.8  # the critic's own statement; below it a criterion is unmet
@@ -76,6 +78,8 @@ def check_output(ledger: Ledger, gateway: Gateway, *, task: str, contract: str |
         result = gateway.decide(DecisionRequest(output, questions, data_class, task=task, contract=contract))
     except GatewayError as error:
         checker.failures(error)
+        if error.code == "BUDGET":  # the critic would cost more still
+            raise
         result = None
     if result is None:
         pending = list(ids)
@@ -118,8 +122,8 @@ def _critic(checker, gateway, task, contract, output, criteria: dict[str, str], 
         result = gateway.call(ModelRequest(tier=CRITIC_TIER, prompt=prompt, system=CRITIC_SYSTEM, data_class=data_class,
                                            max_output_tokens=200 + 100 * len(criteria), task=task, contract=contract))
     except GatewayError as error:
-        if error.code in PAUSE_CODES:
-            checker.failures(error)  # its cost stays in the ledger; the caller pauses the task
+        if error.code in STOP_CODES:
+            checker.failures(error)  # its cost stays in the ledger; the caller pauses the task or asks
             raise
         checker.failures(error.fallback_from)
         checker.gate(GATE_CRITIC, [{"id": cid, "passed": False, "note": f"critic did not answer ({error.code})"}

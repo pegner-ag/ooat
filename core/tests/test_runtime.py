@@ -305,3 +305,63 @@ def test_personal_data_the_model_writes_into_the_document_raises_its_class(tmp_p
     setup.runtime.run(task)
     document = setup.last(task, "RESULT")["body"]["artifacts"][0]
     assert setup.ledger.artifact(document)["data_class"] == "personal"
+
+
+# Owner decisions of 2026-10-03 and the third review of plan 04c --------------------------------------------------
+
+def test_a_usable_first_document_is_kept_when_the_retry_brings_nothing_usable(tmp_path):
+    for second in ('{"abstain": "UNKNOWN"}',
+                   '{"abstain": "UNKNOWN", "reason": "Nevím.", "missing": "Víc času.", "confidence": 0.5}'):
+        model = ScriptedModel(["# Shrnutí\n\nPrvní verze.", second])
+        setup = Setup(tmp_path, model=model, jev=decisions(met=False))
+        task = setup.submit()
+        outcome = setup.runtime.run(task)
+        first = [e for e in setup.ledger.events(task=task, types=["RESULT"]) if e["body"]["outcome"] == "DONE"][0]
+        assert outcome.state == "CLOSED_PARTIAL" and outcome.artifact == first["body"]["artifacts"][0]
+        assert setup.last(task, "RESULT")["body"]["outcome"] == "PARTIAL"
+
+
+def test_the_contract_budget_never_exceeds_the_role_cap(tmp_path):
+    setup = Setup(tmp_path)
+    task = setup.submit(budget_usd=50.0)
+    setup.runtime.run(task)
+    assert setup.last(task, "CONTRACT_ISSUED")["body"]["contract"]["budget"]["max_usd"] == 5.0
+
+
+def budget_setup(tmp_path):
+    model = ScriptedModel(outages={("worker", 1): ConnectorError("TIMEOUT", "no answer")})
+    setup = Setup(tmp_path, model=model)
+    task = setup.submit(budget_usd=0.05)  # enough for one call: the failed one is charged its estimate
+    assert setup.runtime.run(task).state == "RUNNING"
+    asked = setup.runtime.run(task)
+    return setup, task, asked
+
+
+def test_a_budget_used_up_by_failed_calls_pauses_and_asks_to_raise_it(tmp_path):
+    setup, task, asked = budget_setup(tmp_path)
+    assert asked.state == "HIL_WAIT" and asked.request
+    request = setup.last(task, "HIL_REQUEST")["body"]
+    assert [o["id"] for o in request["options"]] == ["raise_budget", "do_not_run"]
+    assert "failed provider calls" in request["question"] and request["default_on_silence"] == "do_not_run"
+    setup.answer(task, asked.request, choice="raise_budget")
+    assert setup.runtime.run(task).state == "CLOSED_DONE"
+    budgets = [e["body"]["contract"]["budget"]["max_usd"] for e in setup.ledger.events(task=task)
+               if e["type"] == "CONTRACT_ISSUED"]
+    assert len(budgets) == 2 and budgets[1] > budgets[0]
+
+
+def test_stopping_at_the_budget_question_cancels_the_task(tmp_path):
+    setup, task, asked = budget_setup(tmp_path)
+    setup.answer(task, asked.request, choice="do_not_run")
+    assert setup.runtime.run(task).state == "CANCELLED"
+
+
+def test_the_runtime_constants_match_the_catalog_cards():
+    from ooat_core.catalog import load_card
+    from ooat_core.runtime import CAPABILITY, CAPABILITY_VERSION, MAX_ATTEMPTS, ROLE
+    from ooat_core.worker import WORKER_TIER
+
+    capability, role = load_card("capabilities", CAPABILITY), load_card("roles", "role.general.worker")
+    assert (CAPABILITY_VERSION, MAX_ATTEMPTS, WORKER_TIER) == (
+        capability["version"], capability["model_policy"]["max_attempts"], capability["model_policy"]["tier"])
+    assert ROLE == f"{role['id']}@{role['version']}" and CAPABILITY in role["capabilities"]

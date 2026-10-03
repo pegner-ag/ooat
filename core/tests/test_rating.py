@@ -40,7 +40,7 @@ def test_rating_records_confirmations_and_corrections_that_feed_the_thresholds(t
 
 @pytest.mark.parametrize("verdicts, message", [
     ("unknown_event", "no decision"),
-    ("a5_as_number", "correct a yes/no decision"),
+    ("a5_as_number", "one of its options"),
     ("c1_as_word", "correct a yes/no decision"),
     ("c1_as_two", "correct a yes/no decision"),
     ("c1_as_true", "correct a yes/no decision"),
@@ -63,3 +63,19 @@ def test_only_a_closed_task_can_be_rated(tmp_path):
     setup.runtime.run(task)  # waits for a clarification
     with pytest.raises(ValueError, match="once it is closed"):
         rate(setup.ledger, task, operator="Martin", accepted=False, value_class="C")
+
+
+def test_typing_the_answer_the_decision_already_gave_counts_as_confirmed(tmp_path):
+    setup, task = closed_task(tmp_path)
+    decisions = {d.question: d for d in task_decisions(setup.ledger.events(task=task))}
+    event = rate(setup.ledger, task, operator="Martin", accepted=True, value_class="B", verdicts={
+        (decisions["c1"].event, "c1"): 1, (decisions["a5"].event, "a5"): "one"})
+    assert {d["verdict"] for d in event["body"]["decisions"]} == {"confirmed"}
+
+
+def test_a_choice_correction_must_be_one_of_the_question_options(tmp_path):
+    setup, task = closed_task(tmp_path)
+    decision = {d.question: d for d in task_decisions(setup.ledger.events(task=task))}["a10"]
+    with pytest.raises(ValueError, match="one of"):
+        rate(setup.ledger, task, operator="Martin", accepted=True, value_class="B",
+             verdicts={(decision.event, "a10"): "pubic"})

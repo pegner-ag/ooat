@@ -154,14 +154,19 @@ which 04 does not have.
   `default_applied` response when a Gate question's deadline has passed. A provider failure (quota, outage,
   timeout, API error) never finishes a task (owner, 2026-10-02): it is paused as RUNNING without using up an
   attempt and resumes with the next `ooat task run <id>` or `ooat task run --all`; 05 runs paused tasks
-  automatically.
+  automatically. When the contract budget is used up (failed calls are charged their estimate), the task pauses
+  and asks the operator to raise it or stop (owner, 2026-10-03); stopping keeps a usable document as PARTIAL.
+  The contract budget is the task budget capped by the role's `max_usd_per_contract`.
 - **Worker (T2):** a stable prompt prefix (family rules → role → contract) plus the task; artifacts by reference
   with previews of at most 6,000 characters. The model answers either with the deliverable or with an abstention
   in a fixed JSON form (`{"abstain": "UNKNOWN", "reason": "…", "missing": "…", "confidence": 0.x}`) → `ABSTAIN`.
 - **Acceptance:** deterministic checks first (non-empty, size limit), then one Jev `noul` per criterion on the
   output ("does the output meet: …?"). An answer below θ is not a pass: per spec §6 the criterion goes to the LLM
   critic (workhorse tier, JSON verdict with reason); a critic that is also unsure counts the criterion as unmet, so
-  an uncertain answer can never produce `DONE`. When any input of the task is `untrusted` (an attached file), the
+  an uncertain answer can never produce `DONE`. In T2 the critic runs on the same workhorse tier as the worker,
+  although spec §7 rule 6 says a critic never reviews output of the same role: an accepted T2 exception (owner,
+  2026-10-03), revisited with T3+. A later attempt that brings nothing usable never throws away a usable earlier
+  document: the task closes as PARTIAL on it. When any input of the task is `untrusted` (an attached file), the
   output may carry text written to steer a checker, so a "met" answer never passes alone: the critic confirms it.
   Each criterion's decision is recorded in its `GATE_PASSED` / `GATE_FAILED` event (`criteria[].decision`), so
   acceptance decisions are rated and calibrated like Gate decisions. All met → `RESULT DONE`; otherwise one retry with the failed criteria as
