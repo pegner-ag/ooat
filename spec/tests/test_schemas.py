@@ -36,6 +36,12 @@ def test_schema_is_valid_draft_2020_12(name):
     Draft202012Validator.check_schema(SCHEMAS[name])
 
 
+def test_every_schema_id_uses_the_project_base():
+    base = "https://moonindustries.eu/ooat/spec/v0.1/"  # ADR 0013
+    assert {name: s["$id"] for name, s in SCHEMAS.items()} == {
+        name: f"{base}{name}.schema.json" for name in SCHEMAS}
+
+
 def test_every_entity_has_a_valid_example():
     covered = {p.name.split(".")[0] for p in VALID}
     assert set(SCHEMAS) - {"common"} <= covered

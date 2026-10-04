@@ -20,4 +20,4 @@ were not searched.
 
 - Package names `ooat` (PyPI, npm) are used as planned.
 - The public repository is https://github.com/pegner-ag/ooat.
-- Schema `$id` host stays `ooat.invalid` until a domain is chosen.
+- Schema `$id` host stays `ooat.invalid` until a domain is chosen. (Superseded by ADR 0013: `moonindustries.eu`.)
