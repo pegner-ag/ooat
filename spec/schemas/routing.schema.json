@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://ooat.invalid/spec/v0.1/routing.schema.json",
+  "$id": "https://moonindustries.eu/ooat/spec/v0.1/routing.schema.json",
   "title": "OOAT routing policy",
   "description": "Maps tiers to provider adapters, holds dated price lists and the data-class policy (spec sections 6 and 9). catalog/routing.json.",
   "type": "object",

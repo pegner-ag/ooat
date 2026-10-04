@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://ooat.invalid/spec/v0.1/capability.schema.json",
+  "$id": "https://moonindustries.eu/ooat/spec/v0.1/capability.schema.json",
   "title": "OOAT capability card",
   "description": "One typed operation with contract, acceptance, model policy and cost card (spec section 5).",
   "type": "object",
