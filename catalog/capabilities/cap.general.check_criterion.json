@@ -1,0 +1,18 @@
+{
+  "id": "cap.general.check_criterion",
+  "version": "0.1.0",
+  "status": "draft",
+  "summary": "Decides whether a delivered output meets one acceptance criterion of its task.",
+  "i18n": {"cs": {"summary": "Rozhodne, zda odevzdaný výstup splňuje jedno kritérium přijetí úlohy."}},
+  "impl": "decision",
+  "input_schema": "schemas/output_and_criterion.v1.json",
+  "output_schema": "schemas/noul_result.v1.json",
+  "acceptance": [{"id": "schema_valid", "type": "deterministic", "check": "jsonschema"}],
+  "model_policy": {
+    "tier": "decision",
+    "max_attempts": 1,
+    "data_classes_allowed": ["public", "internal", "client_confidential", "personal"]
+  },
+  "cost_card": {"prior": {"p_accept": 0.8}, "observed": {"n": 0}},
+  "eval_set": "evals/cap.general.check_criterion/"
+}

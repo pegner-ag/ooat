@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Output and one acceptance criterion",
+  "type": "object",
+  "required": [
+    "output",
+    "criterion"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "output": {
+      "type": "string",
+      "minLength": 1
+    },
+    "criterion": {
+      "type": "string",
+      "minLength": 1
+    }
+  }
+}

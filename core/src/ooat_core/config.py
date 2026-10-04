@@ -2,7 +2,8 @@
 
 The file never holds secrets or connector enablement: secrets are named by environment variable, enablement is
 ledger state (ADR 0010). Unknown keys are rejected so a pasted API key cannot hide in the file. The [policy] table
-holds the operator's limits on where data may go, enforced by the gateway (ADR 0012).
+holds the operator's limits on where data may go, enforced by the gateway (ADR 0012); [gate] holds the Topology
+Gate's values (design 04 §4).
 """
 
 import dataclasses
@@ -17,6 +18,7 @@ _ENV_NAME = re.compile(r"^[A-Z][A-Z0-9_]*$")
 _CONNECTOR_KEYS = frozenset({"secret_env", "plan_fee_usd_month", "models"})
 _COUNTRY = re.compile(r"^[A-Z]{2}$")
 _REGION = re.compile(r"^[a-z]{2}(-[a-z0-9-]+)?$")
+_GATE_NUMBERS = ("v_min_usd", "default_budget_usd", "hil_deadline_hours")
 
 
 @dataclass(frozen=True)
@@ -26,6 +28,8 @@ class Config:
     connectors: dict[str, dict] = field(default_factory=dict)  # connector id -> settings
     blocked_countries: frozenset[str] = frozenset()  # no connector whose vendor or model comes from these
     personal_data_regions: frozenset[str] | None = None  # personal data only processed here; None = no limit
+    blobs_dir: str | None = None  # artifact bodies; None = an "ooat-blobs" folder next to the ledger file
+    gate: dict = field(default_factory=dict)  # [gate] overrides of GateSettings
 
 
 def _table(data: dict, key: str, allowed: set[str]) -> dict:
@@ -40,12 +44,26 @@ def _table(data: dict, key: str, allowed: set[str]) -> dict:
 
 
 def parse_config(data: dict) -> Config:
-    unknown = set(data) - {"ledger", "routing", "connectors", "policy"}
+    unknown = set(data) - {"ledger", "routing", "connectors", "policy", "gate"}
     if unknown:
         raise ValueError(f"unknown config sections: {sorted(unknown)}")
-    ledger_url = _table(data, "ledger", {"url"}).get("url", Config.ledger_url)
+    ledger = _table(data, "ledger", {"url", "blobs"})
+    ledger_url = ledger.get("url", Config.ledger_url)
     if not isinstance(ledger_url, str):
         raise ValueError("ledger.url must be a string")
+    blobs_dir = ledger.get("blobs")
+    if blobs_dir is not None and (not isinstance(blobs_dir, str) or not blobs_dir.strip()):
+        raise ValueError("ledger.blobs must be a folder path")
+    gate = _table(data, "gate", {"value_usd", "expected_output_tokens", *_GATE_NUMBERS})
+    for key in _GATE_NUMBERS:
+        if key in gate and not (type(gate[key]) in (int, float) and gate[key] > 0):
+            raise ValueError(f"gate.{key} must be a positive number")
+    tokens = gate.get("expected_output_tokens", 1)
+    if not (type(tokens) is int and tokens > 0):
+        raise ValueError("gate.expected_output_tokens must be a positive whole number")
+    values = _table(gate, "value_usd", {"A", "B", "C"})
+    if not all(type(v) in (int, float) and v >= 0 for v in values.values()):
+        raise ValueError("gate.value_usd must map A, B, C to amounts in USD")
     pins = _table(_table(data, "routing", {"pin"}), "pin", set())
     for tier, connector_id in pins.items():
         if tier not in TIERS or not isinstance(connector_id, str) or not _PROVIDER_ID.match(connector_id):
@@ -71,7 +89,8 @@ def parse_config(data: dict) -> Config:
         raise ValueError("policy.personal_data_regions must list region codes such as \"eu\"")
     return Config(ledger_url=ledger_url, pins=dict(pins), connectors={k: dict(v) for k, v in connectors.items()},
                   blocked_countries=frozenset(blocked),
-                  personal_data_regions=frozenset(regions) if regions is not None else None)
+                  personal_data_regions=frozenset(regions) if regions is not None else None,
+                  blobs_dir=blobs_dir, gate=dict(gate))
 
 
 def load_config(path: str | Path) -> Config:
@@ -85,4 +104,7 @@ def load_config(path: str | Path) -> Config:
     if location and location != ":memory:" and not absolute:
         resolved = (Path(path).resolve().parent / location).as_posix()
         config = dataclasses.replace(config, ledger_url=prefix + resolved)
+    blobs = config.blobs_dir
+    if blobs is not None and not (PurePosixPath(blobs).is_absolute() or PureWindowsPath(blobs).is_absolute()):
+        config = dataclasses.replace(config, blobs_dir=(Path(path).resolve().parent / blobs).as_posix())
     return config

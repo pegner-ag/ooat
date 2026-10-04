@@ -14,6 +14,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Literal
 
+from .config import Config
 from .connectors import DecisionQuestion, DecisionRequest, ModelRequest
 from .gateway import Gateway, GatewayError
 from .ledger import Ledger, new_event
@@ -50,6 +51,13 @@ class GateSettings:
     default_budget_usd: float = 2.0
     expected_output_tokens: int = 2000  # prior for the worker's deliverable
     hil_deadline_hours: float = 48.0  # spec §8: CLARIFYING closes after 48 h without an answer
+
+
+def settings_from_config(config: Config) -> GateSettings:
+    """GateSettings with the operator's [gate] values from ooat.toml; value classes are merged, not replaced."""
+    overrides = dict(config.gate)
+    values = {**GateSettings().value_usd, **{k: float(v) for k, v in overrides.pop("value_usd", {}).items()}}
+    return GateSettings(value_usd=values, **overrides)
 
 
 @dataclass(frozen=True)

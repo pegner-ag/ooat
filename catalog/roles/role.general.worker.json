@@ -1,0 +1,11 @@
+{
+  "id": "role.general.worker",
+  "extends": "family.analyst",
+  "version": "0.1.0",
+  "status": "draft",
+  "a2a": {"name": "General worker", "description": "Completes one task end to end and delivers a Markdown document.", "skills_from": "capabilities"},
+  "capabilities": ["cap.general.complete_task"],
+  "produces": ["markdown_document"],
+  "permissions": {"read": ["art:*"], "write": ["workspace:*"], "network": false, "code_exec": "none"},
+  "budget": {"max_usd_per_contract": 5.0, "max_turns": 2}
+}
