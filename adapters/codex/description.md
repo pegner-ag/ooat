@@ -13,7 +13,9 @@ existing login.
 - Codex still loads the user's skill descriptions: a measured "OK" call carried about 14,000 input tokens. Fewer
   installed skills mean cheaper calls.
 - The model per tier comes from `ooat.toml` (`models`); the manifest names none, so the connector is unused until
-  the operator sets one and adds its price to `routing.json`.
+  the operator sets one and adds its price to `routing.json`. Priced there (OpenAI API list prices, as shadow
+  cost on the plan): `gpt-6-astra`, `gpt-5.6-sol`, `gpt-5.6-luna`, the ids Codex lists for a ChatGPT login.
+  `gpt-6-sol` is refused with a ChatGPT login (checked 2026-10-05).
 - Usage: OpenAI counts cached input inside `input_tokens`, so `tokens_in` = `input_tokens` − `cached_input_tokens`,
   `tokens_cached` = `cached_input_tokens`, `tokens_out` = `output_tokens`; metering `reported`.
 - Errors: `turn.failed` and top-level `error` events; usage limits → `QUOTA_EXHAUSTED`, login problems →
