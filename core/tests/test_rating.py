@@ -89,3 +89,16 @@ def test_a_decision_the_critic_contradicted_is_marked(tmp_path):
     acceptance = [d for d in task_decisions(setup.ledger.events(task=task)) if d.kind == "acceptance"]
     assert len(acceptance) == 2 and all(d.disputed for d in acceptance)
     assert not any(d.disputed for d in task_decisions(closed_task(tmp_path / "other")[0].ledger.events()))
+
+
+@pytest.mark.parametrize("critic", [
+    '{"c1": {"met": true, "confidence": 0.7, "reason": "Probably."}}',  # unsure: no verdict against Jev
+    '{"c1": {"confidence": 0.9, "reason": "No met field."}}',
+    "Not JSON.",
+], ids=["unsure", "no_verdict", "unreadable"])
+def test_a_critic_without_a_sure_verdict_disputes_nothing(tmp_path, critic):
+    from runtime_fakes import ScriptedModel
+    setup = Setup(tmp_path, model=ScriptedModel(critic=critic))
+    task = setup.submit(files=[b"Smlouva o dilu."])
+    setup.runtime.run(task)
+    assert not any(d.disputed for d in task_decisions(setup.ledger.events(task=task)))

@@ -54,9 +54,10 @@ def _iban_ok(text: str) -> bool:
     return any(15 <= end <= 34 and _mod97_ok(compact[:end]) for end in ends)
 
 
-# Issuer prefixes (Visa, Mastercard, Amex, Diners, Discover, JCB, UnionPay). About one digit run in ten passes Luhn,
-# so a run written without separators counts only with such a prefix: timestamps and order numbers do not.
-_ISSUER = re.compile(r"^(?:4|5[1-5]|2[2-7]|3[0478]|35|6[025])")
+# Issuer prefixes, broad on purpose (Visa, Mastercard and Maestro, Mir, Amex, Diners, JCB, Discover, UnionPay,
+# RuPay). About one digit run in ten passes Luhn, so a run written without separators counts only with such a
+# prefix: timestamps (starting with 1) and order numbers starting with 0, 1, 7 or 9 do not.
+_ISSUER = re.compile(r"^(?:4|5[0-8]|2[2-7]|3|6|8[12])")
 
 
 def _card_ok(text: str) -> bool:

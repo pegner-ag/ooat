@@ -93,7 +93,7 @@ def test_an_expired_responsibility_no_longer_counts():
     setup.enable(connector, responsibility={})
     with pytest.raises(GatewayError) as info:
         setup.route("personal")
-    assert "responsibility from 2026-10-02 is no longer in force" in info.value.trace[0]
+    assert "responsibility dated 2026-10-02 is not in force" in info.value.trace[0]
 
 
 def test_blocked_countries_exclude_a_connector_for_every_class():

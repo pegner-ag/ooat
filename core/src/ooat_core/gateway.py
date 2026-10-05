@@ -331,8 +331,8 @@ class Gateway:
         responsibility = responsibility_in_force(acknowledgement, self._clock().date())
         responsible = responsibility is not None and data_class in RESPONSIBLE_CLASSES
         given = acknowledgement.get("responsibility")
-        expired = (f"; your responsibility from {given['confirmed_on']} is no longer in force (12 months), enable "
-                   "the connector again to renew it") if given and not responsible and data_class in RESPONSIBLE_CLASSES else ""
+        expired = (f"; your responsibility dated {given['confirmed_on']} is not in force (it holds for 12 months "
+                   "from that date), enable the connector again to renew it") if given and not responsible and data_class in RESPONSIBLE_CLASSES else ""
         if data_class not in manifest["data_policy"]["allowed_data_classes"]:
             if not responsible:
                 return f"{data_class} is not allowed by the manifest{expired}"
@@ -348,7 +348,7 @@ class Gateway:
         regions = manifest["jurisdiction"]["processing_regions"] or (
             responsibility.get("processing_regions") if responsible else None)
         if policy.get("require_known_region") and not regions:
-            return f"{data_class} requires a known processing region"
+            return f"{data_class} requires a known processing region{expired}"
         if policy.get("require_verified_redaction"):
             return f"{data_class} requires verified redaction, not available yet"
         if policy.get("require_contract") and not responsible:  # nothing else can vouch for an agreement

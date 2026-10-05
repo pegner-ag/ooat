@@ -9,7 +9,7 @@ revision can carry them.
 
 1. **A provider failure never finishes a task** (owner, 2026-10-02). Quota, outage, timeout or API error pauses the
    task as `RUNNING` without using up an attempt. It resumes from the ledger with `ooat task run <id>` or
-   `ooat task run --all`; 05 runs paused tasks automatically.
+   `ooat task run --all`; 05 will run paused tasks automatically.
 2. **A used-up contract budget asks the operator** (owner, 2026-10-03, choice B). Failed provider calls are charged
    their estimate. When the contract budget is used up, the task pauses with a blocking HIL question: raise the
    budget (recommended; `CONTRACT_ISSUED` is reissued with the raised `max_usd`) or stop. Silence until the
@@ -18,8 +18,9 @@ revision can carry them.
    contract is issued; the operator's answer to the budget question may raise the budget above it.
 4. **In T2 the critic runs on the same workhorse tier as the worker** (owner, 2026-10-03), although spec §7 rule 6
    says a critic never reviews output of the same role. Accepted as a T2 exception, revisited with T3+. The critic
-   is called when Jev is unsure about a criterion, or when any input of the task is `untrusted`; an unsure critic
-   counts the criterion as unmet, so an uncertain answer never produces `DONE`.
+   is called for a criterion when the decision tier (Jev, or its text-model fallback) is unsure about it, for every
+   "met" answer when any input of the task is `untrusted`, and for every criterion when the decision tier gave no
+   answer. An unsure critic counts the criterion as unmet, so an uncertain answer never produces `DONE`.
 
 ## Consequences
 

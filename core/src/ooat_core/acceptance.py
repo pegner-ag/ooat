@@ -139,8 +139,8 @@ def _critic(checker, gateway, task, contract, output, criteria: dict[str, str], 
         if verdict.get("met") is True and sure:
             met.add(cid)
         row = {"id": cid, "passed": cid in met}
-        if type(confidence) in (int, float) and 0 <= confidence <= 1:
-            row["score"] = confidence
+        if type(confidence) in (int, float) and 0 <= confidence <= 1 and type(verdict.get("met")) is bool:
+            row["score"] = confidence  # the critic's confidence in a yes or no it actually gave
         reason = verdict.get("reason")
         row["note"] = (reason.strip()[:300] if isinstance(reason, str) and reason.strip()
                        else "no usable verdict; counted as unmet")

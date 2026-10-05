@@ -14,6 +14,7 @@ from ooat_core.pii import higher_class, raised_class, scan
     ("Účet CZ65 0800 0000 1920 0014 5399 u ČS.", "iban"),
     ("Karta 4111 1111 1111 1111, platnost 12/28.", "card"),
     ("Karta 4111111111111111.", "card"),
+    ("Maestro 6759649826438453.", "card"),
     ("Rodné číslo 780123/0008.", "birth_number"),
     ("Narozen 1950, RČ 505101/123.", "birth_number"),
     ("RČ 015203/0000 podle staršího pravidla.", "birth_number"),

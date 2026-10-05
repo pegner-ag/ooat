@@ -6,7 +6,7 @@ run) and the acceptance checks' (GATE_* events, every attempt). These verdicts a
 
 from dataclasses import dataclass
 
-from .acceptance import GATE_CRITIC as CRITIC_GATE
+from .acceptance import CRITIC_CONFIDENCE, GATE_CRITIC as CRITIC_GATE
 from .connector_admin import checked_operator
 from .gate import BRANCHES, DATA_CLASSES
 from .ledger import Ledger, new_event
@@ -31,9 +31,10 @@ class TaskDecision:
 def task_decisions(events: list[dict]) -> list[TaskDecision]:
     """Every decision record of the task, in ledger order."""
     found, critic = [], {}
-    for event in events:  # the critic's verdicts, by document and criterion
+    for event in events:  # the critic's sure verdicts, by document and criterion; no answer or an unsure one is none
         if event["type"] in GATE_EVENTS and event["body"].get("gate") == CRITIC_GATE:
-            critic |= {(tuple(event["refs"]), c["id"]): c["passed"] for c in event["body"].get("criteria", [])}
+            critic |= {(tuple(event["refs"]), c["id"]): c["passed"] for c in event["body"].get("criteria", [])
+                       if c.get("score", 0) >= CRITIC_CONFIDENCE}
     for event in events:
         if event["type"] == "TOPOLOGY_DECIDED":
             records = [("gate", r) for r in event["body"].get("decisions", [])]

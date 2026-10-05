@@ -240,7 +240,7 @@ def _hil_answer(args, ledger, runtime, stdin, stdout, ask) -> int:
         raise ValueError("give --choice, --text or both")
     if args.choice == "narrow_scope" and not (args.text or "").strip():  # it would use up a budget question
         raise ValueError("narrow_scope needs the narrowed scope as --text")
-    request =next((e for e in ledger.events(types=["HIL_REQUEST"]) if e["id"] == args.request), None)
+    request = next((e for e in ledger.events(types=["HIL_REQUEST"]) if e["id"] == args.request), None)
     if request is None:
         raise ValueError(f"no question {args.request}")
     runtime.expire(request["task"])  # past its deadline the default has applied; a late answer must not win
