@@ -10,11 +10,17 @@ need to know the ADRs to read the spec correctly.
 ## Amendments to fold in
 - ADR 0003: full 26-char ULIDs; `FAILED` as `RESULT` with `error`; `task: null` only for `ADAPTER_ACKNOWLEDGED`;
   `acts: false` and R3 default on silence; objection severity and closed `reason_code` list; role id middle
-  segment = domain; schema `$id` placeholder.
+  segment = domain; schema `$id` base (now `https://moonindustries.eu/ooat/spec/v0.1/`, ADR 0013; the version
+  segment moves to `v0.2` with this revision only if the owner decides so).
 - ADR 0004: domains vs. role families (§2, §5 tables).
 - ADR 0008: pluggable ledger backends (§3 components and profiles); §7 ledger schema with `seq`, nullable
   `task_id`, `(task_id, seq)` / `(type, seq)` indexes, `artifact` table with `untrusted`.
 - ADR 0009: §8 lifecycle row `CLARIFYING` → `SUBMITTED` once every clarifying question is answered.
+- ADR 0011 and ADR 0012: decision tier and operator data responsibility into §2, §4, §6, §8, §9 and §11.
+- ADR 0014: provider failures pause a task (§8), the budget HIL question (§9), contract budget capped by the
+  role, the T2 critic exception to §7 rule 6.
+- Spec §4 rule A3 (below `v_min` → T2 without further calculation): the Gate only records A3 and may still close
+  or clarify; align the text or the code.
 - Ledger-enforced HIL rules (§9): options named by `recommended`/`default_on_silence`, one response per
   request, `default_applied` responses choose the default.
 

@@ -64,3 +64,12 @@
 - [x] `ooat task rate`: validate each typed correction at once (done in 04c).
 - [x] Repeated provider failures charged against the contract budget: the task pauses and asks to raise it
       (owner, 2026-10-03; done in 04c).
+
+### From the review of PR #15 (task runtime)
+- [ ] The acceptance check's decision is sent with the task's declared data class, not the class A10 or the
+      pre-scan raised; the gateway's pre-scan still protects the call, but declare the raised class.
+- [ ] `ooat task rate --confirm-all` also confirms criteria the critic contradicted, which can skew θ; leave
+      those unconfirmed or ask.
+- [ ] Eval cases for `cap.general.check_criterion`: output with text written to steer the checker, and a
+      criterion that cannot be checked from the output.
+- [ ] `runtime.py` loads the role card at import (`ROLE_BUDGET_USD`); load it when the runtime is created.
