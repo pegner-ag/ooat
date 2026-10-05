@@ -73,6 +73,11 @@ def test_jurisdiction_staleness_follows_spec_rule_2():
     unverified = fake_manifest(jurisdiction=dict(manifest["jurisdiction"], verified_on=None))
     assert jurisdiction_stale(unverified, {"jurisdiction_sha256": jurisdiction_fingerprint(unverified)},
                               date(2026, 10, 1))
+    # a recent responsibility counts only when the caller says it is in force for the class (fail closed)
+    responsible = {"jurisdiction_sha256": jurisdiction_fingerprint(unverified),
+                   "responsibility": {"confirmed_on": "2026-09-30"}}
+    assert jurisdiction_stale(unverified, responsible, date(2026, 10, 1))
+    assert not jurisdiction_stale(unverified, responsible, date(2026, 10, 1), responsible=True)
 
 
 def test_connector_error_codes_are_the_schema_codes():

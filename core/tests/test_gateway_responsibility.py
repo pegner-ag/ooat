@@ -91,8 +91,9 @@ def test_an_expired_responsibility_no_longer_counts():
     connector = api()
     setup = Setup(connector, today=TODAY + timedelta(days=366))
     setup.enable(connector, responsibility={})
-    with pytest.raises(GatewayError):
+    with pytest.raises(GatewayError) as info:
         setup.route("personal")
+    assert "responsibility from 2026-10-02 is no longer in force" in info.value.trace[0]
 
 
 def test_blocked_countries_exclude_a_connector_for_every_class():
@@ -168,6 +169,7 @@ def test_an_expired_responsibility_stops_a_subscription_carrying_personal_data_b
     with pytest.raises(GatewayError) as info:
         setup.route("personal")
     assert "not allowed by the manifest" in info.value.trace[0]
+    assert "enable the connector again to renew it" in info.value.trace[0]
 
 
 def test_changed_facts_stop_client_data_on_an_existing_responsibility():

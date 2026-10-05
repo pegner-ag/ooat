@@ -156,7 +156,7 @@ def test_responsibility_lasts_twelve_months_and_stands_in_for_the_verification_d
     body = acknowledge(ledger, connector, "Martin", ["personal"], True, {"no_training": True}, TODAY)["body"]
     assert responsibility_in_force(body, date(2027, 10, 1)) is not None
     assert responsibility_in_force(body, date(2027, 10, 2)) is None
-    assert not jurisdiction_stale(connector.manifest, body, TODAY)  # the manifest itself was never verified
+    assert not jurisdiction_stale(connector.manifest, body, TODAY, responsible=True)  # manifest never verified
     assert jurisdiction_stale(connector.manifest, body, date(2027, 10, 2))
     assert jurisdiction_stale(connector.manifest, body, TODAY, responsible=False)  # special-category data
 
@@ -188,3 +188,10 @@ def test_training_stated_in_the_jurisdiction_block_blocks_an_extension(ledger):
     connector.manifest["jurisdiction"]["training_on_inputs"] = True
     with pytest.raises(ValueError, match="trains on inputs"):
         acknowledge(ledger, connector, "Martin", ["personal"], True, {"no_training": True}, TODAY)
+
+
+def test_only_a_literal_true_states_that_training_is_off():
+    from ooat_core.connector_admin import checked_classes
+    with pytest.raises(ValueError, match="training on your inputs is switched off"):
+        checked_classes(subscription().manifest, ["personal"], {"no_training": "yes"})
+    assert checked_classes(subscription().manifest, ["personal"], {"no_training": True}) == ["personal"]

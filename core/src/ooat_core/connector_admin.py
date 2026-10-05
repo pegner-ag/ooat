@@ -109,10 +109,11 @@ def connector_statuses(registry: Registry, ledger: Ledger, today: date,
         if event is not None and event["type"] == "ADAPTER_DISABLED":
             state = "disabled"
         elif event is not None:
-            state, stale = "enabled", jurisdiction_stale(connector.manifest, event["body"], today)
+            responsibility = responsibility_in_force(event["body"], today)
+            state = "enabled"
+            stale = jurisdiction_stale(connector.manifest, event["body"], today, responsibility is not None)
             unattended = (event["body"].get("automation_confirmed") is True
                           and unattended_forbidden(connector.manifest) is None)
-            responsibility = responsibility_in_force(event["body"], today)
             if responsibility is not None:
                 confirmed = date.fromisoformat(responsibility["confirmed_on"])
                 until = date.fromordinal(confirmed.toordinal() + RESPONSIBILITY_DAYS).isoformat()
@@ -227,7 +228,7 @@ def checked_classes(manifest: dict, data_classes: Iterable[str], responsibility:
     training = provider_trains(manifest)
     if beyond and training is True:
         raise ValueError(f"{manifest['id']} trains on inputs; it cannot carry {beyond}")
-    if beyond and training is None and not responsibility.get("no_training"):
+    if beyond and training is None and responsibility.get("no_training") is not True:
         raise ValueError(f"{manifest['id']}: state that training on your inputs is switched off to allow {beyond}")
     return classes
 
