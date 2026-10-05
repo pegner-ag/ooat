@@ -120,7 +120,9 @@ def _offers(event: dict, option: str) -> bool:
 
 def task_facts(events: list[dict], settings: GateSettings = GateSettings()) -> TaskFacts:
     """Read a task's submission and the operator's answers to the Gate's questions from its events."""
-    submitted = next(e for e in events if e["type"] == "TASK_SUBMITTED")
+    submitted = next((e for e in events if e["type"] == "TASK_SUBMITTED"), None)
+    if submitted is None:
+        raise ValueError("no TASK_SUBMITTED event: unknown task")
     body = submitted["body"]
     requests = {e["id"]: e for e in events if _offers(e, "clarify") or _offers(e, "raise_budget")}
     texts, narrowings, budget = [], [], body.get("budget_usd", settings.default_budget_usd)

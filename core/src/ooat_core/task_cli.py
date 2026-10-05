@@ -190,15 +190,19 @@ def _show(args, ledger, runtime, stdin, stdout, ask) -> int:
 
 def _rate(args, ledger, runtime, stdin, stdout, ask) -> int:
     decisions = task_decisions(ledger.events(task=args.task))
-    verdicts = {}
+    verdicts, left = {}, 0
     for decision in decisions:
         key = (decision.event, decision.question)
         if args.confirm_all:
-            verdicts[key] = "confirmed"
+            if decision.disputed:  # confirming it unseen could teach the threshold the wrong answer
+                left += 1
+            else:
+                verdicts[key] = "confirmed"
             continue
+        disputed = " The critic judged it the other way." if decision.disputed else ""
         while True:
             answer = ask(f"{decision.kind} {decision.question}: answered {decision.answer} (confidence "
-                         f"{decision.confidence:.2f}). Enter = confirm, '-' = skip, or the right answer: ",
+                         f"{decision.confidence:.2f}).{disputed} Enter = confirm, '-' = skip, or the right answer: ",
                          stdin, stdout)
             if answer is None:  # the input ended: confirming the rest silently would distort the calibration
                 raise ValueError("the input ended before every decision was answered; nothing was rated")
@@ -213,6 +217,9 @@ def _rate(args, ledger, runtime, stdin, stdout, ask) -> int:
     event = rate(ledger, args.task, operator=args.operator, accepted=args.accepted == "yes", value_class=args.value,
                  verdicts=verdicts, note=args.note)
     stdout.write(f"Rated {args.task}: {len(event['body']['decisions'])} decisions recorded.\n")
+    if left:
+        stdout.write(f"Left out: {left} decisions the critic contradicted; rate without --confirm-all to judge "
+                     "them.\n")
     return 0
 
 
@@ -231,7 +238,9 @@ def _hil_list(args, ledger, runtime, stdin, stdout, ask) -> int:
 def _hil_answer(args, ledger, runtime, stdin, stdout, ask) -> int:
     if args.choice is None and not (args.text or "").strip():
         raise ValueError("give --choice, --text or both")
-    request = next((e for e in ledger.events(types=["HIL_REQUEST"]) if e["id"] == args.request), None)
+    if args.choice == "narrow_scope" and not (args.text or "").strip():  # it would use up a budget question
+        raise ValueError("narrow_scope needs the narrowed scope as --text")
+    request =next((e for e in ledger.events(types=["HIL_REQUEST"]) if e["id"] == args.request), None)
     if request is None:
         raise ValueError(f"no question {args.request}")
     runtime.expire(request["task"])  # past its deadline the default has applied; a late answer must not win

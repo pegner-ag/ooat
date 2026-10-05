@@ -37,7 +37,12 @@ FALLBACK_TIMEOUT_S = 120
 
 
 class GatewayError(Exception):
-    """NOT_PERMITTED, BUDGET, QUOTA_EXHAUSTED, UNAVAILABLE, API_ERROR or TIMEOUT (design §7)."""
+    """NOT_PERMITTED, BUDGET, QUOTA_EXHAUSTED, UNAVAILABLE, API_ERROR or TIMEOUT (design §7).
+
+    Mapped to contract outcomes by the caller: NOT_PERMITTED is an abstention (`ABSTAIN_NOT_PERMITTED`), never a
+    `RESULT.error.code`; BUDGET pauses the task with a budget question (ADR 0014); the provider failures
+    (QUOTA_EXHAUSTED, UNAVAILABLE, API_ERROR, TIMEOUT) are a `RESULT FAILED` and pause the task.
+    """
 
     def __init__(self, code: str, message: str, trace: list[str] | None = None, cost: dict | None = None):
         super().__init__(f"{code}: {message}")

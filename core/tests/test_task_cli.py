@@ -164,6 +164,8 @@ def test_run_all_goes_on_when_one_task_is_refused(env, monkeypatch):
     (["hil", "answer", "evt_01J9ZQ70A0K3M5N7P9Q1R3S5T7", "--operator", "Martin", "--choice", "clarify"],
      "no question"),
     (["hil", "answer", "evt_01J9ZQ70A0K3M5N7P9Q1R3S5T7", "--operator", "Martin"], "--choice, --text or both"),
+    (["hil", "answer", "evt_01J9ZQ70A0K3M5N7P9Q1R3S5T7", "--operator", "Martin", "--choice", "narrow_scope"],
+     "narrow_scope needs the narrowed scope as --text"),
 ])
 def test_mistakes_are_refused_without_a_traceback(env, argv, message):
     code, out = ooat(env, *argv)
@@ -184,3 +186,17 @@ def test_an_invalid_rating_answer_is_asked_again(env):
     code, rated = ooat(env, "task", "rate", task, "--operator", "Martin", "--accepted", "yes", "--value", "B",
                        answers="\n\nthree\ntwo\n\n\n\n")
     assert code == 0 and "one of" in rated and "6 decisions recorded" in rated
+
+
+def test_confirm_all_leaves_decisions_the_critic_contradicted_for_the_operator(env):
+    env["model"].critic = '{"c1": {"met": false, "confidence": 0.9, "reason": "Too long."}}'
+    attachment = env["dir"] / "smlouva.txt"
+    attachment.write_text("Smlouva o dilu c. 12/2026.", encoding="utf-8")  # untrusted: the critic confirms
+    _, out = ooat(env, "task", "submit", "--operator", "Martin", "--goal", "Shrň přiloženou smlouvu.",
+                  "--acceptance", "Shrnutí má nejvýše 300 slov.", "--file", str(attachment))
+    task = task_id(out)
+    assert "CLOSED_PARTIAL" in out
+    code, rated = ooat(env, "task", "rate", task, "--operator", "Martin", "--accepted", "no", "--value", "C",
+                       "--confirm-all")
+    assert code == 0 and "5 decisions recorded" in rated and "Left out: 2 decisions the critic contradicted" in rated
+    assert all(d["question"] != "c1" for d in events(env, task, "TASK_RATED")[0]["body"]["decisions"])

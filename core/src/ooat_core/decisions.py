@@ -180,6 +180,8 @@ def parse_fallback(text: str, questions: dict[str, DecisionQuestion]) -> dict[st
     """Typed answers from a fallback reply; ValueError if any question is missing or unreadable.
 
     Confidence is the highest probability: the text model's own statement, calibrated as its own engine (ADR 0011).
+    A noul `p_true` given as a percentage (e.g. 85) is refused, while choice and score distributions are normalised:
+    a single number cannot be told apart from a wrong scale, a distribution can.
     """
     data = _json_object(text)
     answers = {}

@@ -6,6 +6,7 @@ run) and the acceptance checks' (GATE_* events, every attempt). These verdicts a
 
 from dataclasses import dataclass
 
+from .acceptance import GATE_CRITIC as CRITIC_GATE
 from .connector_admin import checked_operator
 from .gate import BRANCHES, DATA_CLASSES
 from .ledger import Ledger, new_event
@@ -24,11 +25,15 @@ class TaskDecision:
     kind: str  # "gate" or "acceptance"
     answer: float | str  # noul: probability of yes; choice: the option
     confidence: float
+    disputed: bool = False  # the critic later judged the same criterion of the same document the other way
 
 
 def task_decisions(events: list[dict]) -> list[TaskDecision]:
     """Every decision record of the task, in ledger order."""
-    found = []
+    found, critic = [], {}
+    for event in events:  # the critic's verdicts, by document and criterion
+        if event["type"] in GATE_EVENTS and event["body"].get("gate") == CRITIC_GATE:
+            critic |= {(tuple(event["refs"]), c["id"]): c["passed"] for c in event["body"].get("criteria", [])}
     for event in events:
         if event["type"] == "TOPOLOGY_DECIDED":
             records = [("gate", r) for r in event["body"].get("decisions", [])]
@@ -36,7 +41,10 @@ def task_decisions(events: list[dict]) -> list[TaskDecision]:
             records = [("acceptance", c["decision"]) for c in event["body"].get("criteria", []) if "decision" in c]
         else:
             continue
-        found += [TaskDecision(event["id"], r["question"], kind, r["answer"], r["confidence"]) for kind, r in records]
+        for kind, r in records:
+            judged = critic.get((tuple(event["refs"]), r["question"])) if kind == "acceptance" else None
+            disputed = judged is not None and judged != (r["answer"] >= 0.5)
+            found.append(TaskDecision(event["id"], r["question"], kind, r["answer"], r["confidence"], disputed))
     return found
 
 
