@@ -1,6 +1,6 @@
 # Seed calibration tasks (owner input required)
 
-**Epic:** f0-foundation  **Status:** done — five tasks chosen by the owner (2026-10-07)
+**Epic:** f0-foundation  **Status:** done — five tasks chosen by the owner (2026-10-06)
 **Origin:** spec §11, §12 F0, open question Q12
 
 ## Goal

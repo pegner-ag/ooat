@@ -1,7 +1,7 @@
 # Seed calibration tasks
 
 Five real engineering tasks, anonymised, used as the F1 baseline (spec §11; `tasks/f0-foundation/task-04`).
-They were chosen on 2026-10-07 from ten candidates on the owner's server. Five others need a tool-using agent
+They were chosen on 2026-10-06 from ten candidates on the owner's server. Five others need a tool-using agent
 that builds and runs code (F2+) or inputs larger than one context.
 
 - Each task asks for a single Markdown document, because the F1 worker has no tools. Its acceptance criteria can
