@@ -290,7 +290,12 @@ Then measure, and write each result into `description.md` ("Measured on <date>, 
    besides `model` and `trustedWorkspaces`, add it to `SAFE_SETTINGS` with its doc reference in `description.md`;
    never add one that approves tools or runs commands.
 
-Sanitise both fixtures (Global Constraints: `cwd` → `C:\\work`, every `conversation_id` → zeros; delete the long
+Record the two empty listings exactly as printed, as `mcp_list_empty.txt` and `plugin_list_empty.txt`
+(`"$A" mcp list > mcp_list_empty.txt`, `"$A" plugin list > plugin_list_empty.txt`), and change `CLEAN` in the
+Task 3 tests to read them, so the strings `_NO_MCP` / `_NO_PLUGINS` are pinned to the recorded output:
+`CLEAN = {("mcp", "list"): fixture("mcp_list_empty.txt"), ("plugin", "list"): fixture("plugin_list_empty.txt")}`.
+
+Sanitise both stream fixtures (Global Constraints: `cwd` → `C:\\work`, every `conversation_id` → zeros; delete the long
 `tools` array from the `init` event, keeping `"tools":["view_file"]`). Write the synthetic fixtures:
 
 `auth_error_synthetic.jsonl`:
@@ -451,13 +456,14 @@ git commit -m "feat(adapters): Antigravity stream-json parser on recorded runs (
 **Interfaces:**
 - Consumes: `parse_stream` (Task 2); `run_cli(args, stdin, timeout_s, files=None) -> CliResult` from
   `ooat_core.connectors.cli`.
-- Produces: `exposed_tools(executable: str, settings_path: Path) -> str | None` (the reason the agent could get a
-  tool, or None); `ISOLATION: list[str]`.
+- Produces: `settings_risk(settings_path: Path) -> str | None` (offline, used by `detect()`);
+  `exposed_tools(executable: str, settings_path: Path) -> str | None` (settings plus `agy mcp list` /
+  `agy plugin list`, used before each call); `ISOLATION: list[str]`.
 
 - [ ] **Step 1: Write the failing tests**
 
 ```python
-CLEAN = {("mcp", "list"): "No MCP servers configured.\n", ("plugin", "list"): "No imported plugins.\n"}
+CLEAN = {("mcp", "list"): fixture("mcp_list_empty.txt"), ("plugin", "list"): fixture("plugin_list_empty.txt")}
 
 
 def fake_cli(monkeypatch, listings=None, stream=None):
@@ -477,7 +483,7 @@ def fake_cli(monkeypatch, listings=None, stream=None):
 
 def connector(tmp_path, settings=None):
     path = tmp_path / "settings.json"
-    path.write_text(json.dumps(settings or {"model": "x"}), encoding="utf-8")
+    path.write_text(json.dumps({"model": "x"} if settings is None else settings), encoding="utf-8")
     return AntigravityConnector(executable="agy", settings_path=path)
 
 
@@ -508,7 +514,7 @@ def test_the_call_runs_without_tools_and_with_the_routed_model(tmp_path, monkeyp
 
 
 @pytest.mark.parametrize("settings, listings, cause", [
-    ({"permissions": {"allow": ["command(git)"]}}, None, "permissions.allow"),
+    ({"permissions": {"allow": ["command(git)"]}}, None, "permissions OOAT does not accept"),
     (None, {("mcp", "list"): "github  enabled  npx @mcp/github\n"}, "MCP server"),
     (None, {("plugin", "list"): "acme-tools  enabled\n"}, "plugin"),
     ({"model": "x", "hooks": {"preToolUse": "run.cmd"}}, None, "settings OOAT has not checked (hooks)"),
@@ -530,10 +536,19 @@ def test_an_mcp_server_added_later_stops_the_next_call(tmp_path, monkeypatch):
         agy.complete(request(), None)
 
 
-def test_detect_reports_extra_tools(tmp_path, monkeypatch):
-    fake_cli(monkeypatch, {("plugin", "list"): "acme-tools  enabled\n"})
-    detection = connector(tmp_path).detect()
-    assert not detection.available and "plugin" in detection.detail
+def test_detect_reports_risky_settings_without_running_agy(tmp_path, monkeypatch):
+    calls = fake_cli(monkeypatch)
+    detection = connector(tmp_path, {"permissions": {"allow": ["command(git)"]}}).detect()
+    assert not detection.available and "permissions" in detection.detail and calls == []
+
+
+@pytest.mark.parametrize("settings", [[1, 2], {"permissions": "allow-all"}, {"permissions": {"ask": ["x"]}}],
+                         ids=["not_an_object", "permissions_not_an_object", "unknown_permission_key"])
+def test_settings_of_an_unexpected_shape_refuse_instead_of_crashing(tmp_path, monkeypatch, settings):
+    fake_cli(monkeypatch)
+    with pytest.raises(ConnectorError) as info:
+        connector(tmp_path, settings).complete(request(), None)
+    assert info.value.code == "UNAVAILABLE"
 
 
 def test_agy_is_found_in_its_install_folder(tmp_path, monkeypatch):
@@ -586,17 +601,30 @@ _NO_MCP, _NO_PLUGINS = "No MCP servers configured.", "No imported plugins."
 SAFE_SETTINGS = frozenset({"model", "trustedWorkspaces", "permissions"})
 
 
-def exposed_tools(executable: str, settings_path: Path) -> str | None:
-    """Why the operator's agy setup could give the agent a tool beyond the soft-denied built-ins, or None."""
+def settings_risk(settings_path: Path) -> str | None:
+    """Why the operator's agy settings could approve a tool, or None. Fast and offline (used by detect())."""
     try:
         settings = json.loads(settings_path.read_text(encoding="utf-8")) if settings_path.is_file() else {}
     except (OSError, ValueError):
         return f"cannot read {settings_path}; refusing to run without knowing its permissions"
-    if (settings.get("permissions") or {}).get("allow"):
-        return f"{settings_path} has permissions.allow rules; remove them so the agent stays without tools"
+    if not isinstance(settings, dict):
+        return f"{settings_path} is not a JSON object; refusing to run without knowing its permissions"
     unknown = sorted(set(settings) - SAFE_SETTINGS)
     if unknown:  # fail closed: a key OOAT does not know could approve tools or run hooks
         return f"{settings_path} has settings OOAT has not checked ({', '.join(unknown)}); see description.md"
+    permissions = settings.get("permissions", {})
+    if not isinstance(permissions, dict) or set(permissions) - {"allow", "deny"} or permissions.get("allow"):
+        return (f"{settings_path} has permissions OOAT does not accept (only an empty allow list and deny rules); "
+                "remove them so the agent stays without tools")
+    return None
+
+
+def exposed_tools(executable: str, settings_path: Path) -> str | None:
+    """Why the operator's agy setup could give the agent a tool beyond the soft-denied built-ins, or None.
+    Runs `agy mcp list` and `agy plugin list`, so it is used before each call, not by detect()."""
+    reason = settings_risk(settings_path)
+    if reason is not None:
+        return reason
     if run_cli([executable, "mcp", "list"], "", 30).stdout.strip() != _NO_MCP:
         return "agy has an MCP server configured (agy mcp list); remove it so the agent stays without tools"
     if run_cli([executable, "plugin", "list"], "", 30).stdout.strip() != _NO_PLUGINS:
@@ -609,7 +637,7 @@ def exposed_tools(executable: str, settings_path: Path) -> str | None:
         path = self._find()
         if path is None:
             return Detection(False, "agy is not installed; install Antigravity CLI and log in once with agy")
-        reason = exposed_tools(path, self._settings)
+        reason = settings_risk(self._settings)  # the listings run before each call; detect() stays offline
         if reason is not None:
             return Detection(False, reason)
         return Detection(True, f"agy found at {path}; uses its existing Google login")
@@ -632,8 +660,8 @@ def exposed_tools(executable: str, settings_path: Path) -> str | None:
         return parse_stream(result.stdout, result.stderr, result.returncode, model)
 ```
 
-`test_conformance` keeps passing because `executable="agy-not-installed"` is not found, so `detect()` returns
-fast without running agy.
+`detect()` reads only the settings file, so it meets the conformance rule (fast, offline) whether agy is
+installed or not.
 
 - [ ] **Step 4: Run tests**
 
@@ -663,23 +691,38 @@ git commit -m "feat(adapters): Antigravity call on stdin without tools; refuse a
   `from ooat_adapter_antigravity_cli import AntigravityConnector` to its imports)
 
 ```python
+AGY_NOW = datetime(2026, 10, 6, 9, 0, tzinfo=timezone.utc)  # the Gemini prices are valid from the day they were checked
+
+
 def test_antigravity_tiers_are_priced_and_the_2027_flash_price_applies_from_january(setup):
     routing = setup._routing
     for model in ("gemini-3.8-flash-low", "gemini-3.8-flash-high", "gemini-3.1-pro-high"):
-        assert routing.price("prv.google.subscription_cli", model, NOW.date(), fallback=False) is not None
-    flash = routing.price("prv.google.subscription_cli", "gemini-3.8-flash-low", NOW.date(), fallback=False)
+        assert routing.price("prv.google.subscription_cli", model, AGY_NOW.date(), fallback=False) is not None
+    flash = routing.price("prv.google.subscription_cli", "gemini-3.8-flash-low", AGY_NOW.date(), fallback=False)
     later = routing.price("prv.google.subscription_cli", "gemini-3.8-flash-low",
                           datetime(2027, 1, 1).date(), fallback=False)
     assert (flash.usd_per_mtok_in, later.usd_per_mtok_in) == (0.75, 1.5)
 
 
-def test_antigravity_never_receives_client_or_personal_data(setup):
+def agy_gateway(setup, classes):
     agy = AntigravityConnector(executable="agy-not-installed")
     setup._ledger.append(new_event("ADAPTER_ACKNOWLEDGED", task=None, actor={"kind": "hil", "id": "operator"}, body={
         "adapter": "prv.google.subscription_cli", "manifest_version": agy.manifest["version"],
-        "allowed_data_classes": ["public", "internal"], "operator": "Operator", "automation_confirmed": True,
+        "allowed_data_classes": classes, "operator": "Operator", "automation_confirmed": True,
         "jurisdiction_sha256": jurisdiction_fingerprint(agy.manifest)}))
-    only_agy = Gateway(setup._ledger, Registry([agy]), setup._routing, setup._config, clock=lambda: NOW)
+    return Gateway(setup._ledger, Registry([agy]), setup._routing, setup._config, clock=lambda: AGY_NOW)
+
+
+def test_enabled_for_public_only_antigravity_gets_no_internal_data(setup):
+    only_agy = agy_gateway(setup, ["public"])  # the owner's choice C
+    assert only_agy.estimate(request("public")).connector == "prv.google.subscription_cli"
+    with pytest.raises(GatewayError) as info:
+        only_agy.estimate(request("internal"))
+    assert info.value.code == "NOT_PERMITTED"
+
+
+def test_antigravity_never_receives_client_or_personal_data(setup):
+    only_agy = agy_gateway(setup, ["public", "internal"])
     assert only_agy.estimate(request("internal")).connector == "prv.google.subscription_cli"
     for data_class in ("client_confidential", "personal"):
         with pytest.raises(GatewayError) as info:
@@ -701,7 +744,8 @@ Run: `.venv\Scripts\python.exe -m pytest adapters/integration_tests -q`
 Expected: FAIL — `price(...)` is None for the Gemini ids.
 
 - [ ] **Step 3: Add the prices** to `catalog/routing.json` `prices` (same shape as the OpenAI rows; source
-  `https://ai.google.dev/gemini-api/docs/pricing`, checked 2026-10-06; Pro at the ≤200k-token prompt price, which
+  `https://ai.google.dev/gemini-api/docs/pricing`, checked 2026-10-06; Google's publication date of these prices
+  is not on the page, so `valid_from` is the day they were checked, never an earlier guessed date; Pro at the ≤200k-token prompt price, which
   covers every OOAT prompt today):
 
 | adapter | model | in | cached | out | valid_from | valid_until |
