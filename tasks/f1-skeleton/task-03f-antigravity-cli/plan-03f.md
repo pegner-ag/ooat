@@ -46,16 +46,14 @@ Prices go into `catalog/routing.json`; no change to `ooat-core`.
 5. `agy` prints progress lines or a huge `init` event before the result → ignored; only the `result` event counts
    (Task 2 test `test_non_json_lines_and_init_are_ignored`).
 
-## Owner question (before execution)
+## Owner decision (2026-10-06): option C
 
-The gateway picks the cheapest permitted connector per tier. At these prices Gemini is cheaper than Claude Code
-in every tier (economy 0.75/3.75 vs 1/5, workhorse 0.75/3.75 vs 2/10, frontier 2/12 vs 4/20 USD per 1M tokens),
-so once Antigravity is enabled the worker and the critic run on Gemini — on a provider that trains on inputs.
-Options: **(A)** cheapest wins (no change); **(B)** pin the workhorse tier to Claude Code in `ooat.toml`
-(`[routing.pin] workhorse = "prv.anthropic.subscription_cli"`), Gemini serves economy and frontier;
-**(C)** enable Antigravity only for `public` data at acknowledgement. Recommendation: **B** until the baseline
-(sub-project 06) has measured both. The plan itself is the same for A, B and C; only the operator's
-`ooat.toml` and acknowledgement differ.
+The gateway picks the cheapest permitted connector per tier. At these prices Gemini is cheaper than Claude Code in
+every tier, so with Antigravity enabled for `internal` data the worker and the critic would move to a provider that
+trains on inputs. The owner chose **C**: the operator enables Antigravity for `public` data only, so `internal`
+work stays on Claude Code. The code is the same; only the acknowledgement differs.
+Facts for later: a `[routing.pin]` is per tier (it would pin the critic too) and does not fall back when the pinned
+connector cools down; nothing in `core/` reads `routing.json` `critic_other_vendor` yet (recorded in the 03d list).
 
 ## File Structure
 
@@ -287,6 +285,10 @@ Then measure, and write each result into `description.md` ("Measured on <date>, 
    `cache_read_tokens > 0` and `input_tokens` did not drop by about that amount, `input_tokens` includes cache
    reads → keep `INPUT_INCLUDES_CACHE = True` below; otherwise set it to `False`.
 3. `-p=` with an empty value and stream-json input: confirm the stdin message is the whole prompt.
+4. Settings keys: read the agy settings reference (https://antigravity.google/docs/cli/) for every key that
+   approves tools, runs hooks or adds tool sources. If a harmless key appears in the operator's `settings.json`
+   besides `model` and `trustedWorkspaces`, add it to `SAFE_SETTINGS` with its doc reference in `description.md`;
+   never add one that approves tools or runs commands.
 
 Sanitise both fixtures (Global Constraints: `cwd` → `C:\\work`, every `conversation_id` → zeros; delete the long
 `tools` array from the `init` event, keeping `"tools":["view_file"]`). Write the synthetic fixtures:
@@ -338,6 +340,25 @@ def test_output_without_a_result_is_an_api_error():
     assert info.value.code == "API_ERROR" and "crashed" in info.value.message
 
 
+def test_a_rate_limit_word_on_stderr_without_a_result_is_not_a_quota_cool_down():
+    with pytest.raises(ConnectorError) as info:
+        parse_stream("", "warning: rate limit config ignored; crashed", 1, "gemini-3.8-flash-low")
+    assert info.value.code == "API_ERROR"
+
+
+def test_a_missing_login_without_a_result_is_unavailable():
+    with pytest.raises(ConnectorError) as info:
+        parse_stream("", "Error: authentication required", 1, "gemini-3.8-flash-low")
+    assert info.value.code == "UNAVAILABLE"
+
+
+def test_login_words_inside_other_words_are_not_a_login_error():
+    line = '{"event":"result","result":{"status":"ERROR","error":"catalogin service failed"}}'
+    with pytest.raises(ConnectorError) as info:
+        parse_stream(line, "", 1, "gemini-3.8-flash-low")
+    assert info.value.code == "API_ERROR"
+
+
 def test_thinking_tokens_count_as_output():
     line = ('{"event":"result","result":{"status":"SUCCESS","response":"Hi","usage":{"input_tokens":100,'
             '"output_tokens":5,"thinking_tokens":40,"cache_read_tokens":30,"total_tokens":145}}}')
@@ -358,7 +379,8 @@ Add to `__init__.py`:
 ```python
 INPUT_INCLUDES_CACHE = True  # measured in plan 03f Task 2 (description.md); input_tokens counts cache reads
 _QUOTA = re.compile(r"rate limit|quota|limit reached|too many requests|resource.?exhausted|\b429\b", re.IGNORECASE)
-_LOGIN = re.compile(r"authentication required|sign ?in|log ?in|logged out|unauthori[sz]ed|\b401\b", re.IGNORECASE)
+_LOGIN = re.compile(r"\bauthentication required\b|\bsign ?in\b|\blog ?in\b|\blogged out\b|\bunauthori[sz]ed\b"
+                    r"|\b401\b", re.IGNORECASE)
 
 
 def _failure(message: str) -> ConnectorError:
@@ -384,8 +406,9 @@ def parse_stream(stdout: str, stderr: str, returncode: int, model: str) -> Model
             continue
         if isinstance(event, dict) and event.get("event") == "result" and isinstance(event.get("result"), dict):
             result = event["result"]
-    if result is None:
-        raise _failure(f"agy ended without a result (exit {returncode}): {stderr[-300:]}")
+    if result is None:  # only a login problem is told apart; anything else is an API error, never a cool-down
+        message = f"agy ended without a result (exit {returncode}): {stderr[-300:]}"
+        raise ConnectorError("UNAVAILABLE" if _LOGIN.search(stderr) else "API_ERROR", message[:500])
     if result.get("status") != "SUCCESS":
         raise _failure(str(result.get("error") or f"agy status {result.get('status')}"))
     usage = result.get("usage") or {}
@@ -402,7 +425,8 @@ def parse_stream(stdout: str, stderr: str, returncode: int, model: str) -> Model
     )
 ```
 
-If the measurement of Step 1.2 said `False`, set `INPUT_INCLUDES_CACHE = False` and record a ledger ruling.
+If the measurement of Step 1.2 said `False`, set `INPUT_INCLUDES_CACHE = False` and record a ruling in the
+execution ledger (`.superpowers/sdd/plan-03f/progress.md`, not the OOAT ledger).
 
 - [ ] **Step 5: Run tests**
 
@@ -477,7 +501,7 @@ def test_the_call_runs_without_tools_and_with_the_routed_model(tmp_path, monkeyp
     args = calls[-1]["args"]
     for flag in ("--sandbox", "--disable-slash-commands", "-p="):
         assert flag in args
-    assert args[args.index("--model") + 1] == "gemini-3.8-flash-high"
+    assert "--model=gemini-3.8-flash-high" in args
     assert args[args.index("--input-format") + 1] == args[args.index("--output-format") + 1] == "stream-json"
     for forbidden in ("--dangerously-skip-permissions", "--add-dir", "--continue", "-c", "--conversation"):
         assert forbidden not in args
@@ -487,13 +511,14 @@ def test_the_call_runs_without_tools_and_with_the_routed_model(tmp_path, monkeyp
     ({"permissions": {"allow": ["command(git)"]}}, None, "permissions.allow"),
     (None, {("mcp", "list"): "github  enabled  npx @mcp/github\n"}, "MCP server"),
     (None, {("plugin", "list"): "acme-tools  enabled\n"}, "plugin"),
+    ({"model": "x", "hooks": {"preToolUse": "run.cmd"}}, None, "settings OOAT has not checked (hooks)"),
 ])
 def test_extra_tools_in_the_agy_setup_refuse_the_call(tmp_path, monkeypatch, settings, listings, cause):
     calls = fake_cli(monkeypatch, listings)
     with pytest.raises(ConnectorError) as info:
         connector(tmp_path, settings).complete(request(), None)
     assert info.value.code == "UNAVAILABLE" and cause in info.value.message
-    assert not any("--model" in c["args"] for c in calls)  # the model was never called
+    assert not any(a.startswith("--model") for c in calls for a in c["args"])  # the model was never called
 
 
 def test_an_mcp_server_added_later_stops_the_next_call(tmp_path, monkeypatch):
@@ -526,6 +551,9 @@ def test_model_id_with_shell_characters_is_refused(tmp_path, monkeypatch):
         connector(tmp_path).complete(ModelRequest(tier="workhorse", prompt="x", data_class="internal",
                                                   model="gemini & calc"), None)
     assert info.value.code == "UNAVAILABLE"
+    with pytest.raises(ConnectorError):
+        connector(tmp_path).complete(ModelRequest(tier="workhorse", prompt="x", data_class="internal",
+                                                  model="--dangerously-skip-permissions"), None)
 
 
 @pytest.mark.skipif(os.environ.get("OOAT_LIVE_AGY") != "1", reason="spends Google quota; set OOAT_LIVE_AGY=1")
@@ -552,8 +580,10 @@ Replace `detect()` and `complete()` and add:
 # temporary working directory leaves nothing for the one tool that needs none (reading inside the workspace).
 ISOLATION = ["--input-format", "stream-json", "--output-format", "stream-json", "--sandbox",
              "--disable-slash-commands", "-p="]
-_MODEL_ID = re.compile(r"^[A-Za-z0-9._:-]+$")
+_MODEL_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]*$")  # no leading "-": it could read as a flag
 _NO_MCP, _NO_PLUGINS = "No MCP servers configured.", "No imported plugins."
+# Settings keys measured as harmless (plan 03f Task 2); "permissions" is checked separately.
+SAFE_SETTINGS = frozenset({"model", "trustedWorkspaces", "permissions"})
 
 
 def exposed_tools(executable: str, settings_path: Path) -> str | None:
@@ -564,6 +594,9 @@ def exposed_tools(executable: str, settings_path: Path) -> str | None:
         return f"cannot read {settings_path}; refusing to run without knowing its permissions"
     if (settings.get("permissions") or {}).get("allow"):
         return f"{settings_path} has permissions.allow rules; remove them so the agent stays without tools"
+    unknown = sorted(set(settings) - SAFE_SETTINGS)
+    if unknown:  # fail closed: a key OOAT does not know could approve tools or run hooks
+        return f"{settings_path} has settings OOAT has not checked ({', '.join(unknown)}); see description.md"
     if run_cli([executable, "mcp", "list"], "", 30).stdout.strip() != _NO_MCP:
         return "agy has an MCP server configured (agy mcp list); remove it so the agent stays without tools"
     if run_cli([executable, "plugin", "list"], "", 30).stdout.strip() != _NO_PLUGINS:
@@ -595,7 +628,7 @@ def exposed_tools(executable: str, settings_path: Path) -> str | None:
             raise ConnectorError("UNAVAILABLE", reason)
         content = f"{request.system}\n\n{request.prompt}" if request.system else request.prompt
         message = json.dumps({"event": "user", "message": {"content": content}}, ensure_ascii=False)
-        result = run_cli([path, *ISOLATION, "--model", model], message + "\n", request.timeout_s)
+        result = run_cli([path, *ISOLATION, f"--model={model}"], message + "\n", request.timeout_s)
         return parse_stream(result.stdout, result.stderr, result.returncode, model)
 ```
 
@@ -648,9 +681,18 @@ def test_antigravity_never_receives_client_or_personal_data(setup):
         "jurisdiction_sha256": jurisdiction_fingerprint(agy.manifest)}))
     only_agy = Gateway(setup._ledger, Registry([agy]), setup._routing, setup._config, clock=lambda: NOW)
     assert only_agy.estimate(request("internal")).connector == "prv.google.subscription_cli"
-    with pytest.raises(GatewayError) as info:
-        only_agy.estimate(request("personal"))
-    assert info.value.code == "NOT_PERMITTED"
+    for data_class in ("client_confidential", "personal"):
+        with pytest.raises(GatewayError) as info:
+            only_agy.estimate(request(data_class))
+        assert info.value.code == "NOT_PERMITTED"
+
+
+def test_the_operators_responsibility_cannot_extend_antigravity_because_it_trains():
+    from ooat_core.connector_admin import checked_classes
+    agy = AntigravityConnector(executable="agy-not-installed")
+    for classes in (["internal", "personal"], ["client_confidential"]):
+        with pytest.raises(ValueError, match="trains on inputs"):
+            checked_classes(agy.manifest, classes, {"no_training": True})
 ```
 
 - [ ] **Step 2: Run to verify it fails**
@@ -697,6 +739,5 @@ git commit -m "feat(catalog): Gemini prices for the Antigravity tiers; install a
 
 ## After execution (operator, not code)
 
-- Enable: `ooat connectors enable prv.google.subscription_cli --operator "<name>"` in the working folder; the card
-  quotes the terms and the forum reply.
-- Apply the owner's answer to the owner question above in `C:\DATA_DEVELOPMENT\ooat-work\ooat.toml`.
+- Enable for `public` only (owner decision C): `ooat connectors enable prv.google.subscription_cli --operator
+  "<name>"` in the working folder, allowing only `public`; the card quotes the terms and the forum reply.

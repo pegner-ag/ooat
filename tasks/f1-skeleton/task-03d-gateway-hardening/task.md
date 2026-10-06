@@ -77,3 +77,8 @@
 - [x] Eval cases for `cap.general.check_criterion`: output with text written to steer the checker, and a
       criterion that cannot be checked from the output.
 - [x] `runtime.py` loads the role card at import (`ROLE_BUDGET_USD`); load it when the runtime is created.
+
+### From the review of PR #20 (plan 03f)
+- [ ] `routing.json` `critic_other_vendor` is read by nothing in `core/`: the critic may run on the worker's vendor.
+- [ ] A `[routing.pin]` does not fall back when the pinned connector cools down (`QUOTA_EXHAUSTED`); decide whether
+      a pin may fall back.
