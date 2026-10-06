@@ -14,9 +14,10 @@ the operator's Google account and its existing login. Antigravity CLI replaced G
   workspace); reading inside the workspace needs none, and the workspace is empty.
 - Before each call the connector refuses to run when the agy setup could give the agent a tool: settings keys
   it has not checked, `permissions` other than an empty allow list and deny rules, an MCP server
-  (`agy mcp list`) or a plugin (`agy plugin list`), or hooks in `~/.gemini/config/hooks.json` or in
-  Gemini CLI's `~/.gemini/settings.json` (whether agy still reads the latter is not documented, so it refuses
-  too). `detect()` checks only the files, so it stays offline.
+  (`agy mcp list`) or a plugin (`agy plugin list`), or hooks in `~/.gemini/config/hooks.json`. Gemini CLI's
+  hooks in `~/.gemini/settings.json` do not count: watching every new process during a call (2026-10-06) showed
+  that agy starts none for them. The workspace is a fresh empty directory, so no workspace `.agents/hooks.json`
+  or settings apply. `detect()` checks only the files, so it stays offline.
 - The executable is found on `PATH`, else at `%LOCALAPPDATA%\agy\bin\agy.exe` (winget's install folder).
 - A run whose tools were all denied ends with an empty answer, which the task's output check counts as an empty
   attempt; it is not a provider failure, so the task does not pause on it.

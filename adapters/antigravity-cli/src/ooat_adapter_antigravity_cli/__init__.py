@@ -133,17 +133,16 @@ def settings_risk(settings_path: Path) -> str | None:
 
 
 def hooks_risk(gemini_home: Path) -> str | None:
-    """Hooks run commands around every agent step. agy reads them from config/hooks.json (migration guides);
-    whether it still honours Gemini CLI's settings.json hooks is not documented, so both refuse (fail closed)."""
-    for path, key in ((gemini_home / "config" / "hooks.json", None), (gemini_home / "settings.json", "hooks")):
-        try:
-            text = path.read_text(encoding="utf-8").strip() if path.is_file() else ""
-            data = json.loads(text) if text else None
-        except (OSError, ValueError):
-            return f"cannot read {path}; refusing to run without knowing its hooks"
-        found = data.get(key) if key and isinstance(data, dict) else (data if key is None else None)
-        if found:
-            return f"{path} defines hooks, which would run commands around agy's steps; remove them first"
+    """Hooks run commands around every agent step; agy reads them from config/hooks.json. Gemini CLI's hooks in
+    ~/.gemini/settings.json are not run by agy (measured 2026-10-06: no process started during a call)."""
+    path = gemini_home / "config" / "hooks.json"
+    try:
+        text = path.read_text(encoding="utf-8").strip() if path.is_file() else ""
+        hooks = json.loads(text) if text else None
+    except (OSError, ValueError):
+        return f"cannot read {path}; refusing to run without knowing its hooks"
+    if hooks:
+        return f"{path} defines hooks, which would run commands around agy's steps; remove them first"
     return None
 
 

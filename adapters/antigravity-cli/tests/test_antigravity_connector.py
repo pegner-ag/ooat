@@ -203,7 +203,7 @@ def test_model_id_with_shell_characters_is_refused(tmp_path, monkeypatch):
                                                   model="--dangerously-skip-permissions"), None)
 
 
-@pytest.mark.skipif(os.environ.get("OOAT_LIVE_AGY") != "1", reason="spends Google quota; set OOAT_LIVE_AGY=1")
+@pytest.mark.skipif(os.environ.get("OOAT_LIVE") != "1", reason="spends Google quota; set OOAT_LIVE=1")
 def test_live_minimal_call():
     response = AntigravityConnector().complete(
         ModelRequest(tier="economy", prompt="Reply with the single word OK.", data_class="public",
@@ -240,7 +240,6 @@ def test_a_tool_permission_mode_stops_the_connector(tmp_path, monkeypatch):
 
 @pytest.mark.parametrize("where, content", [
     ("config/hooks.json", {"PreToolUse": [{"command": "notify.cmd"}]}),
-    ("settings.json", {"hooks": {"BeforeAgent": [{"command": "notify.cmd"}]}}),  # Gemini CLI's file
 ])
 def test_hooks_anywhere_agy_might_read_them_stop_the_connector(tmp_path, monkeypatch, where, content):
     fake_cli(monkeypatch)
@@ -261,3 +260,13 @@ def test_empty_hook_files_do_not_stop_the_connector(tmp_path, monkeypatch):
     (gemini / "settings.json").write_text('{"security": {"auth": {}}}', encoding="utf-8")
     agy = AntigravityConnector(executable="agy", settings_path=tmp_path / "settings.json", gemini_home=gemini)
     assert agy.complete(request(), None).text.strip() == "OK"
+
+
+def test_gemini_cli_hooks_do_not_stop_the_connector(tmp_path, monkeypatch):
+    fake_cli(monkeypatch)  # measured 2026-10-06: agy starts no process for hooks in Gemini CLI's settings.json
+    gemini = tmp_path / ".gemini"
+    gemini.mkdir()
+    (gemini / "settings.json").write_text(json.dumps({"hooks": {"BeforeAgent": [{"command": "orca.cmd"}]}}),
+                                          encoding="utf-8")
+    agy = AntigravityConnector(executable="agy", settings_path=tmp_path / "settings.json", gemini_home=gemini)
+    assert agy.detect().available and agy.complete(request(), None).text.strip() == "OK"
