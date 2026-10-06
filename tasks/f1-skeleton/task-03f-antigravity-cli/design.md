@@ -26,9 +26,14 @@ vendor, which spec §7 wants for a critic that is not of the worker's vendor (`r
 - Tools: in headless mode, anything that needs permission is soft-denied (exit 0, `response` empty,
   `denied_actions` names it): `run_command`, `write_file`, `read_url`, and reading a file outside the workspace.
   Reading a file **inside** the working directory is allowed without asking.
+- The probes above ran with `--sandbox` and `--disable-slash-commands`; what each flag changes on its own is not
+  measured yet (plan 03f, task 1).
+- `agy mcp list` reports no MCP servers on this account; whether an MCP tool or a plugin would be soft-denied like
+  the built-in tools is not measured yet (plan 03f, task 1).
 - A minimal call carries about 11,700 input tokens (the agent's own system prompt and tool list).
 - The operator's `~/.gemini/antigravity-cli/settings.json` holds no `permissions.allow` rules today.
-- Terms: Google support answered on 2026-09-15 that launching the official `agy` binary as a local child process
+- Terms: on the Google AI Developers Forum a reply posted as official support (user "Engineer760"; Google
+  employment not verifiable from the page) answered on 2026-09-15 that launching the official `agy` binary as a local child process
   in headless mode on the cached Google login "is fully supported" and uses the same limits as interactive use;
   extracting tokens or calling backend endpoints is not supported (forum link in §6). The Antigravity terms say
   "Using third party software, tools, or services to access the Service (e.g. using OpenClaw with Antigravity
@@ -48,8 +53,9 @@ vendor, which spec §7 wants for a critic that is not of the worker's vendor (`r
   the workspace) finds nothing. The allow-listed environment of `connectors/cli.py` applies (no API keys).
 - Flags: `--input-format stream-json --output-format stream-json -p= --model <id> --sandbox
   --disable-slash-commands`. Never `--dangerously-skip-permissions`, `--add-dir`, `--continue` or `--conversation`.
-- Detection: the connector refuses to run when `settings.json` has `permissions.allow` rules (the operator could
-  have allowed commands or writes for every caller); `ooat connectors list` says so.
+- Detection: the connector refuses to run when `settings.json` has `permissions.allow` rules, when `agy mcp list`
+  shows an MCP server or when a plugin is enabled (any of them could give the agent tools beyond the soft-denied
+  built-ins); `ooat connectors list` says which.
 - The executable is found on `PATH`, else at `%LOCALAPPDATA%\agy\bin\agy.exe`.
 - A reply with `denied_actions` and an empty `response` is returned as an empty answer, not as a provider failure:
   the deterministic output check finds it empty and it uses an attempt. As a provider failure it would pause the task
@@ -73,8 +79,9 @@ vendor, which spec §7 wants for a critic that is not of the worker's vendor (`r
 - Data: `training_on_inputs` `true` (the terms' default for a consumer login, Google AI Pro included; an operator
   setting can switch it off, which the manifest cannot see). `retention_days` and regions stay `null`. Allowed
   classes `public` and `internal`; because the provider trains, `may_extend()` refuses client and personal data
-  even with the operator's responsibility (ADR 0012). The card advises switching telemetry off before sending
-  internal data.
+  even with the operator's responsibility (ADR 0012). The card points to the terms' setting ("change your
+  preference on how such data is used") without relying on it: whether it also ends human review is not stated,
+  so the manifest value stays `true` either way.
 - Local data: `agy` keeps conversations under `~/.gemini/antigravity-cli/conversations`, and no flag turns that
   off. The consequences card says so.
 
@@ -88,6 +95,12 @@ Out of scope: allowing tools, Antigravity's IDE, remote control, MCP.
 ## 6. Owner decisions
 
 Google AI Pro account; default models per tier as in §4 (owner, 2026-10-06).
+
+For the owner:
+- Automated use rests on the forum reply, not on the terms (§2). The owner accepts it, or not, when enabling the
+  connector; the card quotes both.
+- Spec §6 names Gemini CLI as Google's subscription CLI ("Provider access types", "Named providers"). Replacing it
+  with Antigravity CLI is a spec change: it goes into the v0.2 revision (`tasks/spec/task-01-revision-v0-2/`).
 
 Sources: https://antigravity.google/docs/cli/headless/ · https://antigravity.google/terms/ ·
 https://discuss.ai.google.dev/t/is-external-orchestration-of-antigravity-cli-headless-mode-supported-with-account-based-usage/183051
