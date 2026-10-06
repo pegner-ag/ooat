@@ -24,6 +24,23 @@ the operator's Google account and its existing login. Antigravity CLI replaced G
   `QUOTA_EXHAUSTED`, login → `UNAVAILABLE`, else `API_ERROR`); no result line → `UNAVAILABLE` for a login message
   on stderr, else `API_ERROR`; past the timeout → `TIMEOUT`.
 
+## Measured (2026-10-06, agy 1.3.0)
+- A shell command is soft-denied with and without `--sandbox`; `--sandbox` additionally restricts the terminal
+  for any command an operator might allow. `--disable-slash-commands` stops slash-command and skill expansion in
+  the prompt. Both flags stay.
+- `-p=` with stream-json input reads the whole prompt from the stdin message.
+- A minimal call carries about 11,700–12,800 input tokens (agy's own system prompt and tool list).
+- Cache counting: two identical 3,700-character prompts a minute apart showed `cache_read_tokens` 0 both times,
+  so whether `input_tokens` includes cache reads could not be measured. `INPUT_INCLUDES_CACHE` is `False`: if it
+  does include them, cached tokens are counted twice, which overstates the shadow cost rather than hiding cost.
+- Settings (https://antigravity.google/docs/settings/, /docs/permissions/): `toolPermission`,
+  `artifactReviewPolicy` and `allowNonWorkspaceAccess` widen what the agent may do, and `permissions` holds
+  `allow`, `ask` and `deny` lists. Keys accepted without refusing: `model`, `trustedWorkspaces` (present in the
+  operator's file), `enableTelemetry` (data collection only; switching it off must not stop the connector) and
+  the display keys `altScreenMode`, `colorScheme`, `runningLightSpeed`, `verbosity`, `showTips`,
+  `showFeedbackSurvey`, `notifications`, `editorMode`. Any other key, such as `editor` or `useG1Credits`
+  (spends AI credits when the quota runs out), stops the connector until it is reviewed.
+
 ## Manifest facts
 Vendor `google`; vendor entity, country, regions and retention `null`. `training_on_inputs` is `true`: the
 Antigravity terms let Google use Interactions to improve its products and machine learning, with human review, on

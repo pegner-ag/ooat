@@ -51,6 +51,56 @@ MANIFEST = {
 }
 
 
+# Not measurable on 2026-10-06 (no call read from the cache). False counts cached tokens twice if input_tokens
+# already holds them, which overstates the shadow cost; True would understate it if they are separate.
+INPUT_INCLUDES_CACHE = False
+_QUOTA = re.compile(r"rate limit|quota|limit reached|too many requests|resource.?exhausted|\b429\b", re.IGNORECASE)
+_LOGIN = re.compile(r"\bauthentication required\b|\bsign ?in\b|\blog ?in\b|\blogged out\b|\bunauthori[sz]ed\b"
+                    r"|\b401\b", re.IGNORECASE)
+
+
+def _failure(message: str) -> ConnectorError:
+    message = message[:500]
+    if _QUOTA.search(message):
+        return ConnectorError("QUOTA_EXHAUSTED", message)
+    if _LOGIN.search(message):
+        return ConnectorError("UNAVAILABLE", message)
+    return ConnectorError("API_ERROR", message)
+
+
+def parse_stream(stdout: str, stderr: str, returncode: int, model: str) -> ModelResponse:
+    """The `result` event of an `agy --output-format stream-json` run; other lines and events are ignored.
+
+    A run whose tools were all denied ends SUCCESS with an empty response: it is returned as an empty answer,
+    not raised, so the task's output check uses up an attempt instead of pausing the task (design 03f §3).
+    """
+    result = None
+    for line in stdout.splitlines():
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(event, dict) and event.get("event") == "result" and isinstance(event.get("result"), dict):
+            result = event["result"]
+    if result is None:  # only a login problem is told apart; anything else is an API error, never a cool-down
+        message = f"agy ended without a result (exit {returncode}): {stderr[-300:]}"
+        raise ConnectorError("UNAVAILABLE" if _LOGIN.search(stderr) else "API_ERROR", message[:500])
+    if result.get("status") != "SUCCESS":
+        raise _failure(str(result.get("error") or f"agy status {result.get('status')}"))
+    usage = result.get("usage") or {}
+    cached = usage.get("cache_read_tokens", 0)
+    tokens_in = usage.get("input_tokens", 0) - (cached if INPUT_INCLUDES_CACHE else 0)
+    return ModelResponse(
+        text=str(result.get("response") or ""),
+        model=model,
+        tokens_in=max(tokens_in, 0),
+        tokens_cached=cached,
+        tokens_out=usage.get("output_tokens", 0) + usage.get("thinking_tokens", 0),  # thinking is billed as output
+        quota_units=None,
+        metering="reported",
+    )
+
+
 class AntigravityConnector:
     kind = "model"
 
