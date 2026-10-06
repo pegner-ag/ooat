@@ -33,7 +33,7 @@ Chosen by decision (`docs/adr/`), not yet used in code:
 - `adapters/` — connector packages `ooat-adapter-claude-code`, `ooat-adapter-codex`, `ooat-adapter-anthropic-api`,
   `ooat-adapter-typesafe-jev`
   (each with `description.md`), `integration_tests/` (gateway with the real connectors, no network)
-- `catalog/routing.json` — reference routing policy: Anthropic and TypeSafe (Jev) list prices with source and date, data-class policy
+- `catalog/routing.json` — reference routing policy: Anthropic, OpenAI (Codex models) and TypeSafe (Jev) list prices with source and date, data-class policy
 - `sdk/`, `dashboard/`, `evals/` — empty
 - `docs/adr/` — decision records; `docs/assets/` — images (social preview)
 - `.github/` — CI (`tests.yml`: pytest on 3.12 and 3.13), Claude review workflows (`claude-review.yml` automatic on same-repo PRs, `claude.yml` on `@claude` mentions; Opus 5.5, comment-only, advisory per ADR 0007; auth via `CLAUDE_CODE_OAUTH_TOKEN`), issue and PR templates
