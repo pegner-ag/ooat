@@ -27,9 +27,9 @@ vendor, which spec §7 wants for a critic that is not of the worker's vendor (`r
   `denied_actions` names it): `run_command`, `write_file`, `read_url`, and reading a file outside the workspace.
   Reading a file **inside** the working directory is allowed without asking.
 - The probes above ran with `--sandbox` and `--disable-slash-commands`; what each flag changes on its own is not
-  measured yet (plan 03f, task 1).
-- `agy mcp list` reports no MCP servers on this account; whether an MCP tool or a plugin would be soft-denied like
-  the built-in tools is not measured yet (plan 03f, task 1).
+  measured yet (plan 03f, task 2).
+- `agy mcp list` reports no MCP servers on this account; instead of measuring whether MCP tools or plugins would be
+  soft-denied, the connector refuses to run while any exists (§3).
 - A minimal call carries about 11,700 input tokens (the agent's own system prompt and tool list).
 - The operator's `~/.gemini/antigravity-cli/settings.json` holds no `permissions.allow` rules today.
 - Terms: on the Google AI Developers Forum a reply posted as official support (user "Engineer760"; Google
@@ -48,12 +48,13 @@ vendor, which spec §7 wants for a critic that is not of the worker's vendor (`r
 ## 3. How a call runs
 
 - Prompt and system text go to stdin as one stream-json `user` message, never in argv (long prompts would hit the
-  Windows command-line limit). The system text is sent first, marked as the operator's instructions.
+  Windows command-line limit). The system text comes first, then a blank line, then the request (as for Codex).
 - An empty temporary directory is the working directory, so the one tool allowed without asking (reading a file in
   the workspace) finds nothing. The allow-listed environment of `connectors/cli.py` applies (no API keys).
 - Flags: `--input-format stream-json --output-format stream-json -p= --model <id> --sandbox
   --disable-slash-commands`. Never `--dangerously-skip-permissions`, `--add-dir`, `--continue` or `--conversation`.
-- Detection: the connector refuses to run when `settings.json` has `permissions.allow` rules, when `agy mcp list`
+- Detection: the connector refuses to run when `settings.json` has `permissions.allow` rules or a key it has
+  not checked, when `agy mcp list`
   shows an MCP server or when a plugin is enabled (any of them could give the agent tools beyond the soft-denied
   built-ins); `ooat connectors list` says which.
 - The executable is found on `PATH`, else at `%LOCALAPPDATA%\agy\bin\agy.exe`.
@@ -62,7 +63,7 @@ vendor, which spec §7 wants for a critic that is not of the worker's vendor (`r
   (ADR 0014) and repeat on every resume, because the model would try the same tool again.
 - Usage: `tokens_in` = `input_tokens` − `cache_read_tokens`, `tokens_cached` = `cache_read_tokens`,
   `tokens_out` = `output_tokens` + `thinking_tokens`; metering `reported`. Whether `input_tokens` includes cache
-  reads is measured in the plan's first task, not assumed.
+  reads is measured in plan task 2, not assumed.
 - Errors: "authentication required" → `UNAVAILABLE`; rate or quota limits → `QUOTA_EXHAUSTED`; `status` other
   than `SUCCESS`, a missing `result` line or unreadable JSON → `API_ERROR`; past the timeout → `TIMEOUT`.
 
@@ -94,7 +95,8 @@ Out of scope: allowing tools, Antigravity's IDE, remote control, MCP.
 
 ## 6. Owner decisions
 
-Google AI Pro account; default models per tier as in §4 (owner, 2026-10-06).
+Google AI Pro account; default models per tier as in §4; enabled for `public` data only (plan 03f, option C)
+(owner, 2026-10-06).
 
 For the owner:
 - Automated use rests on the forum reply, not on the terms (§2). The owner accepts it, or not, when enabling the
