@@ -37,7 +37,12 @@ FALLBACK_TIMEOUT_S = 120
 
 
 class GatewayError(Exception):
-    """NOT_PERMITTED, BUDGET, QUOTA_EXHAUSTED, UNAVAILABLE, API_ERROR or TIMEOUT (design §7)."""
+    """NOT_PERMITTED, BUDGET, QUOTA_EXHAUSTED, UNAVAILABLE, API_ERROR or TIMEOUT (design §7).
+
+    Mapped to contract outcomes by the caller: NOT_PERMITTED is an abstention (`ABSTAIN_NOT_PERMITTED`), never a
+    `RESULT.error.code`; BUDGET pauses the task with a budget question (ADR 0014); the provider failures
+    (QUOTA_EXHAUSTED, UNAVAILABLE, API_ERROR, TIMEOUT) are a `RESULT FAILED` and pause the task.
+    """
 
     def __init__(self, code: str, message: str, trace: list[str] | None = None, cost: dict | None = None):
         super().__init__(f"{code}: {message}")
@@ -325,9 +330,12 @@ class Gateway:
         # agreement, the region under it, and that training is off for this account.
         responsibility = responsibility_in_force(acknowledgement, self._clock().date())
         responsible = responsibility is not None and data_class in RESPONSIBLE_CLASSES
+        given = acknowledgement.get("responsibility")
+        expired = (f"; your responsibility dated {given['confirmed_on']} is not in force (it holds for 12 months "
+                   "from that date), enable the connector again to renew it") if given and not responsible and data_class in RESPONSIBLE_CLASSES else ""
         if data_class not in manifest["data_policy"]["allowed_data_classes"]:
             if not responsible:
-                return f"{data_class} is not allowed by the manifest"
+                return f"{data_class} is not allowed by the manifest{expired}"
             if not may_extend(manifest, responsibility):  # a hard rule, whatever the routing policy says
                 return (f"{data_class} cannot go beyond the manifest: the provider trains on inputs or training "
                         "is not off")
@@ -340,11 +348,12 @@ class Gateway:
         regions = manifest["jurisdiction"]["processing_regions"] or (
             responsibility.get("processing_regions") if responsible else None)
         if policy.get("require_known_region") and not regions:
-            return f"{data_class} requires a known processing region"
+            return f"{data_class} requires a known processing region{expired}"
         if policy.get("require_verified_redaction"):
             return f"{data_class} requires verified redaction, not available yet"
         if policy.get("require_contract") and not responsible:  # nothing else can vouch for an agreement
-            return f"{data_class} requires a provider contract: take responsibility for it when enabling the connector"
+            return (f"{data_class} requires a provider contract: take responsibility for it when enabling the "
+                    f"connector{expired}")
         allowed_regions = self._config.personal_data_regions
         if data_class in _PERSONAL_OR_HIGHER and allowed_regions is not None and (not regions or not all(
                 any(r == a or r.startswith(f"{a}-") for a in allowed_regions) for r in regions)):
@@ -400,7 +409,7 @@ class Gateway:
 
     def _check_budget(self, request: ModelRequest, estimate: Estimate) -> None:
         budget = self._contract_budget(request)
-        if budget is not None and estimate.usd > budget[0] - budget[1]:
+        if budget is not None and estimate.usd > budget[0] - budget[1] + 1e-9:  # tolerate float rounding
             limit, spent = budget
             raise GatewayError("BUDGET", f"estimated {estimate.usd:.4f} USD exceeds the remaining "
                                          f"{limit - spent:.4f} USD of contract {request.contract}")

@@ -14,8 +14,8 @@ detection (ADR 0011). It never writes text or artifacts.
   uses max(p, 1 − p).
 - A state above about 32k tokens (characters / 3) is refused before sending (`UNAVAILABLE`, the gateway then
   falls back to the economy text tier).
-- Errors: 401 and 529 → `UNAVAILABLE`, 429 → `QUOTA_EXHAUSTED` with a 60-second cool-down, timeout → `TIMEOUT`,
-  unreachable or an unusable key value → `UNAVAILABLE`, 422 and anything else → `API_ERROR`.
+- Errors: 401 and 529 → `UNAVAILABLE`, 429 → `QUOTA_EXHAUSTED` with a 60-second cool-down, a read timeout → `TIMEOUT`,
+  unreachable (a connect timeout included) or an unusable key value → `UNAVAILABLE`, 422 and anything else → `API_ERROR`.
 
 ## Manifest facts
 US processing by TypeSafe AI, Inc.; inputs not used for training (privacy policy, models page). Allowed data

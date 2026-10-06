@@ -452,3 +452,10 @@ def test_a_refusal_stays_final_whatever_comes_later():
         {"id": "evt_5", "type": "HIL_RESPONSE", "actor": HIL, "body": {"request": "evt_4", "text": "Later text."}},
     ]
     assert task_facts(events).refused
+
+
+# Hardening (03d) -----------------------------------------------------------------------------------------------
+
+def test_facts_of_an_unknown_task_are_a_clear_error():
+    with pytest.raises(ValueError, match="no TASK_SUBMITTED"):
+        task_facts([])

@@ -190,8 +190,10 @@ def test_a_paused_acceptance_check_reruns_on_the_same_document(tmp_path):
     setup = Setup(tmp_path, model=model)
     task = setup.submit(files=[b"Smlouva o dilu."])  # untrusted input: the critic must confirm
     assert setup.runtime.run(task).state == "RUNNING"
-    paused = setup.last(task, "RESULT")
-    assert paused["body"]["outcome"] == "FAILED" and paused["refs"]
+    delivered, paused = setup.last(task, "RESULT"), setup.last(task, "DECISION")
+    assert delivered["body"]["outcome"] == "DONE"  # the worker delivered; a paused check is not its failure
+    assert paused["actor"]["id"] == "ooat-runtime" and "acceptance check paused" in paused["body"]["decision"]
+    assert paused["refs"] == delivered["refs"]
     assert setup.runtime.run(task).state == "CLOSED_DONE"
     assert len(model.worker_prompts) == 1  # no new document was written
 

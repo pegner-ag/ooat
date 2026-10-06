@@ -2,7 +2,6 @@
 task_cli.py (`ooat task ...`, `ooat hil ...`)."""
 
 import argparse
-import re
 import sqlite3
 import sys
 import tomllib
@@ -10,13 +9,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from . import connector_admin, task_cli
-from .config import load_config
+from .config import REGION, load_config
 from .connectors.registry import Registry
 from .ledger import Ledger
 
 REFUSED = 1
 CANCELLED = 130
-_REGION = re.compile(r"^[a-z]{2}(-[a-z0-9-]+)?$")
 RESPONSIBILITY = """
 Client or personal data on this connector (ADR 0012). By answering yes you state that you have a legal basis
 for it, a processing agreement with the provider that covers it, and that you know where the provider processes
@@ -181,7 +179,7 @@ def _responsibility(args, manifest, stdin, stdout) -> tuple[dict | None, str | N
             "Regions where the provider processes under your agreement (e.g. eu, us): ",
             stdin, stdout)
         regions = [r.strip() for r in answer.split(",") if r.strip()]
-        if not all(_REGION.match(r) for r in regions):
+        if not all(REGION.match(r) for r in regions):
             return None, "regions are codes such as eu or us"
         if not regions:  # the gateway would never route there: say so now, not at the first task
             return None, "client and personal data need a known processing region; state it from your agreement"

@@ -3,7 +3,9 @@
 A hit raises a request's data class to `personal`; it never lowers one. The scan finds only what has a checkable
 form: e-mail addresses, phone numbers, IBANs (mod 97), payment card numbers (Luhn) and Czech/Slovak birth numbers
 written with a slash (date plus mod 11). Names and free-text health details are not found: that residual risk is
-covered by the class the operator declares.
+covered by the class the operator declares. Known gaps of the forms it does check: IBANs written in lowercase,
+phone numbers of countries other than CZ/SK, and a card number written without separators and without a known
+issuer prefix. A `00420…` number written with spaces may be taken for a card; it raises the class either way.
 """
 
 import re
@@ -52,6 +54,17 @@ def _iban_ok(text: str) -> bool:
     return any(15 <= end <= 34 and _mod97_ok(compact[:end]) for end in ends)
 
 
+# Issuer prefixes, broad on purpose (Visa, Mastercard and Maestro, Mir, Amex, Diners, JCB, Discover, UnionPay,
+# RuPay). About one digit run in ten passes Luhn, so a run written without separators counts only with such a
+# prefix: timestamps (starting with 1) and order numbers starting with 0, 1, 7 or 9 do not.
+_ISSUER = re.compile(r"^(?:4|5[0-8]|2[2-7]|3|6|8[12])")
+
+
+def _card_ok(text: str) -> bool:
+    separated = " " in text or "-" in text
+    return _luhn_ok(text) and (separated or bool(_ISSUER.match(text)))
+
+
 def _luhn_ok(text: str) -> bool:
     digits = [int(char) for char in text if char.isdigit()]
     if len(set(digits)) == 1:  # 0000 0000 ... is a placeholder, not a card
@@ -87,7 +100,7 @@ def scan(text: str) -> frozenset[str]:
         found.add("phone")
     if any(_iban_ok(m.group(0)) for m in _IBAN.finditer(text)):
         found.add("iban")
-    if any(_luhn_ok(m.group(0)) for m in _CARD.finditer(text)):
+    if any(_card_ok(m.group(0)) for m in _CARD.finditer(text)):
         found.add("card")
     if any(_birth_number_ok(m) for m in _BIRTH_NUMBER.finditer(text)):
         found.add("birth_number")

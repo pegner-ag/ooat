@@ -128,7 +128,7 @@ def jurisdiction_fingerprint(manifest: dict) -> str:
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
-def jurisdiction_stale(manifest: dict, acknowledgement: dict, today: date, responsible: bool = True) -> bool:
+def jurisdiction_stale(manifest: dict, acknowledgement: dict, today: date, responsible: bool = False) -> bool:
     """Spec §9 rule 2: the jurisdiction changed since acknowledgement, or was not verified within 12 months.
 
     A stale connector stays enabled but refuses personal and special-category data until acknowledged again.

@@ -17,7 +17,7 @@ _PROVIDER_ID = re.compile(r"^prv\.[a-z][a-z0-9_-]*\.[a-z][a-z0-9_]*$")
 _ENV_NAME = re.compile(r"^[A-Z][A-Z0-9_]*$")
 _CONNECTOR_KEYS = frozenset({"secret_env", "plan_fee_usd_month", "models"})
 _COUNTRY = re.compile(r"^[A-Z]{2}$")
-_REGION = re.compile(r"^[a-z]{2}(-[a-z0-9-]+)?$")
+REGION = re.compile(r"^[a-z]{2}(-[a-z0-9-]+)?$")
 _GATE_NUMBERS = ("v_min_usd", "default_budget_usd", "hil_deadline_hours")
 
 
@@ -85,7 +85,7 @@ def parse_config(data: dict) -> Config:
         raise ValueError("policy.blocked_countries must list two-letter country codes such as \"CN\"")
     regions = policy.get("personal_data_regions")
     if regions is not None and (not isinstance(regions, list)
-                                or not all(isinstance(r, str) and _REGION.match(r) for r in regions)):
+                                or not all(isinstance(r, str) and REGION.match(r) for r in regions)):
         raise ValueError("policy.personal_data_regions must list region codes such as \"eu\"")
     return Config(ledger_url=ledger_url, pins=dict(pins), connectors={k: dict(v) for k, v in connectors.items()},
                   blocked_countries=frozenset(blocked),

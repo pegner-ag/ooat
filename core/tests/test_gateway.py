@@ -487,3 +487,19 @@ def test_api_connector_never_borrows_another_vendors_price():
     with pytest.raises(GatewayError) as info:
         setup.gateway.estimate(setup.request())
     assert "no price" in info.value.trace[0]
+
+
+# Hardening (03d) -----------------------------------------------------------------------------------------------
+
+def test_budget_equal_to_the_estimate_after_earlier_spending_is_allowed():
+    setup = ready(API)
+    estimate = setup.gateway.estimate(setup.request()).usd
+    # an earlier spend whose float sum loses the last bit: (spent + estimate) - spent < estimate
+    spent = next(s / 10 for s in range(1, 10) if (s / 10 + estimate) - s / 10 < estimate)
+    contract = setup.issue_contract(max_usd=spent + estimate)
+    cost = dict(setup.gateway.call(setup.request(contract=contract)).cost, usd=spent)
+    setup.ledger.append(new_event("RESULT", task=setup.task, contract=contract,
+                                  actor={"kind": "agent", "id": new_id("agt"), "role": "role.general.worker@0.1.0"},
+                                  body={"outcome": "FAILED", "error": {"code": "API_ERROR", "message": "500"}},
+                                  cost=cost))
+    assert setup.gateway.call(setup.request(contract=contract)).cost["adapter"] == "prv.fake.api"
