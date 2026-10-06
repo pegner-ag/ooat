@@ -158,7 +158,8 @@ which 04 does not have.
   and asks the operator to raise it or stop (owner, 2026-10-03); stopping keeps a usable document as PARTIAL.
   The contract budget is the task budget capped by the role's `max_usd_per_contract`.
 - **Worker (T2):** a stable prompt prefix (family rules → role → contract) plus the task; artifacts by reference
-  with previews of at most 6,000 characters. The model answers either with the deliverable or with an abstention
+  with previews of at most 100,000 characters (raised from 6,000 by the owner, 2026-10-07, so source files go
+  whole). The model answers either with the deliverable or with an abstention
   in a fixed JSON form (`{"abstain": "UNKNOWN", "reason": "…", "missing": "…", "confidence": 0.x}`) → `ABSTAIN`.
 - **Acceptance:** deterministic checks first (non-empty, size limit), then one Jev `noul` per criterion on the
   output ("does the output meet: …?"). An answer below θ is not a pass: per spec §6 the criterion goes to the LLM
