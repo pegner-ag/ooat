@@ -116,7 +116,7 @@ def fake_cli(monkeypatch, listings=None, stream=None):
 def connector(tmp_path, settings=None):
     path = tmp_path / "settings.json"
     path.write_text(json.dumps({"model": "x"} if settings is None else settings), encoding="utf-8")
-    return AntigravityConnector(executable="agy", settings_path=path)
+    return AntigravityConnector(executable="agy", settings_path=path, gemini_home=tmp_path / "no-gemini")
 
 
 def request(**extra):
@@ -236,3 +236,28 @@ def test_a_tool_permission_mode_stops_the_connector(tmp_path, monkeypatch):
     fake_cli(monkeypatch)
     with pytest.raises(ConnectorError, match="toolPermission"):
         connector(tmp_path, {"toolPermission": "always-proceed"}).complete(request(), None)
+
+
+@pytest.mark.parametrize("where, content", [
+    ("config/hooks.json", {"PreToolUse": [{"command": "notify.cmd"}]}),
+    ("settings.json", {"hooks": {"BeforeAgent": [{"command": "notify.cmd"}]}}),  # Gemini CLI's file
+])
+def test_hooks_anywhere_agy_might_read_them_stop_the_connector(tmp_path, monkeypatch, where, content):
+    fake_cli(monkeypatch)
+    gemini = tmp_path / ".gemini"
+    (gemini / "config").mkdir(parents=True)
+    (gemini / where).write_text(json.dumps(content), encoding="utf-8")
+    agy = AntigravityConnector(executable="agy", settings_path=tmp_path / "settings.json", gemini_home=gemini)
+    assert not agy.detect().available
+    with pytest.raises(ConnectorError, match="hooks"):
+        agy.complete(request(), None)
+
+
+def test_empty_hook_files_do_not_stop_the_connector(tmp_path, monkeypatch):
+    fake_cli(monkeypatch)
+    gemini = tmp_path / ".gemini"
+    (gemini / "config").mkdir(parents=True)
+    (gemini / "config" / "hooks.json").write_text("", encoding="utf-8")
+    (gemini / "settings.json").write_text('{"security": {"auth": {}}}', encoding="utf-8")
+    agy = AntigravityConnector(executable="agy", settings_path=tmp_path / "settings.json", gemini_home=gemini)
+    assert agy.complete(request(), None).text.strip() == "OK"

@@ -14,7 +14,9 @@ the operator's Google account and its existing login. Antigravity CLI replaced G
   workspace); reading inside the workspace needs none, and the workspace is empty.
 - Before each call the connector refuses to run when the agy setup could give the agent a tool: settings keys
   it has not checked, `permissions` other than an empty allow list and deny rules, an MCP server
-  (`agy mcp list`) or a plugin (`agy plugin list`). `detect()` checks only the settings file, so it stays offline.
+  (`agy mcp list`) or a plugin (`agy plugin list`), or hooks in `~/.gemini/config/hooks.json` or in
+  Gemini CLI's `~/.gemini/settings.json` (whether agy still reads the latter is not documented, so it refuses
+  too). `detect()` checks only the files, so it stays offline.
 - The executable is found on `PATH`, else at `%LOCALAPPDATA%\agy\bin\agy.exe` (winget's install folder).
 - A run whose tools were all denied ends with an empty answer, which the task's output check counts as an empty
   attempt; it is not a provider failure, so the task does not pause on it.
@@ -57,7 +59,13 @@ a consumer login (Google AI Pro included); a setting changes this, but OOAT cann
 `public` and `internal`; client and personal data can never be added, because the provider trains (ADR 0012).
 `automation_permitted` is `unknown`: Google support called a local child process on the cached login supported
 (forum, 2026-09-15), the terms forbid third-party software accessing the service; the operator decides when
-acknowledging. agy keeps conversations under `~/.gemini/antigravity-cli/conversations`.
+acknowledging. Owner decision (2026-10-06): enabled for `public` data only, because Gemini is priced below
+Claude Code in every tier and would otherwise take over internal work.
+
+Local copies: agy stores every call on this machine under `~/.gemini/antigravity-cli`: `conversations/`,
+`brain/<conversation id>/`, `implicit/*.pb`, `conversation_summaries.db` and `jetbox_summaries_proto.pb`; no flag
+turns this off. A two-call canary (2026-10-06: a code word in one call, asked for in the next) found no carry-over
+between calls.
 
 ## Public API
 `AntigravityConnector` (entry point `ooat.connectors: antigravity`).

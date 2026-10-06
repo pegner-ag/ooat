@@ -42,8 +42,9 @@ MANIFEST = {
             "Terms: Google uses Interactions to improve its products and machine learning, and its staff and "
             "contractors may review them; a setting changes how they are used, but OOAT cannot see it. "
             "Automated use: a Google support reply on the forum (2026-09-15) calls a local child process on the "
-            "cached login supported; the terms forbid third-party software accessing the service. agy keeps "
-            "conversations locally under ~/.gemini/antigravity-cli/conversations. Gemini is priced below Claude "
+            "cached login supported; the terms forbid third-party software accessing the service. agy keeps every "
+            "call on this machine under ~/.gemini/antigravity-cli (conversations, brain, implicit, "
+            "conversation_summaries.db), with no setting to turn it off. Gemini is priced below Claude "
             "Code in every tier: allowing internal data here moves internal work to this connector."),
         "source_urls": [TERMS, "https://policies.google.com/privacy", FORUM],
         "verified_on": None,
@@ -131,6 +132,21 @@ def settings_risk(settings_path: Path) -> str | None:
     return None
 
 
+def hooks_risk(gemini_home: Path) -> str | None:
+    """Hooks run commands around every agent step. agy reads them from config/hooks.json (migration guides);
+    whether it still honours Gemini CLI's settings.json hooks is not documented, so both refuse (fail closed)."""
+    for path, key in ((gemini_home / "config" / "hooks.json", None), (gemini_home / "settings.json", "hooks")):
+        try:
+            text = path.read_text(encoding="utf-8").strip() if path.is_file() else ""
+            data = json.loads(text) if text else None
+        except (OSError, ValueError):
+            return f"cannot read {path}; refusing to run without knowing its hooks"
+        found = data.get(key) if key and isinstance(data, dict) else (data if key is None else None)
+        if found:
+            return f"{path} defines hooks, which would run commands around agy's steps; remove them first"
+    return None
+
+
 def exposed_tools(executable: str, settings_path: Path) -> str | None:
     """Why the operator's agy setup could give the agent a tool beyond the soft-denied built-ins, or None.
     Runs `agy mcp list` and `agy plugin list`, so it is used before each call, not by detect()."""
@@ -150,16 +166,18 @@ def exposed_tools(executable: str, settings_path: Path) -> str | None:
 class AntigravityConnector:
     kind = "model"
 
-    def __init__(self, executable: str | None = None, settings_path: Path | None = None):
+    def __init__(self, executable: str | None = None, settings_path: Path | None = None,
+                 gemini_home: Path | None = None):
         self.manifest = MANIFEST
         self._executable = executable
-        self._settings = settings_path or Path.home() / ".gemini" / "antigravity-cli" / "settings.json"
+        self._gemini = gemini_home or Path.home() / ".gemini"
+        self._settings = settings_path or self._gemini / "antigravity-cli" / "settings.json"
 
     def detect(self) -> Detection:
         path = self._find()
         if path is None:
             return Detection(False, "agy is not installed; install Antigravity CLI and log in once with agy")
-        reason = settings_risk(self._settings)  # the listings run before each call; detect() stays offline
+        reason = settings_risk(self._settings) or hooks_risk(self._gemini)  # offline; listings run per call
         if reason is not None:
             return Detection(False, reason)
         return Detection(True, f"agy found at {path}; uses its existing Google login")
@@ -180,7 +198,8 @@ class AntigravityConnector:
         path = self._find()
         if path is None:
             raise ConnectorError("UNAVAILABLE", "agy is not installed")
-        reason = exposed_tools(path, self._settings)  # checked on every call: the setup can change at any time
+        # checked on every call: the setup can change at any time
+        reason = hooks_risk(self._gemini) or exposed_tools(path, self._settings)
         if reason is not None:
             raise ConnectorError("UNAVAILABLE", reason)
         content = f"{request.system}\n\n{request.prompt}" if request.system else request.prompt
