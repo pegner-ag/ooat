@@ -70,6 +70,53 @@
       "usd_per_mtok_out": 1.2,
       "valid_from": "2026-10-05",
       "source": "https://developers.openai.com/api/docs/pricing"
+    },
+    {
+      "adapter": "prv.google.subscription_cli",
+      "model": "gemini-3.8-flash-low",
+      "usd_per_mtok_in": 0.75,
+      "usd_per_mtok_cached": 0.075,
+      "usd_per_mtok_out": 3.75,
+      "valid_from": "2026-10-06",
+      "valid_until": "2026-12-31",
+      "source": "https://ai.google.dev/gemini-api/docs/pricing"
+    },
+    {
+      "adapter": "prv.google.subscription_cli",
+      "model": "gemini-3.8-flash-low",
+      "usd_per_mtok_in": 1.5,
+      "usd_per_mtok_cached": 0.15,
+      "usd_per_mtok_out": 7.5,
+      "valid_from": "2027-01-01",
+      "source": "https://ai.google.dev/gemini-api/docs/pricing"
+    },
+    {
+      "adapter": "prv.google.subscription_cli",
+      "model": "gemini-3.8-flash-high",
+      "usd_per_mtok_in": 0.75,
+      "usd_per_mtok_cached": 0.075,
+      "usd_per_mtok_out": 3.75,
+      "valid_from": "2026-10-06",
+      "valid_until": "2026-12-31",
+      "source": "https://ai.google.dev/gemini-api/docs/pricing"
+    },
+    {
+      "adapter": "prv.google.subscription_cli",
+      "model": "gemini-3.8-flash-high",
+      "usd_per_mtok_in": 1.5,
+      "usd_per_mtok_cached": 0.15,
+      "usd_per_mtok_out": 7.5,
+      "valid_from": "2027-01-01",
+      "source": "https://ai.google.dev/gemini-api/docs/pricing"
+    },
+    {
+      "adapter": "prv.google.subscription_cli",
+      "model": "gemini-3.1-pro-high",
+      "usd_per_mtok_in": 2,
+      "usd_per_mtok_cached": 0.2,
+      "usd_per_mtok_out": 12,
+      "valid_from": "2026-10-06",
+      "source": "https://ai.google.dev/gemini-api/docs/pricing"
     }
   ],
   "data_class_policy": {

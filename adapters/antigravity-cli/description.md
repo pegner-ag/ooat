@@ -41,6 +41,15 @@ the operator's Google account and its existing login. Antigravity CLI replaced G
   `showFeedbackSurvey`, `notifications`, `editorMode`. Any other key, such as `editor` or `useG1Credits`
   (spends AI credits when the quota runs out), stops the connector until it is reviewed.
 
+## Prices
+`catalog/routing.json` prices the three default tiers at Google's Gemini API list prices
+(https://ai.google.dev/gemini-api/docs/pricing, checked 2026-10-06), as shadow cost on the plan. The `-low` /
+`-high` suffixes are agy's reasoning-effort variants of the API models `gemini-3.8-flash` (0.75 / 3.75 USD per
+1M tokens until 2026-12-31, then 1.5 / 7.5) and `gemini-3.1-pro-preview` (2 / 12, the price for prompts up to
+200k tokens; a longer prompt costs more than the shadow price says). `valid_from` is the day the prices were
+checked, because the page does not say since when they apply. Other agy models stay unpriced, so the gateway
+does not route to them.
+
 ## Manifest facts
 Vendor `google`; vendor entity, country, regions and retention `null`. `training_on_inputs` is `true`: the
 Antigravity terms let Google use Interactions to improve its products and machine learning, with human review, on
