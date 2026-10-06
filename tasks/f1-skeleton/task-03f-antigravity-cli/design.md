@@ -30,7 +30,15 @@ vendor, which spec §7 wants for a critic that is not of the worker's vendor (`r
 - The operator's `~/.gemini/antigravity-cli/settings.json` holds no `permissions.allow` rules today.
 - Terms: Google support answered on 2026-09-15 that launching the official `agy` binary as a local child process
   in headless mode on the cached Google login "is fully supported" and uses the same limits as interactive use;
-  extracting tokens or calling backend endpoints is not supported (forum link in §6).
+  extracting tokens or calling backend endpoints is not supported (forum link in §6). The Antigravity terms say
+  "Using third party software, tools, or services to access the Service (e.g. using OpenClaw with Antigravity
+  OAuth) is a breach of this Agreement". OOAT starts the official binary and never touches its login, which is the
+  supported case of the forum answer, but the terms themselves do not name it.
+- Data (terms, consumer login, which covers Google AI Pro): "We use Interactions to evaluate, develop, and improve
+  Google and Alphabet research, products, services and machine learning technologies", and "Google employees and
+  contractors may access, view, review and use Interactions". The operator can switch this off in the settings
+  ("Enable telemetry"); only Workspace or Google Cloud access excludes it by contract. The owner's account is on
+  Google AI Pro (owner, 2026-10-06).
 
 ## 3. How a call runs
 
@@ -54,18 +62,19 @@ vendor, which spec §7 wants for a critic that is not of the worker's vendor (`r
 
 ## 4. Manifest, tiers and prices
 
-- Vendor `google`, access `subscription_cli`, `automation_permitted` `permitted` with the forum answer as its
-  source; the operator still confirms when acknowledging.
-- Tiers as defaults the operator can change in `ooat.toml` `models`: economy `gemini-3.8-flash-low`, workhorse
+- Vendor `google`, access `subscription_cli`, `automation_permitted` `unknown`: the forum answer allows it, the
+  terms do not say so; the operator confirms when acknowledging, and the card quotes both.
+- Tiers (owner, 2026-10-06), changeable in `ooat.toml` `models`: economy `gemini-3.8-flash-low`, workhorse
   `gemini-3.8-flash-high`, frontier `gemini-3.1-pro-high`. The Claude and gpt-oss models are reachable by
   setting them, but they come from another model vendor through Google; their jurisdiction is Google's.
 - Prices: shadow cost at Google's Gemini API list prices for the configured ids, with source and date, added only
   where Google publishes a price for that id; an id without a published price stays unpriced, so the gateway
   does not route to it.
-- Data: `training_on_inputs`, `retention_days` and regions stay `null` until sourced: on a free individual account
-  Google may use inputs to improve its products, on Google AI Pro / Ultra the terms differ. Allowed classes
-  `public` and `internal`; client and personal data only with the operator's responsibility (ADR 0012), which
-  `may_extend()` refuses while the provider may train.
+- Data: `training_on_inputs` `true` (the terms' default for a consumer login, Google AI Pro included; an operator
+  setting can switch it off, which the manifest cannot see). `retention_days` and regions stay `null`. Allowed
+  classes `public` and `internal`; because the provider trains, `may_extend()` refuses client and personal data
+  even with the operator's responsibility (ADR 0012). The card advises switching telemetry off before sending
+  internal data.
 - Local data: `agy` keeps conversations under `~/.gemini/antigravity-cli/conversations`, and no flag turns that
   off. The consequences card says so.
 
@@ -76,10 +85,9 @@ prices in `routing.json`, entry point `ooat.connectors: antigravity`, unit tests
 (success, denied tool, auth error, quota, malformed), and one live test skipped unless `OOAT_LIVE_AGY=1`.
 Out of scope: allowing tools, Antigravity's IDE, remote control, MCP.
 
-## 6. Owner questions
+## 6. Owner decisions
 
-1. Which plan is the Google account on (free individual, Google AI Pro, Ultra)? It decides the data facts in §4.
-2. Default models per tier as proposed in §4?
+Google AI Pro account; default models per tier as in §4 (owner, 2026-10-06).
 
-Sources: https://antigravity.google/docs/cli/headless/ ·
+Sources: https://antigravity.google/docs/cli/headless/ · https://antigravity.google/terms/ ·
 https://discuss.ai.google.dev/t/is-external-orchestration-of-antigravity-cli-headless-mode-supported-with-account-based-usage/183051
