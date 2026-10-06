@@ -16,7 +16,7 @@ written for a sub-project only when the ones it depends on are done, so it can u
 | 03 | Provider gateway — design: `task-03-provider-gateway/design.md` (ADR 0010). Plans: 03a gateway core + connector contract (done), 03b connectors (Claude Code CLI, Codex CLI, Anthropic API) (done), 03c `ooat connectors` + consequences card (done) | 01 | done |
 | 03e | Operator responsibility for client and personal data (ADR 0012) — design and plan: `task-03e-operator-data-responsibility/` | 03 | done |
 | 04 | Task runtime T0–T2 — design: `task-04-task-runtime/design.md` (ADR 0011). Plans: 04a decision layer (done), 04b Topology Gate T0–T2 (done), 04c `ooat task` / `ooat hil` commands, worker, acceptance, closing, rating (done); owner decisions in ADR 0014 | 01–03, 03e | done |
-| 03f | Gemini CLI connector (subscription login); needs the owner's `gemini` login | 03 | later |
+| 03f | Antigravity CLI connector (`agy`, Google login; replaced Gemini CLI) — design: `task-03f-antigravity-cli/design.md` | 03 | design |
 | 05 | REST intake and Telegram bot (tasks per project), HIL notifier with one-tap answers, dashboard: HIL queue, rating queue, exceptions, tasks. The operator's everyday work (submit, answer, rate) must not need the command line: the owner found the `ooat` commands very unfriendly (2026-10-05) | 04 | later |
 | 06 | Baseline: eval runner, 5 seed tasks at T2 with cost, HIL hours and acceptance | 02–05 | later |
 
