@@ -24,7 +24,7 @@ Chosen by decision (`docs/adr/`), not yet used in code:
 - Dashboard and TS SDK: TypeScript
 
 ## Project structure
-- `spec/ooat-specification.md` — normative design, draft v0.1 (sections 1–14)
+- `spec/ooat-specification.md` — normative design, draft v0.2 (sections 1–14)
 - `spec/manifesto.md` — rationale for non-technical readers
 - `spec/schemas/`, `spec/examples/`, `spec/tests/` — OOA Spec v0.1 JSON Schemas, examples, pytest (see `spec/README.md`)
 - `catalog/families/` — `family.base` and 5 abstract families (analyst, builder, reviewer, communicator, orchestrator)

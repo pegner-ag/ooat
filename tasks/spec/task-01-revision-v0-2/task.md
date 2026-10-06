@@ -26,6 +26,6 @@ need to know the ADRs to read the spec correctly.
   request, `default_applied` responses choose the default.
 
 ## Acceptance criteria
-- [ ] Each amendment is reflected in the spec text with a reference to its ADR.
-- [ ] Version line `draft v0.2`; `spec/README.md` and schemas unchanged unless an amendment requires it.
+- [x] Each amendment is reflected in the spec text with a reference to its ADR.
+- [x] Version line `draft v0.2`; `spec/README.md` and schemas unchanged unless an amendment requires it.
 - [ ] Owner approval recorded in the PR.
