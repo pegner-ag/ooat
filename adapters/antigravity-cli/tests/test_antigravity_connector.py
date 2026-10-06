@@ -302,3 +302,8 @@ def test_hooks_changed_after_approval_stop_the_call(tmp_path, monkeypatch):
     hooked(tmp_path, '{"PreToolUse": [{"command": "other.cmd"}]}')
     with pytest.raises(ConnectorError, match="approve-hooks"):
         agy.complete(request(approved_hooks=(sha,)), None)
+
+
+@pytest.mark.parametrize("text", ["{}", "[]", "null", "  \n"])
+def test_a_hook_file_without_hooks_needs_no_approval(tmp_path, text):
+    assert hooked(tmp_path, text).hooks() == []

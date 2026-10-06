@@ -212,3 +212,11 @@ def test_hooks_of_a_connector_that_is_not_enabled_cannot_be_approved(ledger):
     from ooat_core.connector_admin import approve_hooks
     with pytest.raises(ValueError, match="enable it first"):
         approve_hooks(ledger, FakeConnector(), "Martin", [("hooks.json", "c" * 64)])
+
+
+def test_hooks_cannot_be_approved_while_client_or_personal_data_is_allowed(ledger):
+    from ooat_core.connector_admin import approve_hooks
+    connector = FakeConnector()
+    acknowledge(ledger, connector, "Martin", ["internal", "personal"], True, {}, TODAY)
+    with pytest.raises(ValueError, match="hooks may receive"):
+        approve_hooks(ledger, connector, "Martin", [("hooks.json", "e" * 64)])

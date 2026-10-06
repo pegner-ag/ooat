@@ -273,6 +273,10 @@ def approve_hooks(ledger: Ledger, connector: ModelConnector, operator: str, hook
         connector.manifest["id"])
     if current is None:
         raise ValueError(f"{connector.manifest['id']} is not enabled; enable it first")
+    above = sorted(set(current["allowed_data_classes"]) & set(RESPONSIBLE_CLASSES))
+    if above:  # a hook runs outside the gateway, so nothing would check the class of what it receives
+        raise ValueError(f"hooks may receive prompts and replies, and this connector is enabled for {above}; enable "
+                         "it for public or internal data only before approving hooks")
     approved = [{"path": path, "sha256": sha} for path, sha in hooks]
     if not approved:
         raise ValueError("there are no hooks to approve")

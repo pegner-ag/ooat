@@ -15,7 +15,10 @@ registers such hooks for its own panes, and wants Orca and OOAT to use `agy` sid
 3. The gateway passes the approved fingerprints to the connector on every call (`ModelRequest.approved_hooks`). A
    hook file whose fingerprint is not approved — new, changed in any byte, or unreadable — stops the call with a
    message naming the command to run.
-4. OOAT still passes the CLI only the allow-listed environment, so a hook gets no `ORCA_*` or other variables it
+4. A hook may receive the CLI's prompts and replies, and it runs outside the gateway. Hooks can therefore only be
+   approved while the connector is enabled for `public` or `internal` data; enabling it again for other classes
+   writes an acknowledgement without the approval. A hook file holding `{}`, `[]` or `null` defines no hooks.
+5. OOAT still passes the CLI only the allow-listed environment, so a hook gets no `ORCA_*` or other variables it
    was not meant to see. Approving a hook does not widen what the agent itself may do.
 
 ## Consequences

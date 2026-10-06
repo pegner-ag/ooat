@@ -176,7 +176,8 @@ def _approve_hooks(args, registry, ledger, stdin, stdout) -> int:
         return REFUSED
     for path, sha, text in files:
         stdout.write(f"--- {path} (sha256 {sha[:12]}...)\n{text.rstrip()}\n")
-    stdout.write("These commands run around every call of the connector's CLI, outside OOAT's isolation. OOAT "
+    stdout.write("These commands run around every call of the connector's CLI, outside OOAT's isolation, and may receive "
+                 "its prompts and replies. OOAT "
                  "passes them no ORCA_* or other non-allow-listed variables. Any change to a file needs a new "
                  "approval.\n")
     confirm = args.confirm or _ask(f"Type {args.connector} to approve: ", stdin, stdout)

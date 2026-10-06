@@ -141,7 +141,11 @@ def hook_files(gemini_home: Path) -> list[tuple[str, str, str]]:
         data = path.read_bytes() if path.is_file() else b""
     except OSError:
         return [(str(path), "", "")]  # unreadable: an empty fingerprint is never approved, so the call refuses
-    if not data.strip():
+    try:
+        empty = not data.strip() or not json.loads(data)  # {}, [] and null define no hooks
+    except ValueError:
+        empty = False  # not JSON: agy may still read it, so it needs approval
+    if empty:
         return []
     return [(str(path), hashlib.sha256(data).hexdigest(), data.decode("utf-8", errors="replace"))]
 
