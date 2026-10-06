@@ -36,7 +36,7 @@ personal_data_regions = ["eu"]    # personal data only to connectors processing 
 
 ```sh
 python -m pip install -e core -e adapters/claude-code -e adapters/codex -e adapters/anthropic-api \
-    -e adapters/typesafe-jev
+    -e adapters/typesafe-jev -e adapters/antigravity-cli
 ooat connectors list                      # installed connectors and their state
 ooat connectors show prv.anthropic.api    # connection consequences card
 ooat connectors enable prv.anthropic.api --operator "Your Name"

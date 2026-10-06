@@ -9,6 +9,7 @@ import pytest
 
 import ooat_adapter_claude_code as claude_code
 from ooat_adapter_anthropic_api import AnthropicApiConnector
+from ooat_adapter_antigravity_cli import AntigravityConnector
 from ooat_adapter_claude_code import ClaudeCodeConnector
 from ooat_adapter_codex import CodexConnector
 from ooat_adapter_typesafe_jev import JevConnector
@@ -126,3 +127,50 @@ def test_personal_data_reaches_neither_jev_nor_an_unverified_subscription(setup)
         jev_gateway(setup, opener).decide(decision("personal"))
     assert info.value.code == "NOT_PERMITTED"
     assert "prv.typesafe.api: personal is not allowed by the manifest" in info.value.trace
+
+
+AGY_NOW = datetime(2026, 10, 6, 9, 0, tzinfo=timezone.utc)  # the Gemini prices are valid from the day they were checked
+
+
+def test_antigravity_tiers_are_priced_and_the_2027_flash_price_applies_from_january(setup):
+    routing = setup._routing
+    for model in ("gemini-3.8-flash-low", "gemini-3.8-flash-high", "gemini-3.1-pro-high"):
+        assert routing.price("prv.google.subscription_cli", model, AGY_NOW.date(), fallback=False) is not None
+    flash = routing.price("prv.google.subscription_cli", "gemini-3.8-flash-low", AGY_NOW.date(), fallback=False)
+    later = routing.price("prv.google.subscription_cli", "gemini-3.8-flash-low",
+                          datetime(2027, 1, 1).date(), fallback=False)
+    assert (flash.usd_per_mtok_in, later.usd_per_mtok_in) == (0.75, 1.5)
+
+
+def agy_gateway(setup, classes):
+    agy = AntigravityConnector(executable="agy-not-installed")
+    setup._ledger.append(new_event("ADAPTER_ACKNOWLEDGED", task=None, actor={"kind": "hil", "id": "operator"}, body={
+        "adapter": "prv.google.subscription_cli", "manifest_version": agy.manifest["version"],
+        "allowed_data_classes": classes, "operator": "Operator", "automation_confirmed": True,
+        "jurisdiction_sha256": jurisdiction_fingerprint(agy.manifest)}))
+    return Gateway(setup._ledger, Registry([agy]), setup._routing, setup._config, clock=lambda: AGY_NOW)
+
+
+def test_enabled_for_public_only_antigravity_gets_no_internal_data(setup):
+    only_agy = agy_gateway(setup, ["public"])  # the owner's choice C
+    assert only_agy.estimate(request("public")).connector == "prv.google.subscription_cli"
+    with pytest.raises(GatewayError) as info:
+        only_agy.estimate(request("internal"))
+    assert info.value.code == "NOT_PERMITTED"
+
+
+def test_antigravity_never_receives_client_or_personal_data(setup):
+    only_agy = agy_gateway(setup, ["public", "internal"])
+    assert only_agy.estimate(request("internal")).connector == "prv.google.subscription_cli"
+    for data_class in ("client_confidential", "personal"):
+        with pytest.raises(GatewayError) as info:
+            only_agy.estimate(request(data_class))
+        assert info.value.code == "NOT_PERMITTED"
+
+
+def test_the_operators_responsibility_cannot_extend_antigravity_because_it_trains():
+    from ooat_core.connector_admin import checked_classes
+    agy = AntigravityConnector(executable="agy-not-installed")
+    for classes in (["internal", "personal"], ["client_confidential"]):
+        with pytest.raises(ValueError, match="trains on inputs"):
+            checked_classes(agy.manifest, classes, {"no_training": True})
