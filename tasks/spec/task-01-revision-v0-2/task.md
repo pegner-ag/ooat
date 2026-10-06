@@ -19,6 +19,7 @@ need to know the ADRs to read the spec correctly.
 - ADR 0011 and ADR 0012: decision tier and operator data responsibility into §2, §4, §6, §8, §9 and §11.
 - ADR 0014: provider failures pause a task (§8), the budget HIL question (§9), contract budget capped by the
   role, the T2 critic exception to §7 rule 6.
+- §6 provider tables: Google's subscription CLI is now Antigravity CLI (`agy`), not Gemini CLI (design 03f).
 - Spec §4 rule A3 (below `v_min` → T2 without further calculation): the Gate only records A3 and may still close
   or clarify; align the text or the code.
 - Ledger-enforced HIL rules (§9): options named by `recommended`/`default_on_silence`, one response per
