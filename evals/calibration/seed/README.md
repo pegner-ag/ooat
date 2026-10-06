@@ -9,7 +9,9 @@ that builds and runs code (F2+) or inputs larger than one context.
 - `attachments` are paths relative to the operator's working folder (`ooat-work/seed/`). The source files never
   enter this repository; their projects are named only there.
 - Value classes use the `[gate]` defaults: A 1,000, B 300, C 50 USD. `expected_topology` is the operator's
-  expectation, which the Gate's decision is compared against.
+  expectation, which the Gate's decision is compared against. It is T2 for all five, because F1 knows only T0 and
+  T2; the three decomposable tasks are the candidates for T4 once it exists, so the Gate's step A answers on
+  them (A5, A7) are what calibrates that side.
 - Structure: sequential s1, s5; decomposable s2, s3, s4.
 
 Submit one with `ooat task submit` in the working folder. Pass `--goal`, each `--acceptance`, `--value`,

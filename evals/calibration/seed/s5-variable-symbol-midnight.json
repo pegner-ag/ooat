@@ -1,7 +1,7 @@
 {
   "id": "seed.s5.variable-symbol-midnight",
   "title": "Payment variable symbol dated by UTC instead of local time",
-  "goal": "The attached service builds payment variable symbols as {LocationDigit}yyMMdd{NNN} from DateTime.UtcNow.Date, so between 00:00 and 02:00 Prague time it uses the previous day. Fix it test-first: first a failing xUnit test (.NET 8), then the fix. Deliver both, in that order, in one Markdown document.",
+  "goal": "The attached service builds payment variable symbols as {LocationDigit}yyMMdd{NNN} from DateTime.UtcNow.Date, so after midnight Prague time it uses the previous day (until 02:00 in summer, 01:00 in winter). Fix it test-first: first a failing xUnit test (.NET 8), then the fix. Deliver both, in that order, in one Markdown document.",
   "acceptance": [
     "The document first shows a test that fails on the current code for 00:30 Europe/Prague in summer and in winter.",
     "The fix injects the time (TimeProvider or an equivalent) and uses no static DateTime.Now or DateTime.UtcNow.",
