@@ -247,7 +247,7 @@ def test_hooks_anywhere_agy_might_read_them_stop_the_connector(tmp_path, monkeyp
     (gemini / "config").mkdir(parents=True)
     (gemini / where).write_text(json.dumps(content), encoding="utf-8")
     agy = AntigravityConnector(executable="agy", settings_path=tmp_path / "settings.json", gemini_home=gemini)
-    assert not agy.detect().available
+    assert "approve-hooks" in agy.detect().detail  # detect stays available; the call refuses until approved
     with pytest.raises(ConnectorError, match="hooks"):
         agy.complete(request(), None)
 
@@ -270,3 +270,35 @@ def test_gemini_cli_hooks_do_not_stop_the_connector(tmp_path, monkeypatch):
                                           encoding="utf-8")
     agy = AntigravityConnector(executable="agy", settings_path=tmp_path / "settings.json", gemini_home=gemini)
     assert agy.detect().available and agy.complete(request(), None).text.strip() == "OK"
+
+
+def hooked(tmp_path, text='{"PreToolUse": [{"command": "orca.cmd"}]}'):
+    gemini = tmp_path / ".gemini"
+    (gemini / "config").mkdir(parents=True, exist_ok=True)
+    (gemini / "config" / "hooks.json").write_text(text, encoding="utf-8")
+    return AntigravityConnector(executable="agy", settings_path=tmp_path / "settings.json", gemini_home=gemini)
+
+
+def test_hooks_lists_each_hook_file_with_its_fingerprint(tmp_path):
+    import hashlib
+    agy = hooked(tmp_path)
+    [(path, sha, text)] = agy.hooks()
+    assert path.endswith("hooks.json") and "orca.cmd" in text
+    assert sha == hashlib.sha256((tmp_path / ".gemini" / "config" / "hooks.json").read_bytes()).hexdigest()
+    assert AntigravityConnector(gemini_home=tmp_path / "none").hooks() == []
+
+
+def test_approved_hooks_let_the_call_run(tmp_path, monkeypatch):
+    fake_cli(monkeypatch)
+    agy = hooked(tmp_path)
+    [(_, sha, _)] = agy.hooks()
+    assert agy.complete(request(approved_hooks=(sha,)), None).text.strip() == "OK"
+
+
+def test_hooks_changed_after_approval_stop_the_call(tmp_path, monkeypatch):
+    fake_cli(monkeypatch)
+    agy = hooked(tmp_path)
+    [(_, sha, _)] = agy.hooks()
+    hooked(tmp_path, '{"PreToolUse": [{"command": "other.cmd"}]}')
+    with pytest.raises(ConnectorError, match="approve-hooks"):
+        agy.complete(request(approved_hooks=(sha,)), None)

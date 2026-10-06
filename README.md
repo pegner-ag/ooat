@@ -40,6 +40,7 @@ python -m pip install -e core -e adapters/claude-code -e adapters/codex -e adapt
 ooat connectors list                      # installed connectors and their state
 ooat connectors show prv.anthropic.api    # connection consequences card
 ooat connectors enable prv.anthropic.api --operator "Your Name"
+ooat connectors approve-hooks prv.google.subscription_cli --operator "Your Name"   # if agy has hooks
 ```
 
 Choosing `client_confidential` or `personal` when enabling a connector asks you to take responsibility for that

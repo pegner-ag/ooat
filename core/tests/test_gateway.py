@@ -503,3 +503,21 @@ def test_budget_equal_to_the_estimate_after_earlier_spending_is_allowed():
                                   body={"outcome": "FAILED", "error": {"code": "API_ERROR", "message": "500"}},
                                   cost=cost))
     assert setup.gateway.call(setup.request(contract=contract)).cost["adapter"] == "prv.fake.api"
+
+
+# Approved hooks (ADR 0015) --------------------------------------------------------------------------------------
+
+def test_the_connector_gets_the_hook_fingerprints_the_operator_approved():
+    setup = Setup(FakeConnector(API))
+    setup.ledger.append(new_event("ADAPTER_ACKNOWLEDGED", task=None, actor=HIL, body={
+        "adapter": API["id"], "manifest_version": API["version"], "allowed_data_classes": ["internal"],
+        "operator": "Operator", "automation_confirmed": True, "jurisdiction_sha256": jurisdiction_fingerprint(API),
+        "approved_hooks": [{"path": "C:/u/.gemini/config/hooks.json", "sha256": "a" * 64}]}))
+    setup.gateway.call(setup.request())
+    assert setup.connectors[0].calls[-1].approved_hooks == ("a" * 64,)
+
+
+def test_without_an_approval_the_connector_gets_no_hook_fingerprints():
+    setup = ready(API)
+    setup.gateway.call(setup.request())
+    assert setup.connectors[0].calls[-1].approved_hooks == ()

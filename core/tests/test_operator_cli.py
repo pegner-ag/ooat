@@ -306,3 +306,40 @@ def test_a_responsibility_without_any_known_region_is_refused(config):
                     "--classes", "personal", "--responsibility", "yes", "--regions", "", "--no-training", "yes",
                     connectors=[subscription()])
     assert code == 1 and "need a known processing region" in out and state_events(config) == []
+
+
+class HookedConnector(FakeConnector):
+    def __init__(self, files):
+        super().__init__()
+        self.files = files
+
+    def hooks(self):
+        return self.files
+
+
+HOOK = ("C:/u/.gemini/config/hooks.json", "d" * 64, '{"PreToolUse": [{"command": "orca.cmd"}]}')
+
+
+def test_approve_hooks_shows_each_file_and_records_the_approval(config):
+    connector = HookedConnector([HOOK])
+    run(config, "connectors", "enable", "prv.fake.api", "--operator", "Martin", "--classes", "public",
+        "--automation", "yes", "--confirm", "prv.fake.api", connectors=[connector])
+    code, out = run(config, "connectors", "approve-hooks", "prv.fake.api", "--operator", "Martin",
+                    answers="prv.fake.api\n", connectors=[connector])
+    assert code == 0 and "orca.cmd" in out and "d" * 12 in out and "approved" in out
+    body = state_events(config)[-1]["body"]
+    assert body["approved_hooks"] == [{"path": HOOK[0], "sha256": HOOK[1]}]
+    assert body["allowed_data_classes"] == ["public"]
+
+
+@pytest.mark.parametrize("connector, answers, message", [
+    (FakeConnector(), "", "does not run hooks"),
+    (HookedConnector([]), "", "no hooks to approve"),
+    (HookedConnector([HOOK]), "wrong\n", "nothing was changed"),
+])
+def test_approve_hooks_refuses_without_hooks_or_confirmation(config, connector, answers, message):
+    run(config, "connectors", "enable", "prv.fake.api", "--operator", "Martin", "--classes", "public",
+        "--automation", "yes", "--confirm", "prv.fake.api", connectors=[connector])
+    code, out = run(config, "connectors", "approve-hooks", "prv.fake.api", "--operator", "Martin",
+                    answers=answers, connectors=[connector])
+    assert code == 1 and message in out and "approved_hooks" not in state_events(config)[-1]["body"]
