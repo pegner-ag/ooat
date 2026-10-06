@@ -1,0 +1,20 @@
+{
+  "id": "seed.s3.export-and-hashing-tests",
+  "title": "Tests for an export packaging service and a password hasher",
+  "goal": "Write xUnit tests (.NET 8) for the two attached classes, an export packaging service and a password hasher, without changing production code. Deliver the tests in one Markdown document. Where the service depends on interfaces that are not attached, write minimal fakes and say which members you assumed.",
+  "acceptance": [
+    "The tests for the export service build the ZIP in a MemoryStream and check its entries and manifest, an empty input, and file names with diacritics.",
+    "The tests for the password hasher cover a round trip, a wrong password, a tampered hash, and two hashes of the same password that differ.",
+    "The document changes no production code; any defect a test reveals is described, not fixed.",
+    "All fixtures are synthetic: no real names of people and no national identification numbers.",
+    "The document lists every dependency member it had to assume."
+  ],
+  "value_class": "B",
+  "data_class": "client_confidential",
+  "risk_class": "R0",
+  "structure": "decomposable",
+  "language": "en",
+  "expected_topology": "T2",
+  "attachments": ["s3/ExportPackagingService.cs", "s3/PasswordHasher.cs"],
+  "key": null
+}
