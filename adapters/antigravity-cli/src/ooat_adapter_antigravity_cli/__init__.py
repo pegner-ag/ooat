@@ -101,6 +101,52 @@ def parse_stream(stdout: str, stderr: str, returncode: int, model: str) -> Model
     )
 
 
+# Read-only by design: no tool runs without a permission headless mode cannot grant (design 03f §2); the empty
+# temporary working directory leaves nothing for the one tool that needs none (reading inside the workspace).
+ISOLATION = ["--input-format", "stream-json", "--output-format", "stream-json", "--sandbox",
+             "--disable-slash-commands", "-p="]
+_MODEL_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]*$")  # no leading "-": it could read as a flag
+_NO_MCP, _NO_PLUGINS = "No MCP servers configured.", "No imported plugins."
+# Settings keys measured or documented as harmless (description.md); "permissions" is checked separately.
+SAFE_SETTINGS = frozenset({"model", "trustedWorkspaces", "permissions", "enableTelemetry", "altScreenMode",
+                           "colorScheme", "runningLightSpeed", "verbosity", "showTips", "showFeedbackSurvey",
+                           "notifications", "editorMode"})
+
+
+def settings_risk(settings_path: Path) -> str | None:
+    """Why the operator's agy settings could approve a tool, or None. Fast and offline (used by detect())."""
+    try:
+        settings = json.loads(settings_path.read_text(encoding="utf-8")) if settings_path.is_file() else {}
+    except (OSError, ValueError):
+        return f"cannot read {settings_path}; refusing to run without knowing its permissions"
+    if not isinstance(settings, dict):
+        return f"{settings_path} is not a JSON object; refusing to run without knowing its permissions"
+    unknown = sorted(set(settings) - SAFE_SETTINGS)
+    if unknown:  # fail closed: a key OOAT does not know could approve tools or run hooks
+        return f"{settings_path} has settings OOAT has not checked ({', '.join(unknown)}); see description.md"
+    permissions = settings.get("permissions", {})
+    if not isinstance(permissions, dict) or set(permissions) - {"allow", "deny"} or permissions.get("allow"):
+        return (f"{settings_path} has permissions OOAT does not accept (only an empty allow list and deny rules); "
+                "remove them so the agent stays without tools")
+    return None
+
+
+def exposed_tools(executable: str, settings_path: Path) -> str | None:
+    """Why the operator's agy setup could give the agent a tool beyond the soft-denied built-ins, or None.
+    Runs `agy mcp list` and `agy plugin list`, so it is used before each call, not by detect()."""
+    reason = settings_risk(settings_path)
+    if reason is not None:
+        return reason
+    for command, empty, what in (("mcp", _NO_MCP, "an MCP server configured"), ("plugin", _NO_PLUGINS,
+                                                                                "a plugin imported")):
+        listing = run_cli([executable, command, "list"], "", 30)
+        if listing.returncode != 0:
+            return f"could not verify agy {command} list (exit {listing.returncode}); refusing to run"
+        if listing.stdout.strip() != empty:
+            return f"agy has {what} (agy {command} list); remove it so the agent stays without tools"
+    return None
+
+
 class AntigravityConnector:
     kind = "model"
 
@@ -113,6 +159,9 @@ class AntigravityConnector:
         path = self._find()
         if path is None:
             return Detection(False, "agy is not installed; install Antigravity CLI and log in once with agy")
+        reason = settings_risk(self._settings)  # the listings run before each call; detect() stays offline
+        if reason is not None:
+            return Detection(False, reason)
         return Detection(True, f"agy found at {path}; uses its existing Google login")
 
     def _find(self) -> str | None:
@@ -123,4 +172,18 @@ class AntigravityConnector:
                                           else None)
 
     def complete(self, request: ModelRequest, secrets) -> ModelResponse:
-        raise ConnectorError("UNAVAILABLE", "not implemented yet")
+        model = request.model or self.manifest["tiers"].get(request.tier)
+        if model is None:
+            raise ConnectorError("UNAVAILABLE", f"no model configured for tier {request.tier}")
+        if not _MODEL_ID.match(model):
+            raise ConnectorError("UNAVAILABLE", "model id contains characters that are not allowed")
+        path = self._find()
+        if path is None:
+            raise ConnectorError("UNAVAILABLE", "agy is not installed")
+        reason = exposed_tools(path, self._settings)  # checked on every call: the setup can change at any time
+        if reason is not None:
+            raise ConnectorError("UNAVAILABLE", reason)
+        content = f"{request.system}\n\n{request.prompt}" if request.system else request.prompt
+        message = json.dumps({"event": "user", "message": {"content": content}}, ensure_ascii=False)
+        result = run_cli([path, *ISOLATION, f"--model={model}"], message + "\n", request.timeout_s)
+        return parse_stream(result.stdout, result.stderr, result.returncode, model)

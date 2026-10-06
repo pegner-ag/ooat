@@ -93,3 +93,146 @@ def test_thinking_tokens_count_as_output():
     response = parse_stream(line, "", 0, "gemini-3.8-flash-high")
     assert response.tokens_out == 45 and response.tokens_cached == 30
     assert response.tokens_in == (70 if adapter.INPUT_INCLUDES_CACHE else 100)
+
+
+CLEAN = {("mcp", "list"): fixture("mcp_list_empty.txt"), ("plugin", "list"): fixture("plugin_list_empty.txt")}
+
+
+def fake_cli(monkeypatch, listings=None, stream=None):
+    calls = []
+    listings = {**CLEAN, **(listings or {})}
+
+    def run(args, stdin, timeout_s, files=None):
+        calls.append({"args": args, "stdin": stdin})
+        key = tuple(args[1:3])
+        if key in listings:
+            return CliResult(0, listings[key], "")
+        return CliResult(0, stream or fixture("success.jsonl"), "")
+    monkeypatch.setattr(adapter, "run_cli", run)
+    monkeypatch.setattr(adapter, "find_executable", lambda name: "C:/agy/agy.exe")
+    return calls
+
+
+def connector(tmp_path, settings=None):
+    path = tmp_path / "settings.json"
+    path.write_text(json.dumps({"model": "x"} if settings is None else settings), encoding="utf-8")
+    return AntigravityConnector(executable="agy", settings_path=path)
+
+
+def request(**extra):
+    return ModelRequest(tier="workhorse", prompt='Shrň "smlouvu"\na odpověz česky.', data_class="internal",
+                        system="Be brief.", model="gemini-3.8-flash-high", **extra)
+
+
+def test_prompt_and_system_go_to_stdin_as_one_stream_json_message(tmp_path, monkeypatch):
+    calls = fake_cli(monkeypatch)
+    connector(tmp_path).complete(request(), None)
+    call = calls[-1]
+    message = json.loads(call["stdin"].splitlines()[0])
+    assert message == {"event": "user", "message": {"content": 'Be brief.\n\nShrň "smlouvu"\na odpověz česky.'}}
+    assert "Shrň" not in " ".join(call["args"])  # never in argv
+
+
+def test_the_call_runs_without_tools_and_with_the_routed_model(tmp_path, monkeypatch):
+    calls = fake_cli(monkeypatch)
+    connector(tmp_path).complete(request(), None)
+    args = calls[-1]["args"]
+    for flag in ("--sandbox", "--disable-slash-commands", "-p="):
+        assert flag in args
+    assert "--model=gemini-3.8-flash-high" in args
+    assert args[args.index("--input-format") + 1] == args[args.index("--output-format") + 1] == "stream-json"
+    for forbidden in ("--dangerously-skip-permissions", "--add-dir", "--continue", "-c", "--conversation"):
+        assert forbidden not in args
+
+
+@pytest.mark.parametrize("settings, listings, cause", [
+    ({"permissions": {"allow": ["command(git)"]}}, None, "permissions OOAT does not accept"),
+    (None, {("mcp", "list"): "github  enabled  npx @mcp/github\n"}, "MCP server"),
+    (None, {("plugin", "list"): "acme-tools  enabled\n"}, "plugin"),
+    ({"model": "x", "hooks": {"preToolUse": "run.cmd"}}, None, "settings OOAT has not checked (hooks)"),
+])
+def test_extra_tools_in_the_agy_setup_refuse_the_call(tmp_path, monkeypatch, settings, listings, cause):
+    calls = fake_cli(monkeypatch, listings)
+    with pytest.raises(ConnectorError) as info:
+        connector(tmp_path, settings).complete(request(), None)
+    assert info.value.code == "UNAVAILABLE" and cause in info.value.message
+    assert not any(a.startswith("--model") for c in calls for a in c["args"])  # the model was never called
+
+
+def test_an_mcp_server_added_later_stops_the_next_call(tmp_path, monkeypatch):
+    agy = connector(tmp_path)
+    fake_cli(monkeypatch)
+    agy.complete(request(), None)
+    fake_cli(monkeypatch, {("mcp", "list"): "notes  enabled  node notes.js\n"})
+    with pytest.raises(ConnectorError, match="MCP server"):
+        agy.complete(request(), None)
+
+
+def test_detect_reports_risky_settings_without_running_agy(tmp_path, monkeypatch):
+    calls = fake_cli(monkeypatch)
+    detection = connector(tmp_path, {"permissions": {"allow": ["command(git)"]}}).detect()
+    assert not detection.available and "permissions" in detection.detail and calls == []
+
+
+@pytest.mark.parametrize("settings", [[1, 2], {"permissions": "allow-all"}, {"permissions": {"ask": ["x"]}}],
+                         ids=["not_an_object", "permissions_not_an_object", "unknown_permission_key"])
+def test_settings_of_an_unexpected_shape_refuse_instead_of_crashing(tmp_path, monkeypatch, settings):
+    fake_cli(monkeypatch)
+    with pytest.raises(ConnectorError) as info:
+        connector(tmp_path, settings).complete(request(), None)
+    assert info.value.code == "UNAVAILABLE"
+
+
+def test_agy_is_found_in_its_install_folder(tmp_path, monkeypatch):
+    installed = tmp_path / "agy" / "bin" / "agy.exe"
+    installed.parent.mkdir(parents=True)
+    installed.write_bytes(b"")
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
+    monkeypatch.setattr(adapter, "find_executable", lambda name: name if name == str(installed) else None)
+    assert AntigravityConnector()._find() == str(installed)
+
+
+def test_model_id_with_shell_characters_is_refused(tmp_path, monkeypatch):
+    fake_cli(monkeypatch)
+    with pytest.raises(ConnectorError) as info:
+        connector(tmp_path).complete(ModelRequest(tier="workhorse", prompt="x", data_class="internal",
+                                                  model="gemini & calc"), None)
+    assert info.value.code == "UNAVAILABLE"
+    with pytest.raises(ConnectorError):
+        connector(tmp_path).complete(ModelRequest(tier="workhorse", prompt="x", data_class="internal",
+                                                  model="--dangerously-skip-permissions"), None)
+
+
+@pytest.mark.skipif(os.environ.get("OOAT_LIVE_AGY") != "1", reason="spends Google quota; set OOAT_LIVE_AGY=1")
+def test_live_minimal_call():
+    response = AntigravityConnector().complete(
+        ModelRequest(tier="economy", prompt="Reply with the single word OK.", data_class="public",
+                     model="gemini-3.8-flash-low", timeout_s=180), None)
+    assert "OK" in response.text and response.tokens_out
+
+
+def test_a_listing_that_fails_says_it_could_not_verify(tmp_path, monkeypatch):
+    fake_cli(monkeypatch)
+    real = adapter.run_cli
+
+    def failing(args, stdin, timeout_s, files=None):
+        if tuple(args[1:3]) == ("mcp", "list"):
+            return CliResult(1, "", "panic")
+        return real(args, stdin, timeout_s, files)
+    monkeypatch.setattr(adapter, "run_cli", failing)
+    with pytest.raises(ConnectorError) as info:
+        connector(tmp_path).complete(request(), None)
+    assert info.value.code == "UNAVAILABLE" and "could not verify" in info.value.message
+
+
+def test_switching_telemetry_off_does_not_stop_the_connector(tmp_path, monkeypatch):
+    fake_cli(monkeypatch)
+    response = connector(tmp_path, {"model": "x", "enableTelemetry": False, "colorScheme": "dark"}).complete(
+        request(), None)
+    assert response.text.strip() == "OK"
+
+
+def test_a_tool_permission_mode_stops_the_connector(tmp_path, monkeypatch):
+    fake_cli(monkeypatch)
+    with pytest.raises(ConnectorError, match="toolPermission"):
+        connector(tmp_path, {"toolPermission": "always-proceed"}).complete(request(), None)
