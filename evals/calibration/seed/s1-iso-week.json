@@ -1,0 +1,20 @@
+{
+  "id": "seed.s1.iso-week",
+  "title": "ISO 8601 week of a weekly allowance service",
+  "goal": "Fix GetIsoWeek in the attached C# service so that it returns the ISO 8601 year and week. The project targets .NET Framework 4.8, which has no System.Globalization.ISOWeek, and Calendar.GetWeekOfYear is not ISO. Deliver the new method and an xUnit test class (.NET 8) in one Markdown document.",
+  "acceptance": [
+    "The document contains a new GetIsoWeek implementation that uses no ISOWeek class and no C# syntax newer than 7.3.",
+    "The document contains an xUnit test that compares GetIsoWeek with ISOWeek.GetYear and ISOWeek.GetWeekOfYear for every day from 2000-01-01 to 2040-12-31.",
+    "The tests assert 2024-12-30 as 2025 week 1, 2021-01-03 as 2020 week 53 and 2026-12-31 as 2026 week 53.",
+    "The document contains a round-trip test of GetWeekStart for every ISO week from 2000 to 2040.",
+    "The document states that only GetIsoWeek, and GetWeekStart if needed, change."
+  ],
+  "value_class": "B",
+  "data_class": "internal",
+  "risk_class": "R0",
+  "structure": "sequential",
+  "language": "en",
+  "expected_topology": "T2",
+  "attachments": ["s1/WeeklyAllowanceService.cs"],
+  "key": "The original code returns 2024 week 53 for 2024-12-30; the operator runs the tests while rating."
+}
