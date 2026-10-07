@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://moonindustries.eu/ooat/spec/v0.1/contract.schema.json",
+  "$id": "https://moonindustries.eu/ooat/spec/v0.2/contract.schema.json",
   "title": "OOAT contract",
   "description": "Instance of a capability contract for one task, assigned to one agent instance (spec sections 2 and 8). Carried in the body of CONTRACT_ISSUED.",
   "type": "object",

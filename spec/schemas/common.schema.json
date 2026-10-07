@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://moonindustries.eu/ooat/spec/v0.1/common.schema.json",
+  "$id": "https://moonindustries.eu/ooat/spec/v0.2/common.schema.json",
   "title": "OOAT common definitions",
   "description": "Shared identifiers and enumerations referenced by all OOA Spec schemas (spec sections 2, 5, 6, 7, 9).",
   "$defs": {

@@ -15,7 +15,7 @@ Normative part of OOAT: JSON Schemas (draft 2020-12) plus the semantics in `ooat
 | `contract.schema.json` | Contract instance for one task (body of `CONTRACT_ISSUED`) | 2, 8 |
 | `event.schema.json` | Ledger event envelope and one body schema per event type | 7, 9 |
 
-`$id` values use the base `https://moonindustries.eu/ooat/spec/v0.1/` (ADR 0013); they are names resolved from this
+`$id` values use the base `https://moonindustries.eu/ooat/spec/v0.2/` (ADR 0013); they are names resolved from this
 folder, not URLs that must be served.
 
 ## Rules the schemas enforce beyond types
@@ -28,7 +28,8 @@ folder, not URLs that must be served.
 - Abstentions require `reason` (≤ 300 chars), `missing` and `confidence`.
 - `HIL_REQUEST`: 2–3 options, recommendation, default on silence, deadline; an R3 request must offer a do-not-act option (`acts: false`).
 - Objections reference an artifact version and use a closed `reason_code` list.
-- Only agents emit `CLAIM`/`RESULT`/`OBJECTION`; only humans emit `HIL_RESPONSE`, `TASK_RATED`, `DEFECT_FOUND`, `ADAPTER_ACKNOWLEDGED`, `ADAPTER_DISABLED`.
+- Only agents emit `CLAIM`/`RESULT`/`OBJECTION`; only humans emit `HIL_RESPONSE`, `TASK_RATED`, `DEFECT_FOUND`, `ADAPTER_ACKNOWLEDGED`, `ADAPTER_DISABLED`,
+  except the `HIL_RESPONSE` the runtime writes as `default-on-silence` when a deadline passes (HIL rule 5).
 - Timestamps are UTC (`Z`).
 
 ## Rules left to the catalog linter or runtime

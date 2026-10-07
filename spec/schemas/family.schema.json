@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://moonindustries.eu/ooat/spec/v0.1/family.schema.json",
+  "$id": "https://moonindustries.eu/ooat/spec/v0.2/family.schema.json",
   "title": "OOAT role family",
   "description": "Abstract ancestor of roles with shared rules, permissions, budget and gates (spec section 5). Inheritance rules (narrowing only, accumulating gates, depth <= 3) are enforced by the catalog linter, not by this schema.",
   "type": "object",

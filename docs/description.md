@@ -2,7 +2,7 @@
 
 ## Purpose
 OOAT is an open-source framework for multi-agent AI work in which a Topology Gate decides per task whether
-a team is worth its cost. The repository currently contains the specification and the OOA Spec v0.1 JSON Schemas with tests;
+a team is worth its cost. The repository currently contains the specification and the OOA Spec v0.2 JSON Schemas with tests;
 the starter catalog holds role families, capability names and the first cards (`cap.general.complete_task`,
 `cap.general.check_criterion`, `role.general.worker`) with their schemas in `catalog/schemas/` and first eval
 cases in `evals/`; `ooat-core` has the ledger foundation, the provider gateway
@@ -24,9 +24,9 @@ Chosen by decision (`docs/adr/`), not yet used in code:
 - Dashboard and TS SDK: TypeScript
 
 ## Project structure
-- `spec/ooat-specification.md` — normative design, draft v0.1 (sections 1–14)
+- `spec/ooat-specification.md` — normative design, draft v0.2 (sections 1–14)
 - `spec/manifesto.md` — rationale for non-technical readers
-- `spec/schemas/`, `spec/examples/`, `spec/tests/` — OOA Spec v0.1 JSON Schemas, examples, pytest (see `spec/README.md`)
+- `spec/schemas/`, `spec/examples/`, `spec/tests/` — OOA Spec v0.2 JSON Schemas, examples, pytest (see `spec/README.md`)
 - `catalog/families/` — `family.base` and 5 abstract families (analyst, builder, reviewer, communicator, orchestrator)
 - `catalog/taxonomy.json` — 13 starter domains + `general` fallback; 103 capability names with summary, proposed `impl` and per-domain target
 - `catalog/tests/` — schema, family-chain and taxonomy checks

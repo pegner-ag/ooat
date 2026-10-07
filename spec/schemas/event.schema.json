@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://moonindustries.eu/ooat/spec/v0.1/event.schema.json",
+  "$id": "https://moonindustries.eu/ooat/spec/v0.2/event.schema.json",
   "title": "OOAT ledger event",
   "description": "Immutable ledger record: envelope plus a body validated per event type (spec sections 7 and 9). Keys, types and reason codes are English; free-text fields follow lang.",
   "type": "object",

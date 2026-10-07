@@ -1,6 +1,26 @@
 # OOAT: Object-Oriented Agent Team, open framework specification
 
-Sep 28, 2026 · @Martin Pegner
+Sep 28, 2026 · @Martin Pegner · draft v0.2 (revised Oct 6, 2026)
+
+### Changes in v0.2
+
+v0.2 folds the accepted decision records (`docs/adr/`) into the text, so the specification reads correctly without them. Each change below names its ADR; the ADR wins where the two ever differ.
+
+- ADR 0003: full 26-character ULIDs; `FAILED` as a `RESULT` with a typed `error`; `task: null` only for connector events; `acts: false` and the R3 default on silence; objection severity and closed `reason_code` list; role id middle segment = domain (§2, §7, §9).
+- ADR 0004: capability domains are namespaces, role families are abstract ancestors by kind of work (§2, §3, §5).
+- ADR 0008: pluggable ledger backends selected by URL; ledger schema with `seq`, nullable `task_id`, `seq` indexes and an `artifact` table with `untrusted` (§3, §7).
+- ADR 0009: `CLARIFYING` returns to `SUBMITTED` once every clarifying question is answered; a narrowed scope returns a `GATED` task to the Gate (§8).
+- ADR 0010: cost estimates before every call and start; connector state as ledger events (`ADAPTER_ACKNOWLEDGED`, `ADAPTER_DISABLED`); `automation_permitted` states the provider's terms, the operator confirms in the acknowledgement (§4, §6, §7, §9).
+- ADR 0011: decision tier from the first task; thresholds per decision point, engine and model version; R2 and R3 never decided by a model; `decision` gates; `project` on tasks (§2, §4, §6, §7, §8, §11).
+- ADR 0012: the operator takes responsibility for client and personal data; `[policy]` limits on countries and regions (§2, §6, §9).
+- ADR 0013: schema `$id` base `https://moonindustries.eu/ooat/spec/v0.2/`; the version segment follows the spec version (§3, owner 2026-10-07).
+- Rule A10 (§4): the text now matches the implemented outcome, `CLOSED_ABSTAINED` without an `ABSTAIN` event (owner 2026-10-07).
+- HIL rule 5 (§9): defaults applied on silence carry the reserved actor id `default-on-silence`.
+- ADR 0014: provider failures pause a running task; contract budget capped by the role and the budget HIL question; T2 critic exception (§2, §6, §7, §8, §9).
+- ADR 0015: the operator approves the hooks a connector's CLI runs (§7, §9).
+- Design 03f: Google's subscription CLI is Antigravity CLI (`agy`), not Gemini CLI (§6).
+- Rule A3 aligned with the implemented Gate: it is recorded and skips step B, but the Gate may still close or clarify (§4).
+- Ledger-enforced HIL rules: options named by `recommended` / `default_on_silence`, one response per request, `default_applied` responses choose the default (§9).
 
 ## 1. Purpose, goals and principles
 
@@ -69,20 +89,23 @@ The basic unit is the capability, not the agent. A role is a named bundle of cap
 
 | Entity | Definition | Lives in | Key |
 | --- | --- | --- | --- |
-| Capability | One typed operation: input and output schema, acceptance, impl `deterministic` or `llm`, tier, cost card | `catalog/capabilities/*.json` | `cap.<domain>.<verb>_<object>` |
-| Role | Bundle of capabilities + permissions + budget + gates; inherits from a family | `catalog/roles/*.json` | `role.<family>.<name>` |
-| Role family | Abstract ancestor (e.g. `analyst-base`, `reviewer-base`) with shared rules | `catalog/families/*.json` | `family.<name>` |
-| Provider adapter | Declared access to one model source: API or subscription, metering, terms, data policy | `providers/*.json` | `prv.<vendor>.<access>` |
+| Domain | Namespace of capabilities and roles (e.g. `bi`, `dev`); carries no rules or permissions (ADR 0004) | `catalog/taxonomy.json` | `<domain>` |
+| Capability | One typed operation: input and output schema, acceptance, impl `deterministic`, `decision` or `llm`, tier, cost card | `catalog/capabilities/*.json` | `cap.<domain>.<verb>_<object>` |
+| Role | Bundle of capabilities + permissions + budget + gates; inherits from a family | `catalog/roles/*.json` | `role.<domain>.<name>`: the middle segment is the domain, not the family (ADR 0003, 0004) |
+| Role family | Abstract ancestor grouped by kind of work and risk (`family.base` → `analyst`, `builder`, `reviewer`, `communicator`, `orchestrator`) with shared rules, permissions, budget and gates (ADR 0004) | `catalog/families/*.json` | `family.<name>` |
+| Provider adapter | Declared access to one model or decision source: API or subscription, metering, terms, data policy; enabled only by the operator's acknowledgement in the ledger (ADR 0010), which for `client_confidential` and `personal` also records the operator's responsibility for that data (ADR 0012) | `providers/*.json` | `prv.<vendor>.<access>` |
 | Agent instance | A role running for one Task with its own context and budget | runtime, row in store | `agt_<ulid>` |
-| Task | A request with goal, acceptance criteria, budget, risk class and working language | store | `tsk_<ulid>` |
-| Contract | Instance of a capability contract for one Task: input references, expected output, budget, deadline | store | `ctr_<ulid>` |
-| Artifact | Versioned output (document, code, schema, dataset) with type, classification and hash | artifact store | `art_<ulid>@v<n>` |
+| Task | A request with goal, acceptance criteria, budget, risk class, working language and optional operator `project` (ADR 0011) | store | `tsk_<ulid>` |
+| Contract | Instance of a capability contract for one Task: input references, expected output, budget (the task budget capped by the role's `max_usd_per_contract`, ADR 0014), deadline | store | `ctr_<ulid>` |
+| Artifact | Versioned output (document, code, schema, dataset) with type, classification, `untrusted` flag and hash | artifact store | `art_<ulid>@v<n>` |
 | Event | Immutable ledger record: type, actor, references, cost | append-only table | `evt_<ulid>` |
-| Gate | Checkpoint: deterministic, critic or HIL | defined in role, instances in store | `gate.<type>.<name>` |
+| Gate | Checkpoint: deterministic, decision, critic or HIL (`decision` gates are acceptance checks answered by the decision tier, ADR 0011) | defined in role, instances in store | `gate.<type>.<name>` |
 | Topology | How a task is executed (T0 to T5, section 4) | Task attribute | `T0`…`T5` |
 | Tier | Abstract model class, mapped to concrete models and providers by routing policy | `catalog/routing.json` | `local`, `economy`, `workhorse`, `frontier` |
 
-A capability's `impl` is one of `deterministic`, `decision` or `llm` (section 5). Tiers include a separate `decision` tier for System One models, which return typed choices, scores and truth values instead of text (section 6).
+A capability's `impl` is one of `deterministic`, `decision` or `llm` (section 5). Tiers include a separate `decision` tier for System One models, which return typed choices, scores and truth values instead of text (section 6). A decision acts on its own only on R0 and R1 tasks and only above its calibrated threshold; R2 and R3 actions are never decided by a model (ADR 0011, section 6).
+
+Every `<ulid>` is a full 26-character ULID; IDs shortened in this text (e.g. `evt_01J9ZQ8M2K`) are illustrative only (ADR 0003).
 
 ### Relationships
 
@@ -90,7 +113,7 @@ A capability's `impl` is one of `deterministic`, `decision` or `llm` (section 5)
 - A Contract references exactly one Capability and is assigned to exactly one Agent instance.
 - An Agent instance is created from a Role; a Role inherits from a Role family (single inheritance, max. depth 3).
 - An Agent instance calls models only through Provider adapters selected by the routing policy.
-- Every state change of a Task or Contract is an Event; state is never overwritten without one.
+- Every state change of a Task or Contract is an Event; state is never overwritten without one. Every event belongs to a Task except the connector events `ADAPTER_ACKNOWLEDGED` and `ADAPTER_DISABLED`, which have `task: null` (ADR 0003, ADR 0010).
 - An Artifact is created only as a Contract output or as HIL input; it never has anonymous provenance.
 
 ### Contract outcomes
@@ -104,7 +127,9 @@ A capability's `impl` is one of `deterministic`, `decision` or `llm` (section 5)
 | `ABSTAIN_UNABLE` | Attempted; acceptance repeatedly not met | tier escalation or HIL |
 | `ABSTAIN_BUDGET` | Completion would exceed the budget | HIL approves more budget or narrows scope |
 | `ABSTAIN_NOT_PERMITTED` | Data policy or permissions forbid the only viable route (e.g. special-category data with no permitted model) | HIL decides or task closes |
-| `FAILED` | Technical error (tool, timeout, API, quota) | retry per policy |
+| `FAILED` | Technical error (tool, timeout, API, quota, connector unavailable, invalid output) | retry per policy; a provider failure pauses the task instead (section 8, ADR 0014) |
+
+`FAILED` is recorded as a `RESULT` event with `outcome: FAILED` and a typed `error` whose code is one of `TOOL_ERROR`, `TIMEOUT`, `API_ERROR`, `QUOTA_EXHAUSTED`, `INVALID_OUTPUT`, `UNAVAILABLE` (ADR 0003, ADR 0010).
 
 An abstention must carry `reason` (max. 300 characters, in the task language), `missing` (exactly what is missing) and `confidence` (0 to 1). An abstention without these fields is validated as `FAILED`.
 
@@ -120,12 +145,12 @@ Orchestrator and workers only propose and return results. Only `ooat-core` write
 
 | Deliverable | Language | Purpose |
 | --- | --- | --- |
-| OOA Spec | JSON Schema 2020-12 + Markdown | Normative: capability, role, family, provider, contract, event, routing schemas and semantics |
+| OOA Spec | JSON Schema 2020-12 + Markdown | Normative: capability, role, family, provider, contract, event, routing schemas and semantics. Schema `$id`s use the base `https://moonindustries.eu/ooat/spec/v0.2/`; they are names resolved locally from `spec/schemas/`, not URLs that must be served (ADR 0013) |
 | `ooat-core` | Python 3.12+ | Reference runtime: Topology Gate, dispatcher, contracts, budgets, state machine |
 | `ooat-sdk` (Python, TypeScript) | Python, TypeScript | Define capabilities and deterministic checks, submit tasks, read the ledger |
 | `ooat-cli` | Python | Run tasks, validate and resolve the catalog, run evals |
 | Dashboard | TypeScript web app | HIL queue, exceptions, economics, calibration |
-| Starter catalog | JSON | 13 families, \~100 capability stubs, eval set templates |
+| Starter catalog | JSON | 13 capability domains, 5 role families under `family.base` (ADR 0004), \~100 capability stubs, eval set templates |
 | Adapters | Python | Providers (API and subscription), stores, notifiers (e-mail, Slack, Microsoft Teams, messaging bots, webhooks) |
 | Integrations (optional) | various | Claude Code plugin, MCP server exposing OOAT as tools, A2A Agent Cards (F4) |
 
@@ -140,7 +165,7 @@ Python for the core because most provider and agent SDKs ship there first; TypeS
 | Orchestrator (LLM) | Decomposition, contract drafting, synthesis | `frontier` tier worker | any provider meeting the tier |
 | Agent workers | Run agent instances against contracts | Process per instance; Claude Agent SDK runtime in F1 | OpenAI Agents SDK, subscription CLI runner, NOOA (F4 pilot) |
 | Provider gateway | Tier → provider mapping, metering, quotas, data-policy enforcement | Own thin layer over adapters | LiteLLM as backend for metered APIs |
-| Store (ledger + state) | Append-only events, materialised state, costs | SQLite (Solo) | Postgres (Team) |
+| Store (ledger + state) | Append-only events, materialised state, costs | SQLite (Solo) | PostgreSQL (Team); Microsoft SQL Server (optional). Backend selected by URL (ADR 0008) |
 | Artifact store | Versioned, hash-addressed artifacts | Local filesystem; git for code | S3-compatible object storage |
 | Catalog | Capabilities, roles, families, routing, providers | JSON in git, validated in CI | mirrored into the store at runtime |
 | Role index | Top-k retrieval for the dispatcher | SQLite FTS5 + sqlite-vec, hybrid BM25 + vector | Postgres + pgvector |
@@ -148,11 +173,18 @@ Python for the core because most provider and agent SDKs ship there first; TypeS
 | Dashboard | Exceptions, HIL queue, economics | Web app served by `ooat-core` | read-only API for other UIs |
 | Eval runner | Regression tests for capabilities and the Gate | pytest + LLM judge | CI or nightly |
 
+### Ledger backends (ADR 0008)
+
+- The ledger is split into `Ledger` (the specification's rules: validation, provenance, an event and its artifacts written atomically) and a `LedgerBackend` (database dialect only). The backend is selected by a URL: `sqlite:///<path>`, `postgresql://…`, `mssql://…`.
+- Supported backends: SQLite (F1, Solo default), PostgreSQL (F2, Team profile), Microsoft SQL Server (optional, built when an installation needs it).
+- First-run choice, no forced installs: `ooat init` detects what the machine already has, asks the operator which backend to use and writes the ledger URL to the configuration. OOAT never installs a database; only the chosen backend's driver is needed, as an optional extra installed after the operator confirms. Credentials never go into the configuration; they come from environment variables or the OS credential store.
+- Every backend passes the shared ledger conformance tests, including append-only enforcement per backend.
+
 ### Deployment profiles
 
 | Profile | For | Store | Isolation | Hardware |
 | --- | --- | --- | --- | --- |
-| Solo | One person, one machine | SQLite, filesystem | Docker optional | Ordinary CPU machine, no GPU; proposed minimum 4 vCPU, 8 GB RAM |
+| Solo | One person, one machine | SQLite (or another supported backend, ADR 0008), filesystem | Docker optional | Ordinary CPU machine, no GPU; proposed minimum 4 vCPU, 8 GB RAM |
 | Team | Small team, shared server | Postgres, S3-compatible | Docker required | CPU server |
 | Scaled | Many concurrent tasks | Postgres, object storage | Kubernetes | after F4, out of scope before |
 
@@ -195,16 +227,18 @@ Three cheap filters settle simple tasks without any calculation; the economic mo
 | --- | --- | --- | --- |
 | A1 | Goal, output or acceptance criterion missing | T0: max. 3 clarifying questions to HIL | MAST: 41.8 % of failures are specification issues |
 | A2 | A verified recipe exists for the task type | T1 | practice |
-| A3 | Task value V below `v_min` (default USD 15) | T2 without further calculation | the Gate must not cost more than it saves |
+| A3 | Task value V below `v_min` (default USD 15) | At most T2 and no step B; A3 is recorded in `TOPOLOGY_DECIDED`. The other rules, the estimate before start and their outcomes (clarify, close as T0, budget question) still apply | the Gate must not cost more than it saves |
 | A4 | The task is a sequential chain (each step depends on the previous one) | at most T3 | Google/MIT: −39 to −70 % on sequential tasks |
 | A5 | Fewer than 3 independent branches | at most T3 | Claude Code docs, Anthropic |
 | A6 | Historical acceptance for the task class: T2 ≥ 45 % and T3 ≥ 75 % | at most T3 | Google/MIT: saturation around 45 % |
 | A7 | Branches need the same large context or edit the same files | at most T3 | Cognition: conflicting implicit decisions |
 | A8 | Irreversible action, external communication, production data | at least T3 + HIL gate | AI4DataLeaders essay |
 | A9 | Many tools (> 16) that cannot be split across branches | prefer T2/T3 | Google/MIT: tool-coordination trade-off |
-| A10 | Input classified `special_category` and no permitted route (no local tier, redaction not verifiable) | T0 with `ABSTAIN_NOT_PERMITTED` | data policy, section 9 |
+| A10 | Input classified `special_category` and no permitted route (no local tier, redaction not verifiable) | At the Gate: T0, the task closes `CLOSED_ABSTAINED` with the missing route recorded (no `ABSTAIN` event: no contract exists yet). A refusal by the gateway during a contract is still `ABSTAIN_NOT_PERMITTED` | data policy, section 9 |
 
-Where a `decision` tier is available, the judgement rules (A1, A4, A5, A7, A9, A10) run as one batch of typed questions against the task state: Noul for “is the acceptance criterion missing?”, Choice for the dependency structure, Score for decomposability. At Jev's list price a 5,000-token task state costs about USD 0.0002 for the whole step, so the Gate can run on every task, including those below `v_min`. Without a decision tier, step A uses the `economy` LLM tier through a structured-decision wrapper. Either way, the calibrated probabilities become Gate inputs only after OOAT's own calibration (section 11), not on the vendor's word.
+Where a `decision` tier is available, the judgement rules (A1, A4, A5, A7, A9, A10) run as one batch of typed questions against the task state: Noul for “is the acceptance criterion missing?”, Choice for the dependency structure, Score for decomposability. At Jev's list price a 5,000-token task state costs about USD 0.0002 for the whole step, so the Gate can run on every task, including those below `v_min`. Without a decision tier, step A uses the `economy` LLM tier through a structured-decision wrapper. Either way, an answer acts only when its confidence reaches the threshold θ of its decision point, engine and model version (section 6). A decision connector acts from the first task with the interim θ = 0.8; the text-model fallback keeps θ = 1 until it has been rated, so its answers go to the operator. Below θ the safer outcome applies, which for step A is a question to the operator (ADR 0011). Every answer is recorded in `TOPOLOGY_DECIDED` with engine, model version, answer, confidence and threshold.
+
+Rule A3 in v0.1 read “T2 without further calculation”. v0.2 aligns it with the implemented Gate: A3 removes step B, not the rest of the Gate. Step A and the cost estimate are cheap enough to run on every task, so a low-value task can still be closed (no permitted route, not worth its cost), sent back for clarification (A1) or given a budget question.
 
 ### Step B: economic choice among the remaining candidates
 
@@ -257,21 +291,25 @@ Observation for the design: in these examples model cost is 1 to 8 % of task val
 
 ### Gate requirements
 
-- Cost of the decision itself ≤ 1 % of V, max. 4,000 tokens on the `economy` tier; below `v_min` nothing is computed.
-- Output is a `TOPOLOGY_DECIDED` record listing all candidates, their EU, the parameters used and the rules that eliminated candidates.
+- Cost of the decision itself ≤ 1 % of V, max. 4,000 tokens on the `economy` tier; below `v_min` step B is not computed (rule A3).
+- Estimate before start (ADR 0010): the Gate asks the gateway for the expected cost of the worker and its acceptance checks, using the same estimates the gateway records as `estimated_usd` before every call. An estimate above V closes the task as T0 (not worth its cost). An estimate above the task budget raises the budget question of section 9: raise the budget, narrow the scope or do not run (ADR 0009 amendment); after 3 budget questions the task closes as `CLOSED_ABSTAINED`.
+- No permitted route for the task's data class (rule A10, section 9; ADR 0012) closes the task as T0 (`CLOSED_ABSTAINED`) with the missing route recorded.
+- Output is a `TOPOLOGY_DECIDED` record listing all candidates, their EU, the parameters used, the rules that eliminated candidates, and the decision records of step A (ADR 0011).
 - The Gate may return `ABSTAIN_UNKNOWN` when the EU gap between the top two candidates is smaller than their uncertainty. It then picks the cheaper candidate and flags the task for calibration.
 - HIL may override the topology before start; the override is an event and a calibration input.
 - In F2 a shadow mode runs T2 alongside the chosen topology on calibration tasks and compares realised EU (section 11).
 
 ## 5. Capability and role catalog
 
-The catalog has three levels: \~100 capabilities as units of work, 13 families as abstract ancestors, and roles as named bundles. The role format extends the A2A Agent Card v1.0 so that a role can later be exposed to other systems unchanged.
+The catalog has three levels: \~100 capabilities as units of work, role families as abstract ancestors, and roles as named bundles. Capabilities and roles are grouped into 13 domains, which are namespaces only (ADR 0004). The role format extends the A2A Agent Card v1.0 so that a role can later be exposed to other systems unchanged.
 
 ### Starter capability domains
 
 The starter catalog targets knowledge work typical for consulting, data and small-business projects. Anyone can add domains; the starter set is a seed, not a boundary.
 
-| Family | Example capabilities | Target count |
+A domain is the middle segment of `cap.<domain>.<verb>_<object>` and `role.<domain>.<name>` and carries no rules or permissions. The list, with each domain's target count, lives in `catalog/taxonomy.json`; further domains are added there without changing schemas or tests. Domain `general` holds `cap.general.complete_task`, the one-agent fallback (T2 default) for tasks no specialised capability fits; repeated failures or cost there feed the catalog backlog (ADR 0004).
+
+| Domain | Example capabilities | Target count |
 | --- | --- | --- |
 | `mgmt` management | decompose request, phase plan, status report, risk register | 8 |
 | `account` client | summarise client requirements, draft proposal, client e-mail (HIL) | 6 |
@@ -289,6 +327,10 @@ The starter catalog targets knowledge work typical for consulting, data and smal
 | **Total** |  | **102** |
 
 Roles are combinations: a BI developer = 5 capabilities from `bi` + 1 from `data` + 1 from `doc`. One capability can belong to many roles; it is measured and priced once.
+
+### Role families
+
+Families are abstract role ancestors grouped by kind of work and risk, not by field (ADR 0004): `family.base` → `family.analyst`, `family.builder`, `family.reviewer`, `family.communicator`, `family.orchestrator`. They carry rules, permissions, budget and gates. Permissions and gates follow the risk of the work, which cuts across domains: a reviewer in `bi` needs the same rules as one in `dev`.
 
 ### Implementation kinds
 
@@ -372,9 +414,9 @@ Two consequences for catalog design:
 ### Inheritance rules
 
 1. A family defines shared output format, logging, escalation rules, default permissions and default gates.
-2. A role may only narrow permissions, never widen them beyond its family. Widening requires a new family and HIL approval.
+2. Permissions and budgets are ceilings: every level (family and role) may only narrow its parent, so `family.base` is the ceiling for the whole catalog (ADR 0004). Widening requires a new family and HIL approval.
 3. Gates accumulate: a role adds gates, never removes them.
-4. Max. inheritance depth 3 (`family.base` → `family.analyst` → `role.bi.developer`).
+4. Max. inheritance depth 3 (`family.base` → `family.<kind>` → `role.<domain>.<name>`, e.g. `family.base` → `family.analyst` → `role.bi.developer`).
 5. The linter resolves every role into `catalog/_resolved/`; the runtime reads only resolved cards.
 
 ### Index record for the dispatcher
@@ -397,7 +439,7 @@ Cards reference tiers; the routing policy maps tiers to provider adapters; every
 | Access type | Examples | Metering | Marginal cost | Main constraint |
 | --- | --- | --- | --- | --- |
 | `api` | Anthropic, OpenAI, Google Gemini and other vendor APIs | Exact tokens from the response | Per token | Budget, rate limits |
-| `subscription_cli` | Official headless CLIs running on a personal or team plan (e.g. Claude Code, OpenAI Codex CLI, Gemini CLI) | Reported by the CLI, otherwise estimated | Shadow price of quota | Quota windows, concurrency, provider terms |
+| `subscription_cli` | Official headless CLIs running on a personal or team plan (e.g. Claude Code, OpenAI Codex CLI, Google Antigravity CLI `agy`) | Reported by the CLI, otherwise estimated | Shadow price of quota | Quota windows, concurrency, provider terms |
 | `subscription_manual` | A subscription chat UI where automated access is not permitted | None; a human relays input and output | c\_HIL × relay time | Human time; only for HIL-approved steps |
 | `local` (optional) | Ollama or llama.cpp on the user's hardware | Exact | Close to zero | Hardware; never required |
 
@@ -414,14 +456,18 @@ The reference installation will trial Anthropic, OpenAI, Google Gemini, Meta and
   "tiers": {"workhorse": "<model-id>", "frontier": "<model-id>"},
   "metering": "reported",
   "plan": {"fee_usd_month": 100, "quota_window_hours": null, "units": "token_equivalent"},
-  "automation_permitted": "operator_confirmed",
+  "automation_permitted": "unknown",
   "concurrency": 1,
   "data_policy": {"training_on_inputs": false, "retention_days": null, "allowed_data_classes": ["public", "internal", "client_confidential"]},
   "features": {"tool_use": true, "vision": true, "context_tokens": null}
 }
 ```
 
-`automation_permitted` takes `operator_confirmed`, `not_permitted` or `unknown`. Only `operator_confirmed` adapters may run unattended; the other two are limited to `subscription_manual` with HIL. The framework never works around provider terms; the operator confirms, for each plan, that automated use is allowed. Unknown fields stay `null` until measured or confirmed, never guessed.
+`automation_permitted` states the provider's published terms for unattended use: `permitted`, `not_permitted` or `unknown` (ADR 0010; v0.1's `operator_confirmed` is replaced by `permitted`). The operator's confirmation is not a manifest value but part of the connector's acknowledgement in the ledger (`automation_confirmed`, section 9). Unattended use requires `automation_permitted` ≠ `not_permitted` **and** an acknowledgement in force with `automation_confirmed: true`; an acknowledgement never overrides `not_permitted`. Manual relay (`subscription_manual`) is never used unattended and cannot be `permitted`; it always needs a human in the loop. The framework never works around provider terms. Unknown fields stay `null` until measured or confirmed, never guessed.
+
+### Connector state (ADR 0010)
+
+Connector state is ledger state. Enabling a connector is an `ADAPTER_ACKNOWLEDGED` event by a named operator (section 9); `ADAPTER_DISABLED` (adapter, operator, reason) disables it. The configuration file (`ooat.toml`) holds the operator's preferences only, such as tier pins and `[policy]` limits (section 9), and can never enable a connector. Connectors are discovered as installed packages through the Python entry-point group `ooat.connectors`; one mechanism serves model connectors, decision connectors and, later, tool connectors.
 
 ### Shadow price of subscription quota
 
@@ -446,7 +492,9 @@ Prices per million tokens are deliberately absent from this document. `routing.j
 
 The `decision` tier is for System One models: no text generation, typed answers to declared questions, every question scored in parallel against the same state. It serves only `impl: decision` capabilities and never writes artifacts. Its economics differ by orders of magnitude: TypeSafe lists Jev at USD 0.042 per million input tokens with free output and 70 to 500 ms per call, against USD 0.20 to 10 per million input tokens for text models. This makes checks that would be too expensive with an LLM affordable on every contract: acceptance pre-checks, data-class detection, untrusted-content flags, routing. The price may be subsidised; TypeSafe says so itself, so cost cards treat it as a measured value, not a constant.
 
-### Named providers (as of 2026-09-29)
+Decision connectors (`kind = "decision"`) are routed by the gateway under the same rules as model connectors: acknowledgement, data class, automation and budget. When no decision connector can serve a request, the `economy` text tier answers the same typed questions through the structured-decision wrapper; it is calibrated as its own engine (ADR 0011).
+
+### Named providers (as of 2026-09-29; Google's subscription CLI updated 2026-10)
 
 | Provider | Product | OOAT access | Tier fit | Status and constraints |
 | --- | --- | --- | --- | --- |
@@ -454,19 +502,19 @@ The `decision` tier is for System One models: no text generation, typed answers 
 | Meta | Muse Spark models through the Meta Model API (OpenAI-compatible), also via OpenRouter | `api` | `workhorse` candidate | Public preview. USD 1.25 input / 4.25 output per million tokens, 1M-token context. Launched US-only; Meta now advertises expanded global access, to be verified from an EU account. The discounted contributor tier trains on prompts and completions: `public` data only. A zero-data-retention option is priced at parity with standard. |
 | Meta | Muse Code, desktop coding agent (macOS, Windows) | `subscription_cli` candidate | `workhorse` | Headless mode and automation terms to be verified before an adapter is written. |
 | Meta | Muse app, a personal agent that books, fills forms and acts in external services (free, USD 20 or 100 per month) | none as a worker | none | Not a model endpoint but an autonomous actor in the user's accounts. It could only ever sit behind an R3 gate as an external executor; out of scope for F1 to F3. |
-| Anthropic, OpenAI, Google | APIs; Claude Code, Codex CLI, Gemini CLI on subscriptions | `api`, `subscription_cli` | `economy` to `frontier` | Automation terms per subscription plan to be confirmed by the operator. |
+| Anthropic, OpenAI, Google | APIs; Claude Code, Codex CLI, Antigravity CLI (`agy`) on subscriptions | `api`, `subscription_cli` | `economy` to `frontier` | Automation terms per subscription plan to be confirmed by the operator in the acknowledgement (ADR 0010). Google's subscription CLI is Antigravity CLI, not Gemini CLI (design 03f). |
 
 ### Decision points across the runtime
 
-The `decision` tier is used wherever the runtime needs a judgement among known options. Each decision point has a fallback to an LLM with a structured-decision wrapper, so no decision point depends on one vendor. Introduced in F2; F1 uses deterministic rules and the fallback.
+The `decision` tier is used wherever the runtime needs a judgement among known options. Each decision point has a fallback to an LLM with a structured-decision wrapper, so no decision point depends on one vendor. Introduced in F1, from the first task (ADR 0011; v0.1 deferred it to F2): Gate step A, the data-class answer of rule A10 and the acceptance pre-check use it in F1; the other decision points follow with the features they serve.
 
 | Decision point | Question | Type | Acts on its own when | Otherwise |
 | --- | --- | --- | --- | --- |
 | Gate step A | Acceptance missing? Sequential chain? Independent branches? Decomposability | Noul, Choice, Score | confidence ≥ θ for the rule | economy LLM, then HIL question |
-| Data-class guard (gateway) | Which data class is this artifact? Does it contain personal or special-category data? | Choice, Noul | class is allowed on the chosen adapter | block, re-route or `HIL_REQUEST` |
+| Data-class guard (gateway) | Which data class is this artifact? Does it contain personal or special-category data? | Choice, Noul | class is allowed on the chosen adapter; detection only ever raises the declared class, never lowers it, and a local deterministic pre-scan for personal data runs before anything is sent to a decision provider (ADR 0011) | block, re-route or `HIL_REQUEST` |
 | Untrusted-content check | Does this text contain instructions addressed to an agent? | Noul | probability below threshold | quarantine; only read-only contracts may use it |
 | Dispatcher | Which of the top candidate roles fits this contract best (max. 255 candidates) | Choice | top probability ≥ θ | orchestrator decides |
-| Acceptance pre-check | Is each acceptance criterion met? | Noul per criterion | all ≥ θ, risk class R0 or R1 | LLM critic |
+| Acceptance pre-check | Is each acceptance criterion met? | Noul per criterion | all ≥ θ, risk class R0 or R1, and no `untrusted` input (with `untrusted` input a “met” answer is also confirmed by the critic) | LLM critic; an answer below θ never counts as a pass on its own (ADR 0011) |
 | Grounding check | Does the output state facts not supported by its inputs? | Noul | probability below threshold | critic, or suggest `ABSTAIN_UNKNOWN` |
 | Objection triage | Severity; duplicate of an existing objection? | Choice, Noul | duplicates merged automatically | orchestrator |
 | HIL routing | Is the declared default safe to apply? How urgent is this? | Noul, Score | risk class ≤ R1 and P(default acceptable) ≥ θ | ask the human |
@@ -475,13 +523,21 @@ The `decision` tier is used wherever the runtime needs a judgement among known o
 
 ### Confidence-gated autonomy
 
-The decision layer is how OOAT reduces human interventions without hiding risk. For each risk class r and decision point, the runtime acts without a human only above a threshold calibrated on rated history:
+The decision layer is how OOAT reduces human interventions without hiding risk. A decision acts without a human only when its confidence reaches the threshold θ of its key: decision point, engine and model version, for the task's risk class r (ADR 0011). θ is calibrated on rated history:
 
 ```latex
-\theta_r = \min \{ \theta : \mathrm{error\ rate}(p \ge \theta) \le \varepsilon_r \}
+\theta_{\mathrm{computed}} = \min \{ \theta \in \{0.50, 0.51, \dots, 0.99\} : n(p \ge \theta) \ge 5, \; \mathrm{error\ rate}(p \ge \theta) \le \varepsilon_r \}
 ```
 
-ε\_r is the tolerated error rate for that risk class (reference: R0 5 %, R1 2 %; R2 and R3 never act alone). Until ≥ 20 rated cases exist for a decision point, θ = 1 and every case goes to the fallback. Thresholds are recomputed monthly and after any model change.
+ε\_r is the tolerated error rate for that risk class (reference: R0 5 %, R1 2 %). If no θ on the grid qualifies, θ\_computed = 1. Only R0 and R1 tasks act on decisions alone; R2 and R3 actions are never decided by a model.
+
+| Rated decisions for the key | θ |
+| --- | --- |
+| fewer than 5 | 0.8 for a decision connector; 1 for the text-model fallback, whose self-stated probability never acts alone before it is rated |
+| 5 to 19 | max(0.8, θ\_computed) |
+| 20 or more | θ\_computed |
+
+θ is recomputed after every rating from the operator's verdicts on decision records (`TASK_RATED`, section 11). Ratings of another model version do not count, so a model change starts the key again. Below θ the safer outcome applies. Every decision is recorded with engine, model version, answer, confidence and threshold.
 
 Two safeguards against over-trusting vendor calibration:
 
@@ -490,7 +546,7 @@ Two safeguards against over-trusting vendor calibration:
 
 ### Routing policy
 
-1. Filter adapters by the artifact data class, `automation_permitted` and remaining quota.
+1. Filter adapters by connector state in the ledger (acknowledged and not disabled), the artifact data class and the operator's responsibility and `[policy]` (section 9, ADR 0012), the automation rule above (ADR 0010) and remaining quota. `tiers` in `routing.json` is an optional allow-list: a listed tier accepts only the listed connectors, an unlisted tier accepts every acknowledged connector whose manifest maps it (ADR 0010).
 2. Keep adapters on which the capability has passed its eval for the requested tier.
 3. Pick the lowest expected cost: API price or quota shadow price.
 4. The critic of a T3+ output should run on a different vendor than the author where one is available, to reduce correlated errors.
@@ -504,14 +560,16 @@ C_{\mathrm{contract}} = \sum_{\mathrm{api\ calls}} (t_{\mathrm{in}} p_{\mathrm{i
 
 Topology cost = contracts + Gate + orchestrator + critic. The ledger stores the four separately so coordination overhead can be measured, and flags each cost as `exact` or `estimated`.
 
+Estimate next to actual (ADR 0010): before every call the gateway estimates its cost and records it as `cost.estimated_usd` next to the actual `usd`, so predicted and actual cost are comparable per connector and capability from the first call on. The Gate uses the same estimates before start (section 4). A failed provider call is charged its estimate (ADR 0014).
+
 ### Budgets
 
 | Level | Set by | Soft limit | Hard limit |
 | --- | --- | --- | --- |
 | Monthly system budget | Operator | 80 %: daily report | 100 %: new Tasks only T0 to T2 |
 | Subscription quota | Adapter | 80 % of window: shadow price doubles | 100 %: adapter unavailable until reset |
-| Task | Gate from V and task type; HIL may override | 80 %: dashboard warning | 100 %: `ABSTAIN_BUDGET`, HIL decides |
-| Contract | Role card (`max_usd_per_contract`) | 80 %: agent is told the remaining budget | 100 %: contract ends as `PARTIAL` or abstention |
+| Task | Gate from V and task type; HIL may override | 80 %: dashboard warning; an estimate above it before start: budget question (section 9) | 100 %: `ABSTAIN_BUDGET`, HIL decides |
+| Contract | The task budget capped by the role card's `max_usd_per_contract` when the contract is issued; the operator's answer to the budget question may raise it above the cap (ADR 0014) | 80 %: agent is told the remaining budget | 100 %: the task pauses with the budget question of section 9 (raise or stop); stopping keeps a usable document as `PARTIAL` (ADR 0014) |
 | Debate (T5) | Orchestrator | none | max. 2 objection rounds per artifact |
 
 ### Levers for saving tokens (in order of expected effect)
@@ -549,36 +607,40 @@ Agents never talk in free text. Every message is a typed event in an append-only
 }
 ```
 
-The example shows the language rule: keys, event types and reason codes are English, free-text fields follow the task language (`lang`). `body` is validated against the schema for its `type`; an event that fails is not written and the agent receives the error. `usd` is filled in by the gateway.
+The example shows the language rule: keys, event types and reason codes are English, free-text fields follow the task language (`lang`). `body` is validated against the schema for its `type`; an event that fails is not written and the agent receives the error. `usd` is filled in by the gateway, next to the optional `estimated_usd` it made before the call (ADR 0010). IDs in the example are shortened; real IDs carry full 26-character ULIDs (ADR 0003). `task` is required on every event except `ADAPTER_ACKNOWLEDGED` and `ADAPTER_DISABLED`, which have `task: null` (ADR 0003, ADR 0010).
 
 ### Event types
 
 | Type | Actor | Content | Subscribers |
 | --- | --- | --- | --- |
-| `TASK_SUBMITTED` | HIL, intake | Request, V, budget, risk class, language | Gate |
-| `TOPOLOGY_DECIDED` | Gate | Candidates, EU, rules, choice | Orchestrator, dashboard |
-| `CONTRACT_ISSUED` | Orchestrator via `ooat-core` | Capability, input refs, budget, deadline | Assigned agent |
+| `TASK_SUBMITTED` | HIL, intake | Request, V, budget, risk class, language, optional `project` (ADR 0011) | Gate |
+| `TOPOLOGY_DECIDED` | Gate | Candidates, EU, rules, choice, decision records of step A (ADR 0011) | Orchestrator, dashboard |
+| `CONTRACT_ISSUED` | Orchestrator via `ooat-core` | Capability, input refs, budget, deadline; reissued with a raised budget after the budget question (ADR 0014) | Assigned agent |
 | `CLAIM` | Agent | Contract accepted | Orchestrator |
-| `RESULT` | Agent | Outcome (`DONE`/`PARTIAL`), `art_` refs, self-assessed acceptance | Gates, artifact consumers |
+| `RESULT` | Agent | Outcome (`DONE`/`PARTIAL`, or `FAILED` with a typed `error`, ADR 0003), `art_` refs, self-assessed acceptance | Gates, artifact consumers |
 | `ABSTAIN` | Agent, Gate | Abstention type, `reason`, `missing`, `confidence` | Orchestrator, dashboard |
-| `OBJECTION` | Agent with `can_object_to` | Objection to an artifact, `reason_code`, proposed fix, severity | Artifact author, orchestrator |
+| `OBJECTION` | Agent with `can_object_to` | Objection to an artifact version, `reason_code`, proposed fix, severity `blocking` or `non_blocking` (ADR 0003) | Artifact author, orchestrator |
 | `OBJECTION_RESOLVED` | Author or orchestrator | Accepted or rejected with reason, new artifact version | Objector |
 | `DECISION` | Orchestrator, HIL | A decision binding further contracts (a small ADR) | Everyone in the Task |
-| `GATE_PASSED` / `GATE_FAILED` | Gate runner, critic, HIL | Check result with evidence | Orchestrator |
+| `GATE_PASSED` / `GATE_FAILED` | Gate runner, critic, HIL | Check result with evidence; per criterion its decision record (ADR 0011) | Orchestrator |
 | `HIL_REQUEST` | Anyone via `ooat-core` | Question or approval, options, deadline, default on silence | HIL (notifier, dashboard) |
 | `HIL_RESPONSE` | Human | Answer, approval, scope change | Requester, orchestrator |
 | `BUDGET_WARNING` / `QUOTA_WARNING` | Gateway | Soft limit reached | Agent, orchestrator |
 | `TASK_CLOSED` | Orchestrator | Outcome, costs, final artifact | Dashboard, calibration |
-| `TASK_RATED` / `DEFECT_FOUND` | Human | Acceptance rating, value class; defect found after closing | Calibration |
+| `TASK_RATED` / `DEFECT_FOUND` | Human | Acceptance rating, value class, the operator's verdict per decision record (`decisions`: event, question, verdict, value; ADR 0011); defect found after closing | Calibration, decision thresholds |
+| `ADAPTER_ACKNOWLEDGED` | Human (named operator) | Connector enabled: manifest version, allowed data classes, `automation_confirmed`, `jurisdiction_sha256` (ADR 0010), optional `responsibility` (ADR 0012) and `approved_hooks` (ADR 0015); `task: null` | Gateway, dashboard |
+| `ADAPTER_DISABLED` | Human (named operator) | Connector disabled: adapter, operator, reason (ADR 0010); `task: null` | Gateway, dashboard |
+
+Only agents emit `CLAIM`, `RESULT` and `OBJECTION`; only humans emit `HIL_RESPONSE`, `TASK_RATED`, `DEFECT_FOUND`, `ADAPTER_ACKNOWLEDGED` and `ADAPTER_DISABLED`. The one exception: a default applied on silence is a `HIL_RESPONSE` written by the runtime under the reserved actor id `default-on-silence` (section 9, HIL rule 5).
 
 ### Debate rules
 
-1. An objection always points to a specific artifact version and carries a `reason_code` from a closed list (e.g. `SPEC_VIOLATION`, `FACT_UNSUPPORTED`, `GRAIN_MISMATCH`, `SECURITY_RISK`, `COST_RISK`, `INCONSISTENT_WITH_DECISION`).
+1. An objection always points to a specific artifact version and carries a `reason_code` from the closed list `SPEC_VIOLATION`, `FACT_UNSUPPORTED`, `GRAIN_MISMATCH`, `SECURITY_RISK`, `COST_RISK`, `INCONSISTENT_WITH_DECISION`, which only a spec version may extend, and a severity `blocking` or `non_blocking` (ADR 0003).
 2. Only a role that lists the artifact type in `can_object_to` may object.
 3. Max. 2 rounds per artifact; an unresolved blocking objection after round 2 becomes a `HIL_REQUEST` with two options and the orchestrator's recommendation.
 4. Agents do not read the whole thread. They get the artifact, the objections to it and the valid `DECISION` events.
 5. Agreement is not written. “I agree” messages are forbidden: they cost tokens and carry no information.
-6. A critic never reviews its own output or output of the same role; a critic from another family, and ideally another vendor, is preferred.
+6. A critic never reviews its own output or output of the same role; a critic from another family, and ideally another vendor, is preferred. Exception for T2 (ADR 0014): the critic runs on the same `workhorse` tier as the worker, revisited with T3+. In T2 the critic is called for a criterion the decision tier is unsure about, for every “met” answer when any input of the task is `untrusted`, and for every criterion when the decision tier gave no answer; an unsure critic counts the criterion as unmet, so an uncertain answer never produces `DONE`.
 
 ### Why not free debate: a cost model
 
@@ -590,13 +652,16 @@ C_{\mathrm{read}} \approx n^2 \cdot m \cdot \frac{R(R+1)}{2}
 
 For n = 5, m = 800, R = 4 that is 200,000 tokens before any output or system prompt. The structured variant (one position per agent with references, one synthesis by the critic) costs ≈ 2 × n × m + synthesis ≈ 10,000 tokens: about 20× less.
 
-### Minimal ledger schema (SQLite and Postgres compatible)
+### Minimal ledger schema (portable across backends, ADR 0008)
+
+Shown in SQLite syntax; each backend uses its own identity column type for `seq`.
 
 ```sql
 CREATE TABLE event (
-  id            TEXT PRIMARY KEY,
+  seq           INTEGER PRIMARY KEY AUTOINCREMENT,  -- append order (identity), not rowid or ts
+  id            TEXT NOT NULL UNIQUE,
   ts            TEXT NOT NULL,          -- ISO 8601 UTC
-  task_id       TEXT NOT NULL,
+  task_id       TEXT,                   -- NULL only for ADAPTER_ACKNOWLEDGED / ADAPTER_DISABLED
   contract_id   TEXT,
   actor_kind    TEXT NOT NULL CHECK (actor_kind IN ('agent','hil','system')),
   actor_id      TEXT NOT NULL,
@@ -611,14 +676,27 @@ CREATE TABLE event (
   quota_units   REAL,
   cost_usd      REAL,
   cost_basis    TEXT CHECK (cost_basis IN ('exact','estimated','shadow')),
-  price_ver     TEXT
+  price_ver     TEXT,
+  estimated_usd REAL                        -- gateway estimate before the call (ADR 0010)
 );
-CREATE INDEX event_task_ts ON event (task_id, ts);
-CREATE INDEX event_type_ts ON event (type, ts);
--- No UPDATE or DELETE: the application role has INSERT and SELECT only.
+CREATE INDEX event_task_seq ON event (task_id, seq);
+CREATE INDEX event_type_seq ON event (type, seq);
+CREATE TABLE artifact (
+  id                TEXT NOT NULL,
+  version           INTEGER NOT NULL CHECK (version >= 1),
+  type              TEXT NOT NULL,
+  data_class        TEXT NOT NULL,
+  untrusted         INTEGER NOT NULL CHECK (untrusted IN (0, 1)),
+  sha256            TEXT NOT NULL,
+  uri               TEXT NOT NULL,
+  produced_by_event TEXT NOT NULL REFERENCES event (id),
+  PRIMARY KEY (id, version)
+);
+-- No UPDATE or DELETE on either table: enforced by triggers, and on server databases also by an
+-- application role with INSERT and SELECT only.
 ```
 
-Task and Contract states are views over `event`; artifacts have their own table `artifact(id, version, type, data_class, sha256, uri, produced_by_event)`.
+Task and Contract states are views over `event` in `seq` order. An artifact row is written atomically with the event that produced it and never without one; `untrusted` marks content from the web, e-mail or client documents (section 9). A backend also enforces one `HIL_RESPONSE` per `HIL_REQUEST` when two writers race (section 9).
 
 ## 8. Orchestrator and task lifecycle
 
@@ -660,15 +738,17 @@ Abstention is not scored as failure in calibration; its justification is. An abs
 | State | Entered on | Leaves to |
 | --- | --- | --- |
 | `SUBMITTED` | `TASK_SUBMITTED` | Gate step A |
-| `CLARIFYING` | Rule A1 | `HIL_RESPONSE`, or after 48 h `CLOSED_ABSTAINED` |
-| `GATED` | `TOPOLOGY_DECIDED` | T0 → closed; T1, T2 → `RUNNING`; T3 to T5 → `PLANNED` |
+| `CLARIFYING` | Rule A1 | `SUBMITTED` once every clarifying question (each `HIL_REQUEST` raised while `CLARIFYING`) has a `HIL_RESPONSE`; the Gate then decides again (ADR 0009). While any is open the task stays `CLARIFYING`; after 48 h without an answer `CLOSED_ABSTAINED` |
+| `GATED` | `TOPOLOGY_DECIDED` | T0 → closed (e.g. no permitted route for the data class, not worth its cost, still unclear after 3 clarifications); T1, T2 → `RUNNING`; T3 to T5 → `PLANNED`. A budget question answered with `narrow_scope` returns the task to the Gate, which decides again on the narrowed scope while the task stays `GATED`; after 3 budget questions it closes as `CLOSED_ABSTAINED` (ADR 0009 amendment) |
 | `PLANNED` | Contract DAG accepted by `ooat-core` (and HIL if the profile requires) | `RUNNING` |
-| `RUNNING` | `CONTRACT_ISSUED`, `CLAIM`, `RESULT`, `ABSTAIN`, `OBJECTION` | `REVIEW` when the DAG completes |
+| `RUNNING` | `CONTRACT_ISSUED`, `CLAIM`, `RESULT`, `ABSTAIN`, `OBJECTION` | `REVIEW` when the DAG completes. A provider failure (quota, outage, timeout, API error) never finishes the task: it pauses in `RUNNING` without using up an attempt and resumes from the ledger (ADR 0014). A used-up contract budget → `HIL_WAIT` with the budget question (section 9) |
 | `REVIEW` | Deterministic gates, critic, synthesis | `HIL_WAIT` or closed |
-| `HIL_WAIT` | `HIL_REQUEST` | `HIL_RESPONSE`; after the deadline the declared default applies |
+| `HIL_WAIT` | A blocking `HIL_REQUEST` | `HIL_RESPONSE`; after the deadline the declared default applies, recorded as a `HIL_RESPONSE` with `default_applied: true` (section 9) |
 | `CLOSED_DONE` / `CLOSED_PARTIAL` / `CLOSED_ABSTAINED` / `CANCELLED` | `TASK_CLOSED` | Rating request, then calibration |
 
 `CLOSED_ABSTAINED` is a valid end state: it records what was achieved, what is missing, why, and what it cost. The dashboard shows it as its own category, not as an error.
+
+A paused task needs no operator: the runtime resumes it on its next run (in F1 `ooat task run <id>` or `--all`). Decisions in the lifecycle (Gate step A, acceptance pre-checks) act on their own only for R0 and R1 tasks and only above their threshold; otherwise they fall to the critic or the operator (section 6, ADR 0011). Data the operator has taken responsibility for opens a route for `client_confidential` and `personal` tasks (section 9, ADR 0012); when no connector offers a permitted route, such a task closes at the Gate as T0.
 
 ## 9. HIL, gates, governance and security
 
@@ -683,7 +763,7 @@ HIL gates follow the risk class of the action, not the task type, and every HIL 
 | R2 | Client-facing output, publication, catalog or routing change | Deterministic + critic + HIL approval |
 | R3 | Irreversible: production data, payments, sending e-mail, deletion, external write APIs | HIL approval of every action by a named approver; cannot be delegated |
 
-Any `impl: llm` capability able to perform an R3 action requires a one-time named approval when it moves to `active`, separate from ordinary catalog review. This implements the AI4DataLeaders essay's recommendation directly.
+Any `impl: llm` capability able to perform an R3 action requires a one-time named approval when it moves to `active`, separate from ordinary catalog review. This implements the AI4DataLeaders essay's recommendation directly. No model, including the decision tier, ever decides an R2 or R3 action on its own (ADR 0011, section 6).
 
 ### HIL request format
 
@@ -704,7 +784,26 @@ Any `impl: llm` capability able to perform an R3 action requires a one-time name
 }
 ```
 
-Rules: max. 3 options, always a recommendation, always a default on silence (for R3 the default is “do not act”), a cost per option. Non-blocking questions are collected into a digest twice a day; blocking ones go out immediately through the configured notifier with one-tap answers.
+Rules: 2 to 3 options, always a recommendation, always a default on silence, a cost per option. An option may carry `acts`; an R3 request must offer an option with `acts: false` and its default on silence must be that option, so silence never acts (ADR 0003). Non-blocking questions are collected into a digest twice a day; blocking ones go out immediately through the configured notifier with one-tap answers.
+
+The ledger enforces the cross-field rules a schema cannot express, and refuses an event that breaks them:
+
+1. `recommended` and `default_on_silence` each name one of the request's options.
+2. Exactly one `HIL_RESPONSE` per `HIL_REQUEST`, also when two writers race; a response must reference an existing request of the same task.
+3. A response's `choice` is one of the request's options; an R3 request needs an explicit choice, not only text.
+4. A response with `default_applied: true` (written by the runtime when the deadline passes without an answer) must choose the request's `default_on_silence`.
+5. That response is written under the reserved actor id `default-on-silence` (`actor.kind = hil`); no operator may use the name, so a default is never mistaken for a human answer.
+
+### Budget questions (ADR 0014, ADR 0009 amendment)
+
+Budget is never raised automatically; it is a blocking HIL question with the standard format.
+
+| When | Options | Recommended | Default on silence |
+| --- | --- | --- | --- |
+| Before start: the Gate's estimate exceeds the task budget (section 4) | raise the budget (`raise_budget`), narrow the scope with text (`narrow_scope`), do not run (`do_not_run`, `acts: false`) | `raise_budget` | `do_not_run` |
+| While running: the contract budget is used up; failed provider calls are charged their estimate | raise the budget (`raise_budget`; `CONTRACT_ISSUED` is reissued with the raised `max_usd`, which may exceed the role's cap), stop (`do_not_run`, `acts: false`) | `raise_budget` | `do_not_run` |
+
+Stopping keeps a usable document as `PARTIAL`. Narrowing the scope halves the output prior of the Gate's next estimate, so narrowing can bring a task under its budget; the Gate asks at most 3 budget questions per task.
 
 ### Defined HIL entry points
 
@@ -713,22 +812,24 @@ Besides risk-based gates, fixed checkpoints can be switched on per task: before 
 ### Security
 
 1. **Least privilege:** permissions live in the role card and are enforced by the runtime, not the prompt. Default: no network, writes only to the contract workspace.
-2. **Untrusted content:** artifacts from the web, e-mail and client documents carry an `untrusted` flag. A contract that reads an `untrusted` artifact may not hold R2 or R3 permissions; a separate contract acts on a structured extract.
+2. **Untrusted content:** artifacts from the web, e-mail and client documents carry an `untrusted` flag, recorded in the ledger's `artifact` table (section 7, ADR 0008). A contract that reads an `untrusted` artifact may not hold R2 or R3 permissions; a separate contract acts on a structured extract. A “met” acceptance answer on a task with `untrusted` input is also confirmed by the critic (ADR 0011).
 3. **Sandbox:** `code_exec` capabilities run in an isolated container. Static checks and deny-lists are not a containment boundary; NOOA's documentation says so explicitly. Without a container runtime these capabilities are disabled.
 4. **Secrets:** API keys and subscription sessions live only in the gateway and tools; agents receive tool handles, never credentials.
 5. **Audit:** the ledger is append-only; backup and retention are configuration (reference: 24 months).
 6. **Supply chain:** adapters and catalog packs are versioned and signed; third-party catalog packs start in `shadow`.
+7. **Hooks of subscription CLIs (ADR 0015):** a vendor CLI may run hook commands around every agent step, outside OOAT's isolation. A connector that knows its CLI's hook files exposes them (path, sha256 of the bytes, text). The operator reviews them with `ooat connectors approve-hooks <connector> --operator <name>`, confirms by typing the connector id, and a new `ADAPTER_ACKNOWLEDGED` repeats the one in force with `approved_hooks` (path and sha256 per file); classes, automation and responsibility stay as given, and the approval replaces earlier ones. The gateway passes the approved fingerprints on every call; a hook file that is new, changed in any byte or unreadable stops the call with a message naming the command to run. The CLI still gets only the allow-listed environment, and approving a hook never widens what the agent itself may do.
 
 ### Data protection without local models
 
 - Artifacts carry a class: `public`, `internal`, `client_confidential`, `personal`, `special_category`.
-- Routing enforces classes against each adapter's `allowed_data_classes`; the check is in the gateway, not in prompts.
-- `personal` and `client_confidential` go only to adapters whose data policy excludes training on inputs.
+- Routing enforces classes against each adapter's `allowed_data_classes`, which the operator's recorded responsibility may extend for `client_confidential` and `personal` (ADR 0012, below); the check is in the gateway, not in prompts.
+- Before routing, a local deterministic pre-scan looks for personal data (e-mail, phone, bank and card numbers, birth numbers) and raises the class to `personal` on a hit. Detection, by the pre-scan or the decision tier, only ever raises the declared class, never lowers it. Personal data the pre-scan cannot recognise is sent under the class the operator declared; this residual risk is stated to the operator (ADR 0011).
+- `personal` and `client_confidential` go only to adapters whose data policy excludes training on inputs. The operator's statement that training is off satisfies this for those two classes, unless the manifest says the provider trains on inputs (ADR 0012).
 - `special_category` (health, genetic, biometric data) may leave the machine only after redaction by a deterministic or CPU-based detector (e.g. Microsoft Presidio) with a verification test that no detected entity remains. Where redaction cannot be verified, the result is `ABSTAIN_NOT_PERMITTED`.
 - Some data cannot be anonymised by redaction at all: raw genetic data is identifying by nature. Such inputs are processed only by deterministic capabilities on the operator's machine, or by a `local` tier if one exists; only aggregated or derived non-identifying outputs may reach external models.
 - The capability and role inventory doubles as an inventory of AI systems for EU AI Act purposes.
 
-Vendor-specific rules in the reference routing policy: Meta's contributor tier trains on inputs, so it is restricted to `public`. TypeSafe processes in the US, so personal data of EEA users sent to Jev is a transfer outside the EEA and needs the operator's legal basis; the adapter declares `region: us` and the gateway blocks `personal` and `special_category` unless the operator enables it.
+Vendor-specific rules in the reference routing policy: Meta's contributor tier trains on inputs, so it is restricted to `public`. TypeSafe processes in the US, so personal data of EEA users sent to Jev is a transfer outside the EEA and needs the operator's legal basis; the adapter declares `region: us` and the gateway blocks `personal` and `special_category` unless the operator enables it: `personal` through the operator's recorded responsibility (ADR 0012), `special_category` only after verified redaction.
 
 ### Operator responsibility and connection consequences
 
@@ -755,11 +856,13 @@ Every adapter manifest carries a `jurisdiction` block. Unknown values stay `null
 
 Rules:
 
-1. An adapter starts disabled. Enabling it shows a **connection consequences card** generated from the `jurisdiction` block and the data classes the operator wants to allow. Confirming writes an `ADAPTER_ACKNOWLEDGED` event (operator, time, manifest version, allowed data classes).
-2. A change in the manifest's jurisdiction fields, or a `verified_on` older than 12 months, disables the adapter for `personal` and higher classes until re-acknowledged.
+1. An adapter starts disabled. Enabling it shows a **connection consequences card** generated from the `jurisdiction` block and the data classes the operator wants to allow. Confirming writes an `ADAPTER_ACKNOWLEDGED` event (operator, time, manifest version, allowed data classes, `automation_confirmed`, and `jurisdiction_sha256`, the fingerprint of the acknowledged `jurisdiction` block; ADR 0010). The connector's state is the latest acknowledgement or `ADAPTER_DISABLED` in the ledger, never the configuration (section 6).
+2. A changed `jurisdiction` block (fingerprint mismatch), or a `verified_on` that is `null` or older than 12 months, refuses `personal` and `special_category` until re-acknowledged; other classes stay available (ADR 0010). For `client_confidential` and `personal`, the later of the manifest's `verified_on` and the operator's `confirmed_on` counts (ADR 0012).
 3. Data jurisdiction follows the host, model risk follows the model. An open-weight model from any country run by the operator or an EU host has the host's jurisdiction; its own evals still apply.
 4. The starter catalog ships reference manifests with sources and a verification date. They are informative defaults, not legal opinions, and the card says so.
-5. The reference routing policy, which operators can change: `public` and `internal` to any adapter that passed evals; `client_confidential` and `personal` only to adapters with `training_on_inputs: false`, a contract and a known region; `special_category` only after verified redaction, or not at all.
+5. The reference routing policy, which operators can change: `public` and `internal` to any adapter that passed evals; `client_confidential` and `personal` only to adapters with `training_on_inputs: false`, a contract and a known region, where the operator's recorded responsibility meets the contract requirement and may supply the region and “training off” (ADR 0012); `special_category` only after verified redaction, or not at all.
+6. **Operator responsibility (ADR 0012).** When enabling a connector for `client_confidential` or `personal`, the named operator takes responsibility for that data: legal basis, processing agreement with the provider, where it is processed. It is recorded in `ADAPTER_ACKNOWLEDGED.body.responsibility` with the date (`confirmed_on`) and holds for 12 months; the operator's check of the card counts as the verification date. With responsibility and “training off”, a connector may carry those two classes beyond its manifest's `allowed_data_classes` (for example a subscription CLI), unless the manifest says the provider trains on inputs. `special_category` is never covered. OOAT records these statements; it does not verify them, and the operator answers for them.
+7. **Operator policy (ADR 0012).** `[policy]` in `ooat.toml` can block countries (vendor or model origin) for every class and limit `personal` and `special_category` data to listed processing regions. The gateway enforces it; the card and the connector listing show it. A country block cannot exclude a connector whose country is unknown (the card notes it), while an unknown region fails the region limit: a country block names what to avoid, a region list names what is allowed.
 
 The [OOAT Manifesto](https://claude.ai/code/artifact/a3726dc6-25c8-403c-92d6-5deb7bf26cf5) explains these consequences for non-technical readers, including the current state of EU-US transfers and hosted Chinese services.
 
@@ -807,7 +910,7 @@ Nothing goes live without measurement against the single-agent baseline. Evaluat
 
 | Stage | Tasks | Purpose | Who rates |
 | --- | --- | --- | --- |
-| F1 seed | 5 hand-picked real tasks with V and acceptance defined in advance | Pipeline works end to end; rough T2 baseline; first cost cards | Operator |
+| F1 seed | 5 hand-picked real tasks with V and acceptance defined in advance | Pipeline works end to end; rough T2 baseline; first cost cards; first decision ratings (ADR 0011) | Operator |
 | F1 to F2 organic | Every closed real task, rated in the rating queue (≈ 2 minutes: accept/reject, value class A/B/C) | Grow the set without separate test work | Operator |
 | F2 exit | ≥ 20 rated tasks in total, ≥ 5 of them decomposable | Enough to judge the Gate, not enough for statistics per task class | Operator |
 | Community | Public synthetic task suite shipped in the repository | Comparable results across installations and providers | Maintainers, contributors |
@@ -825,6 +928,7 @@ Five tasks are enough to prove the machinery, not to prove the Gate. With 5 task
 - `p_accept` and `p_silent` per capability × task class: Beta distribution, prior from the card weighted as 5 observations, updated on every rating.
 - Cost: p50 and p90 over the last 50 runs, per adapter; history is split when the model behind a tier changes.
 - Subscription U\_eff (usable units per month) is learned per adapter from quota-limit events.
+- Decision thresholds θ (section 6) are recomputed after every `TASK_RATED`, from the operator's verdict (confirmed or corrected) on each decision record of the task, per decision point, engine and model version (ADR 0011). The first 5 rated tasks are the calibration set for the interim thresholds; this replaces v0.1's “θ = 1 until 20 rated cases”.
 - Self-reported `confidence` is scored with the Brier score against actual acceptance; roles with Brier > 0.25 receive a trust penalty in the Gate.
 - Silent errors are found retrospectively: any correction after closing is a `DEFECT_FOUND` event linked to artifact and contract.
 
@@ -851,7 +955,7 @@ The two exit gates are the only go/no-go points. If F2 fails, the framework stay
 
 - [ ] Public repository `ooat` with `spec/`, `catalog/`, `core/`, `sdk/`, `adapters/`, `dashboard/`, `evals/`; licence, CONTRIBUTING, code of conduct, decision records (ADR) folder.
 - [ ] OOA Spec v0.1: JSON Schemas for capability, family, role, provider adapter, contract, event, routing.
-- [ ] Taxonomy of 13 families and \~100 capability names with one-line summaries (no implementation).
+- [ ] Taxonomy of 13 domains, 5 role families (ADR 0004) and \~100 capability names with one-line summaries (no implementation).
 - [ ] 5 seed calibration tasks with V and acceptance, defined by the operator.
 
 ### F1 Skeleton and baseline (est. 2 to 3 weeks)
@@ -905,7 +1009,7 @@ The biggest risk is not technical: it is a catalog that looks complete but is ne
 | Superficial verification | Critic approves whatever compiles | Silent errors above 5 % | Deterministic checks before the critic, critic from another family and vendor, 10 % human check |
 | Error propagation | One agent's error reaches the synthesis | Defects traced to a single contract | Central validation in `ooat-core` (Google/MIT: 4.4× vs. 17.2× for independent agents) |
 | Lazy abstention | Agents learn that “I don't know” is safe | Abstention rate rises, justification falls | Penalty in p\_accept; evals where abstention is wrong |
-| Subscription terms | Automated use of a consumer plan may breach provider terms or get the account limited | Adapter with `automation_permitted` ≠ `operator_confirmed` in unattended use | Enforced in gateway; operator confirmation per plan; API fallback |
+| Subscription terms | Automated use of a consumer plan may breach provider terms or get the account limited | Adapter in unattended use without `automation_confirmed`, or with `automation_permitted: not_permitted` | Enforced in gateway; operator confirmation per plan in the acknowledgement (ADR 0010); API fallback |
 | Quota exhaustion | A flat-rate plan runs out mid-task | `QUOTA_WARNING`, stalled contracts | Shadow price above 80 % utilisation, API fallback, resume after reset |
 | Multi-vendor drift | Many adapters, frequent model changes, differing tool-use formats | Eval failures after vendor updates | Tiers instead of models, adapter conformance tests, evals on routing change |
 | Catalog decay | New models change tier economics every 3 to 6 months | Cost cards without observations > 60 days | Quarterly review; retirement of unused capabilities |
@@ -934,13 +1038,15 @@ Early-access vendors add one more risk: preview APIs change pricing, limits and 
 
 D11 (Q7, 2026-09-29): Jev enters OOAT as the engine of a new `decision` tier and implementation kind, not as a text worker. Muse Spark enters as a `workhorse` candidate through the Meta Model API. The Muse app is not an adapter: it is an autonomous actor in the user's own accounts, not a model endpoint.
 
+Later decisions are recorded as ADRs in `docs/adr/` (0002 to 0015); v0.2 folds their effect on this text into the sections above.
+
 ### Open questions
 
-1. **Q7 Access check:** does the operator have Jev early access, and does the Meta Model API accept an EU account today? Both decide whether the `decision` tier and the Muse Spark adapter exist in F1 or wait.
-2. **Q8 First adapters for F1:** proposal: Anthropic API (`workhorse`, `frontier`) + Jev (`decision`) + one subscription CLI the operator already pays for.
-3. **Q9 Licence:** Apache 2.0 (explicit patent grant, proposed) or MIT (shorter, no patent clause)?
-4. **Q10 Name:** is “OOAT” free to use as a project name and package name on PyPI and npm?
-5. **Q11 Maintainers:** who besides the operator reviews pull requests and catalog packs, and under which governance model?
+1. **Q7 Access check:** (answered: ADR 0005) does the operator have Jev early access, and does the Meta Model API accept an EU account today? Both decide whether the `decision` tier and the Muse Spark adapter exist in F1 or wait.
+2. **Q8 First adapters for F1:** (answered: ADR 0005) proposal: Anthropic API (`workhorse`, `frontier`) + Jev (`decision`) + one subscription CLI the operator already pays for.
+3. **Q9 Licence:** (answered: Apache 2.0, ADR 0002) Apache 2.0 (explicit patent grant, proposed) or MIT (shorter, no patent clause)?
+4. **Q10 Name:** (answered: ADR 0006) is “OOAT” free to use as a project name and package name on PyPI and npm?
+5. **Q11 Maintainers:** (answered: ADR 0007) who besides the operator reviews pull requests and catalog packs, and under which governance model?
 6. **Q12 Seed tasks:** which 5 real tasks, with at least 2 decomposable and at least 1 sequential, so that both sides of the Gate are exercised from day one?
 
 ## 14. Sources
