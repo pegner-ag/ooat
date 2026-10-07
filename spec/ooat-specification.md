@@ -234,7 +234,7 @@ Three cheap filters settle simple tasks without any calculation; the economic mo
 | A7 | Branches need the same large context or edit the same files | at most T3 | Cognition: conflicting implicit decisions |
 | A8 | Irreversible action, external communication, production data | at least T3 + HIL gate | AI4DataLeaders essay |
 | A9 | Many tools (> 16) that cannot be split across branches | prefer T2/T3 | Google/MIT: tool-coordination trade-off |
-| A10 | Input classified `special_category` and no permitted route (no local tier, redaction not verifiable) | T0: the task closes `CLOSED_ABSTAINED` with the missing route recorded (no `ABSTAIN` event: no contract exists yet) | data policy, section 9 |
+| A10 | Input classified `special_category` and no permitted route (no local tier, redaction not verifiable) | At the Gate: T0, the task closes `CLOSED_ABSTAINED` with the missing route recorded (no `ABSTAIN` event: no contract exists yet). A refusal by the gateway during a contract is still `ABSTAIN_NOT_PERMITTED` | data policy, section 9 |
 
 Where a `decision` tier is available, the judgement rules (A1, A4, A5, A7, A9, A10) run as one batch of typed questions against the task state: Noul for “is the acceptance criterion missing?”, Choice for the dependency structure, Score for decomposability. At Jev's list price a 5,000-token task state costs about USD 0.0002 for the whole step, so the Gate can run on every task, including those below `v_min`. Without a decision tier, step A uses the `economy` LLM tier through a structured-decision wrapper. Either way, an answer acts only when its confidence reaches the threshold θ of its decision point, engine and model version (section 6). A decision connector acts from the first task with the interim θ = 0.8; the text-model fallback keeps θ = 1 until it has been rated, so its answers go to the operator. Below θ the safer outcome applies, which for step A is a question to the operator (ADR 0011). Every answer is recorded in `TOPOLOGY_DECIDED` with engine, model version, answer, confidence and threshold.
 
@@ -631,7 +631,7 @@ The example shows the language rule: keys, event types and reason codes are Engl
 | `ADAPTER_ACKNOWLEDGED` | Human (named operator) | Connector enabled: manifest version, allowed data classes, `automation_confirmed`, `jurisdiction_sha256` (ADR 0010), optional `responsibility` (ADR 0012) and `approved_hooks` (ADR 0015); `task: null` | Gateway, dashboard |
 | `ADAPTER_DISABLED` | Human (named operator) | Connector disabled: adapter, operator, reason (ADR 0010); `task: null` | Gateway, dashboard |
 
-Only agents emit `CLAIM`, `RESULT` and `OBJECTION`; only humans emit `HIL_RESPONSE`, `TASK_RATED`, `DEFECT_FOUND`, `ADAPTER_ACKNOWLEDGED` and `ADAPTER_DISABLED`.
+Only agents emit `CLAIM`, `RESULT` and `OBJECTION`; only humans emit `HIL_RESPONSE`, `TASK_RATED`, `DEFECT_FOUND`, `ADAPTER_ACKNOWLEDGED` and `ADAPTER_DISABLED`. The one exception: a default applied on silence is a `HIL_RESPONSE` written by the runtime under the reserved actor id `default-on-silence` (section 9, HIL rule 5).
 
 ### Debate rules
 

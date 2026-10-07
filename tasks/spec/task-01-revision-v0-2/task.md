@@ -10,8 +10,8 @@ need to know the ADRs to read the spec correctly.
 ## Amendments to fold in
 - ADR 0003: full 26-char ULIDs; `FAILED` as `RESULT` with `error`; `task: null` only for `ADAPTER_ACKNOWLEDGED`;
   `acts: false` and R3 default on silence; objection severity and closed `reason_code` list; role id middle
-  segment = domain; schema `$id` base (now `https://moonindustries.eu/ooat/spec/v0.1/`, ADR 0013; the version
-  segment moves to `v0.2` with this revision only if the owner decides so).
+  segment = domain; schema `$id` base `https://moonindustries.eu/ooat/spec/v0.2/` (ADR 0013; the version segment moved with
+  this revision, owner 2026-10-07).
 - ADR 0004: domains vs. role families (§2, §5 tables).
 - ADR 0008: pluggable ledger backends (§3 components and profiles); §7 ledger schema with `seq`, nullable
   `task_id`, `(task_id, seq)` / `(type, seq)` indexes, `artifact` table with `untrusted`.
@@ -28,4 +28,5 @@ need to know the ADRs to read the spec correctly.
 ## Acceptance criteria
 - [x] Each amendment is reflected in the spec text with a reference to its ADR.
 - [x] Version line `draft v0.2`; `spec/README.md` and schemas unchanged unless an amendment requires it.
-- [x] Owner approval recorded in the PR (owner, 2026-10-07: "mergni #22 až #25"; the open points in the PR stay open).
+- [x] Owner approval recorded in the PR (owner, 2026-10-07: merge #22 to #25; open points decided: `$id` to v0.2, A10 text follows the code,
+      `default-on-silence` stated as HIL rule 5).
