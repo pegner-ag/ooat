@@ -445,6 +445,7 @@
         "operator": {"description": "Name of the acknowledging operator.", "$ref": "#/$defs/text"},
         "automation_confirmed": {"description": "The operator checked that the plan terms allow unattended use (ADR 0010).", "type": "boolean"},
         "jurisdiction_sha256": {"description": "Fingerprint of the acknowledged jurisdiction block (ADR 0010).", "type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "approved_hooks": {"description": "Hook files the operator reviewed and allows to run around the connector's CLI; any change to a file's content needs a new approval (ADR 0015).", "type": "array", "uniqueItems": true, "items": {"type": "object", "required": ["path", "sha256"], "additionalProperties": false, "properties": {"path": {"$ref": "#/$defs/text"}, "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}}}},
         "responsibility": {
           "description": "The operator takes responsibility for client or personal data on this connector: legal basis, processing agreement, where it is processed (ADR 0012). In force for 12 months from confirmed_on.",
           "type": "object",

@@ -262,6 +262,29 @@ def acknowledge(ledger: Ledger, connector: ModelConnector, operator: str, data_c
                                    body=body))
 
 
+def approve_hooks(ledger: Ledger, connector: ModelConnector, operator: str, hooks: Iterable[tuple[str, str]]) -> dict:
+    """Record that a named operator reviewed these hook files (path, sha256) and allows them to run (ADR 0015).
+
+    A new acknowledgement repeats the one in force and adds the approval, so classes, automation and any
+    responsibility stay exactly as the operator gave them; it replaces earlier hook approvals.
+    """
+    operator = checked_operator(operator)
+    current = acknowledgements(ledger.events(types=["ADAPTER_ACKNOWLEDGED", "ADAPTER_DISABLED"])).get(
+        connector.manifest["id"])
+    if current is None:
+        raise ValueError(f"{connector.manifest['id']} is not enabled; enable it first")
+    above = sorted(set(current["allowed_data_classes"]) & set(RESPONSIBLE_CLASSES))
+    if above:  # a hook runs outside the gateway, so nothing would check the class of what it receives
+        raise ValueError(f"hooks may receive prompts and replies, and this connector is enabled for {above}; enable "
+                         "it for public or internal data only before approving hooks")
+    approved = [{"path": path, "sha256": sha} for path, sha in hooks]
+    if not approved:
+        raise ValueError("there are no hooks to approve")
+    body = {**current, "operator": operator, "approved_hooks": approved}
+    return ledger.append(new_event("ADAPTER_ACKNOWLEDGED", task=None, actor={"kind": "hil", "id": operator},
+                                   body=body))
+
+
 def disable(ledger: Ledger, connector_id: str, operator: str, reason: str) -> dict:
     operator, reason = checked_operator(operator), reason.strip()
     if not reason:

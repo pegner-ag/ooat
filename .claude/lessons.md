@@ -24,3 +24,8 @@
 - Regexes that scan task text (pii.py) must stay linear: an unbounded `[...]+@` local part backtracked from every
   position, so a 100k-character attachment took minutes. Bound repeats and start tokens with a lookbehind; the
   test `test_a_long_attachment_is_scanned_in_linear_time` guards it.
+- Python run from a Bash heredoc: a `\n` inside a Python string in the heredoc ended up as a real newline in the
+  written source (unterminated f-strings). Build backslashes with `chr(92)` or write the script with the Write
+  tool first.
+- Antigravity CLI (`agy`) does not run Gemini CLI's hooks in `~/.gemini/settings.json` (process watch during a
+  call, 2026-10-06); it reads `~/.gemini/config/hooks.json`. The operator's Orca hooks live in the old file.

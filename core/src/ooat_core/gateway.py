@@ -85,6 +85,7 @@ class _Candidate:
     estimate: Estimate
     connector: ModelConnector
     price: Price
+    approved_hooks: tuple[str, ...] = ()  # from the acknowledgement in force (ADR 0015)
 
 
 def _utc(text: str) -> datetime:
@@ -258,6 +259,8 @@ class Gateway:
         connector_id = candidate.connector.manifest["id"]
         try:
             routed = dataclasses.replace(request, model=candidate.estimate.model)
+            if isinstance(routed, ModelRequest):
+                routed = dataclasses.replace(routed, approved_hooks=candidate.approved_hooks)
             response = getattr(candidate.connector, method)(routed, _OwnSecret(self._secrets, connector_id))
         except ConnectorError as error:
             if error.code == "QUOTA_EXHAUSTED":
@@ -290,7 +293,9 @@ class Gateway:
             if reason is None:
                 reason, candidate = self._priced(connector, request)
                 if candidate is not None:
-                    candidates.append(candidate)
+                    hooks = acknowledged[connector_id].get("approved_hooks", [])
+                    candidates.append(dataclasses.replace(candidate,
+                                                          approved_hooks=tuple(h["sha256"] for h in hooks)))
                     continue
             if connector_id in cooldowns and reason.startswith("quota"):
                 cooling.add(connector_id)
