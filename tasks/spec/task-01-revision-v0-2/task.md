@@ -28,4 +28,4 @@ need to know the ADRs to read the spec correctly.
 ## Acceptance criteria
 - [x] Each amendment is reflected in the spec text with a reference to its ADR.
 - [x] Version line `draft v0.2`; `spec/README.md` and schemas unchanged unless an amendment requires it.
-- [ ] Owner approval recorded in the PR.
+- [x] Owner approval recorded in the PR (owner, 2026-10-07: "mergni #22 až #25"; the open points in the PR stay open).
