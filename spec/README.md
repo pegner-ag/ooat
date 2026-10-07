@@ -15,7 +15,7 @@ Normative part of OOAT: JSON Schemas (draft 2020-12) plus the semantics in `ooat
 | `contract.schema.json` | Contract instance for one task (body of `CONTRACT_ISSUED`) | 2, 8 |
 | `event.schema.json` | Ledger event envelope and one body schema per event type | 7, 9 |
 
-`$id` values use the base `https://moonindustries.eu/ooat/spec/v0.1/` (ADR 0013); they are names resolved from this
+`$id` values use the base `https://moonindustries.eu/ooat/spec/v0.2/` (ADR 0013); they are names resolved from this
 folder, not URLs that must be served.
 
 ## Rules the schemas enforce beyond types

@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://moonindustries.eu/ooat/spec/v0.1/provider.schema.json",
+  "$id": "https://moonindustries.eu/ooat/spec/v0.2/provider.schema.json",
   "title": "OOAT provider adapter manifest",
   "description": "Declared access to one model source: access type, metering, plan, terms, data policy and jurisdiction (spec sections 6 and 9). Unknown values are null, never guessed.",
   "type": "object",

@@ -13,7 +13,9 @@ v0.2 folds the accepted decision records (`docs/adr/`) into the text, so the spe
 - ADR 0010: cost estimates before every call and start; connector state as ledger events (`ADAPTER_ACKNOWLEDGED`, `ADAPTER_DISABLED`); `automation_permitted` states the provider's terms, the operator confirms in the acknowledgement (§4, §6, §7, §9).
 - ADR 0011: decision tier from the first task; thresholds per decision point, engine and model version; R2 and R3 never decided by a model; `decision` gates; `project` on tasks (§2, §4, §6, §7, §8, §11).
 - ADR 0012: the operator takes responsibility for client and personal data; `[policy]` limits on countries and regions (§2, §6, §9).
-- ADR 0013: schema `$id` base `https://moonindustries.eu/ooat/spec/v0.1/` (§3).
+- ADR 0013: schema `$id` base `https://moonindustries.eu/ooat/spec/v0.2/`; the version segment follows the spec version (§3, owner 2026-10-07).
+- Rule A10 (§4): the text now matches the implemented outcome, `CLOSED_ABSTAINED` without an `ABSTAIN` event (owner 2026-10-07).
+- HIL rule 5 (§9): defaults applied on silence carry the reserved actor id `default-on-silence`.
 - ADR 0014: provider failures pause a running task; contract budget capped by the role and the budget HIL question; T2 critic exception (§2, §6, §7, §8, §9).
 - ADR 0015: the operator approves the hooks a connector's CLI runs (§7, §9).
 - Design 03f: Google's subscription CLI is Antigravity CLI (`agy`), not Gemini CLI (§6).
@@ -143,7 +145,7 @@ Orchestrator and workers only propose and return results. Only `ooat-core` write
 
 | Deliverable | Language | Purpose |
 | --- | --- | --- |
-| OOA Spec | JSON Schema 2020-12 + Markdown | Normative: capability, role, family, provider, contract, event, routing schemas and semantics. Schema `$id`s use the base `https://moonindustries.eu/ooat/spec/v0.1/`; they are names resolved locally from `spec/schemas/`, not URLs that must be served (ADR 0013) |
+| OOA Spec | JSON Schema 2020-12 + Markdown | Normative: capability, role, family, provider, contract, event, routing schemas and semantics. Schema `$id`s use the base `https://moonindustries.eu/ooat/spec/v0.2/`; they are names resolved locally from `spec/schemas/`, not URLs that must be served (ADR 0013) |
 | `ooat-core` | Python 3.12+ | Reference runtime: Topology Gate, dispatcher, contracts, budgets, state machine |
 | `ooat-sdk` (Python, TypeScript) | Python, TypeScript | Define capabilities and deterministic checks, submit tasks, read the ledger |
 | `ooat-cli` | Python | Run tasks, validate and resolve the catalog, run evals |
@@ -232,7 +234,7 @@ Three cheap filters settle simple tasks without any calculation; the economic mo
 | A7 | Branches need the same large context or edit the same files | at most T3 | Cognition: conflicting implicit decisions |
 | A8 | Irreversible action, external communication, production data | at least T3 + HIL gate | AI4DataLeaders essay |
 | A9 | Many tools (> 16) that cannot be split across branches | prefer T2/T3 | Google/MIT: tool-coordination trade-off |
-| A10 | Input classified `special_category` and no permitted route (no local tier, redaction not verifiable) | T0 with `ABSTAIN_NOT_PERMITTED` | data policy, section 9 |
+| A10 | Input classified `special_category` and no permitted route (no local tier, redaction not verifiable) | T0: the task closes `CLOSED_ABSTAINED` with the missing route recorded (no `ABSTAIN` event: no contract exists yet) | data policy, section 9 |
 
 Where a `decision` tier is available, the judgement rules (A1, A4, A5, A7, A9, A10) run as one batch of typed questions against the task state: Noul for “is the acceptance criterion missing?”, Choice for the dependency structure, Score for decomposability. At Jev's list price a 5,000-token task state costs about USD 0.0002 for the whole step, so the Gate can run on every task, including those below `v_min`. Without a decision tier, step A uses the `economy` LLM tier through a structured-decision wrapper. Either way, an answer acts only when its confidence reaches the threshold θ of its decision point, engine and model version (section 6). A decision connector acts from the first task with the interim θ = 0.8; the text-model fallback keeps θ = 1 until it has been rated, so its answers go to the operator. Below θ the safer outcome applies, which for step A is a question to the operator (ADR 0011). Every answer is recorded in `TOPOLOGY_DECIDED` with engine, model version, answer, confidence and threshold.
 
@@ -790,6 +792,7 @@ The ledger enforces the cross-field rules a schema cannot express, and refuses a
 2. Exactly one `HIL_RESPONSE` per `HIL_REQUEST`, also when two writers race; a response must reference an existing request of the same task.
 3. A response's `choice` is one of the request's options; an R3 request needs an explicit choice, not only text.
 4. A response with `default_applied: true` (written by the runtime when the deadline passes without an answer) must choose the request's `default_on_silence`.
+5. That response is written under the reserved actor id `default-on-silence` (`actor.kind = hil`); no operator may use the name, so a default is never mistaken for a human answer.
 
 ### Budget questions (ADR 0014, ADR 0009 amendment)
 

@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://moonindustries.eu/ooat/spec/v0.1/role.schema.json",
+  "$id": "https://moonindustries.eu/ooat/spec/v0.2/role.schema.json",
   "title": "OOAT role card",
   "description": "Named bundle of capabilities with permissions, budget and gates; extends a family and an A2A Agent Card (spec section 5). Narrowing against the family is checked by the catalog linter.",
   "type": "object",
