@@ -45,6 +45,10 @@ def _parser() -> argparse.ArgumentParser:
                                           "manifest does not know them)")
     enable.add_argument("--no-training", dest="no_training", choices=["yes", "no"],
                         help="training on your inputs is switched off for this account (asked when unknown)")
+    hooks = actions.add_parser("approve-hooks", help="review the hook files a connector's CLI would run and allow them")
+    hooks.add_argument("connector")
+    hooks.add_argument("--operator", required=True, help="your name; recorded as the approver")
+    hooks.add_argument("--confirm", help="the connector id, typed again to confirm (asked when omitted)")
     disable = actions.add_parser("disable", help="disable a connector")
     disable.add_argument("connector")
     disable.add_argument("--operator", required=True)
@@ -115,7 +119,7 @@ def _run(args, stdin, stdout, registry, today) -> int:
             return REFUSED
         stdout.write(connector_admin.consequences_card(connector.manifest, today, config) + "\n")
         return 0
-    if config is None and args.action in ("enable", "disable"):
+    if config is None and args.action in ("enable", "disable", "approve-hooks"):
         # Without a config the ledger would be wherever the shell happens to be; state changes need the real one.
         stdout.write(f"No {path} found: create one with a [ledger] url, or pass --config. Nothing was changed.\n")
         return REFUSED
@@ -132,6 +136,8 @@ def _run(args, stdin, stdout, registry, today) -> int:
             return _list(registry, ledger, today, config, stdout)
         if args.action == "disable":
             return _disable(args, ledger, url, stdout)
+        if args.action == "approve-hooks":
+            return _approve_hooks(args, registry, ledger, stdin, stdout)
         return _enable(args, registry, ledger, url, today, config, stdin, stdout)
     finally:
         ledger.close()
@@ -152,6 +158,38 @@ def _list(registry, ledger, today, config, stdout) -> int:
         if status.responsibility_until:
             stdout.write(f"  your responsibility for client or personal data holds until "
                          f"{status.responsibility_until}\n")
+    return 0
+
+
+def _approve_hooks(args, registry, ledger, stdin, stdout) -> int:
+    """Show every hook file the connector's CLI would run, then record the named operator's approval (ADR 0015)."""
+    connector = registry.get(args.connector)
+    if connector is None:
+        stdout.write(f"{args.connector} is not installed (see `ooat connectors list`).\n")
+        return REFUSED
+    if not hasattr(connector, "hooks"):
+        stdout.write(f"{args.connector} does not run hooks; nothing to approve.\n")
+        return REFUSED
+    files = connector.hooks()
+    if not files or not all(sha for _, sha, _ in files):
+        stdout.write("There are no hooks to approve" + (" (a hook file could not be read)" if files else "") + ".\n")
+        return REFUSED
+    for path, sha, text in files:
+        stdout.write(f"--- {path} (sha256 {sha[:12]}...)\n{text.rstrip()}\n")
+    stdout.write("These commands run around every call of the connector's CLI, outside OOAT's isolation, and may receive "
+                 "its prompts and replies. OOAT "
+                 "passes them no ORCA_* or other non-allow-listed variables. Any change to a file needs a new "
+                 "approval.\n")
+    confirm = args.confirm or _ask(f"Type {args.connector} to approve: ", stdin, stdout)
+    if confirm != args.connector:
+        stdout.write("Not confirmed; nothing was changed.\n")
+        return REFUSED
+    try:
+        connector_admin.approve_hooks(ledger, connector, args.operator, [(path, sha) for path, sha, _ in files])
+    except ValueError as error:
+        stdout.write(f"Refused: {error}; nothing was changed.\n")
+        return REFUSED
+    stdout.write(f"Hooks approved for {args.connector} by {args.operator.strip()}.\n")
     return 0
 
 

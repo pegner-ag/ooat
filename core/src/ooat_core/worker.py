@@ -15,7 +15,7 @@ from .gateway import Gateway
 
 ROLE_ID = "role.general.worker"
 WORKER_TIER = "workhorse"
-PREVIEW_CHARS = 6000  # design 04 §5: artifacts by reference, previews of at most 6,000 characters
+PREVIEW_CHARS = 100_000  # design 04 §5: attachments up to 100,000 characters go whole (owner, 2026-10-06)
 ABSTAIN_OUTCOMES = {"UNKNOWN": "ABSTAIN_UNKNOWN", "INCAPABLE": "ABSTAIN_INCAPABLE", "UNABLE": "ABSTAIN_UNABLE"}
 
 

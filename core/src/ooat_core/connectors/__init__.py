@@ -35,6 +35,7 @@ class ModelRequest:
     contract: str | None = None
     timeout_s: float = 600
     model: str | None = None  # set by the gateway to the routed model; connectors must use it
+    approved_hooks: tuple[str, ...] = ()  # set by the gateway: sha256 of hook files the operator approved (ADR 0015)
 
 
 @dataclass(frozen=True)

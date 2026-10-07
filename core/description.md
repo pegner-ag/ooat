@@ -57,7 +57,7 @@ its `ooat task` / `ooat hil` commands (one worker, acceptance checks, closing, r
 - `catalog.py` — `load_card()`, `routing_path()`: cards and `routing.json` read from the repository's
   `catalog/`
 - `worker.py` — `run_worker()`: the T2 worker; one workhorse call with the family rules, the role, the task,
-  untrusted attachment previews (6,000 characters) and the feedback of a failed attempt; returns a Markdown
+  untrusted attachments (whole up to 100,000 characters each, else a preview) and the feedback of a failed attempt; returns a Markdown
   document, an abstention in the fixed JSON form, or `invalid`
 - `acceptance.py` — `check_output()`: deterministic checks, one decision per criterion (θ for point
   `acceptance`), the critic for unsure answers and for "met" on untrusted input; GATE_PASSED / GATE_FAILED events

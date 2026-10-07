@@ -1,6 +1,7 @@
 """OOAT model connector for Google Antigravity CLI (`agy -p`, stream-json) on a Google login
 (prv.google.subscription_cli)."""
 
+import hashlib
 import json
 import os
 import re
@@ -132,17 +133,29 @@ def settings_risk(settings_path: Path) -> str | None:
     return None
 
 
-def hooks_risk(gemini_home: Path) -> str | None:
-    """Hooks run commands around every agent step; agy reads them from config/hooks.json. Gemini CLI's hooks in
+def hook_files(gemini_home: Path) -> list[tuple[str, str, str]]:
+    """(path, sha256 of the bytes, text) of each hook file agy reads: config/hooks.json. Gemini CLI's hooks in
     ~/.gemini/settings.json are not run by agy (measured 2026-10-06: no process started during a call)."""
     path = gemini_home / "config" / "hooks.json"
     try:
-        text = path.read_text(encoding="utf-8").strip() if path.is_file() else ""
-        hooks = json.loads(text) if text else None
-    except (OSError, ValueError):
-        return f"cannot read {path}; refusing to run without knowing its hooks"
-    if hooks:
-        return f"{path} defines hooks, which would run commands around agy's steps; remove them first"
+        data = path.read_bytes() if path.is_file() else b""
+    except OSError:
+        return [(str(path), "", "")]  # unreadable: an empty fingerprint is never approved, so the call refuses
+    try:
+        empty = not data.strip() or not json.loads(data)  # {}, [] and null define no hooks
+    except ValueError:
+        empty = False  # not JSON: agy may still read it, so it needs approval
+    if empty:
+        return []
+    return [(str(path), hashlib.sha256(data).hexdigest(), data.decode("utf-8", errors="replace"))]
+
+
+def hooks_risk(gemini_home: Path, approved: tuple[str, ...] = ()) -> str | None:
+    """Why hooks would run commands around agy's steps without the operator's approval, or None (ADR 0015)."""
+    for path, sha, _ in hook_files(gemini_home):
+        if sha not in approved or not sha:
+            return (f"{path} defines hooks the operator has not approved, or they changed since; review them with "
+                    "`ooat connectors approve-hooks prv.google.subscription_cli`")
     return None
 
 
@@ -176,10 +189,15 @@ class AntigravityConnector:
         path = self._find()
         if path is None:
             return Detection(False, "agy is not installed; install Antigravity CLI and log in once with agy")
-        reason = settings_risk(self._settings) or hooks_risk(self._gemini)  # offline; listings run per call
+        reason = settings_risk(self._settings)  # offline; listings and hook approvals are checked per call
         if reason is not None:
             return Detection(False, reason)
-        return Detection(True, f"agy found at {path}; uses its existing Google login")
+        hooks = "; hooks run only once approved (ooat connectors approve-hooks)" if self.hooks() else ""
+        return Detection(True, f"agy found at {path}; uses its existing Google login{hooks}")
+
+    def hooks(self) -> list[tuple[str, str, str]]:
+        """Hook files the operator must approve before calls run (path, sha256, text)."""
+        return hook_files(self._gemini)
 
     def _find(self) -> str | None:
         if self._executable is not None:
@@ -198,7 +216,7 @@ class AntigravityConnector:
         if path is None:
             raise ConnectorError("UNAVAILABLE", "agy is not installed")
         # checked on every call: the setup can change at any time
-        reason = hooks_risk(self._gemini) or exposed_tools(path, self._settings)
+        reason = hooks_risk(self._gemini, request.approved_hooks) or exposed_tools(path, self._settings)
         if reason is not None:
             raise ConnectorError("UNAVAILABLE", reason)
         content = f"{request.system}\n\n{request.prompt}" if request.system else request.prompt

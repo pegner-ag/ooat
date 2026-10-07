@@ -95,3 +95,9 @@ def test_a_malformed_abstention_from_the_model_comes_back_as_invalid_with_its_co
     output = run_worker(gateway, task=new_id("tsk"), contract=None, data_class="internal", state="Goal: x")
     assert output.text is None and output.abstention is None and "confidence" in output.invalid
     assert output.cost["usd"] > 0
+
+
+def test_a_source_file_of_tens_of_thousands_of_characters_reaches_the_worker_whole():
+    source = "def f():\n    return 1\n" * 4000  # about 88,000 characters, like a large module
+    prompt = worker_prompt("Goal: Napiš testy.", [Attachment("art_01J9ZQ6X9EK3M5N7P9Q1R3S5T7@v1", "big.py", source)])
+    assert source in prompt and "(Preview:" not in prompt

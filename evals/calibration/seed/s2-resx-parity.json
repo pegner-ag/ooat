@@ -1,0 +1,20 @@
+{
+  "id": "seed.s2.resx-parity",
+  "title": "Parity checker for localised .resx files",
+  "goal": "Write a repeatable checker in Python that compares every language variant of a set of .resx files with its neutral file and writes a report. The attached files are samples of the format (40 entries each); the real set has 63 files. Deliver the checker and its tests in one Markdown document. Never change a .resx file: the texts are regulated product content.",
+  "acceptance": [
+    "The checker reports missing keys, extra keys, empty values, mismatched placeholders such as {0}, invalid XML and leftover markup or source-language text, in JSON and in Markdown.",
+    "The checker exits with a non-zero code when any key is missing.",
+    "The document contains pytest tests on synthetic .resx files written by the tests themselves.",
+    "The checker only reads .resx files and never writes to them.",
+    "The document proposes no translations and no wording for product claims."
+  ],
+  "value_class": "B",
+  "data_class": "internal",
+  "risk_class": "R0",
+  "structure": "decomposable",
+  "language": "en",
+  "expected_topology": "T2",
+  "attachments": ["s2/Strings.sample.resx", "s2/Strings.sv-SE.sample.resx"],
+  "key": "Run on the full set, the report lists one key missing in five Nordic locale files (725 against 726 keys)."
+}

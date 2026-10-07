@@ -1,0 +1,20 @@
+{
+  "id": "seed.s4.display-planner-tests",
+  "title": "Tests for the pure logic of an e-ink display planner",
+  "goal": "Write a pytest suite for the pure logic in the four attached Python modules of an e-ink display: the refresh planner, Czech public holidays, astronomy helpers and the palette conversion. Deliver the tests in one Markdown document. The tests must not import any module that reads sensors or calls an external API.",
+  "acceptance": [
+    "The tests run offline and import only the four attached modules and the standard library or Pillow.",
+    "easter_sunday is checked for every year from 1990 to 2100 against an independent algorithm or table inside the test.",
+    "public_holiday is checked for all Czech public holidays in three chosen years, including Good Friday from 2016.",
+    "The planner tests cover the switch to summer and to winter time, sleep_minutes and next_refresh_after.",
+    "to_2bpp is checked for an output length of 800 x 480 / 4 bytes and for the bit order on a small known image."
+  ],
+  "value_class": "C",
+  "data_class": "internal",
+  "risk_class": "R0",
+  "structure": "decomposable",
+  "language": "en",
+  "expected_topology": "T2",
+  "attachments": ["s4/planner.py", "s4/calendar_holidays.py", "s4/astro.py", "s4/palette.py"],
+  "key": "Partial: Easter dates and Czech holidays are public facts; the operator runs the suite while rating."
+}

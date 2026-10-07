@@ -46,7 +46,9 @@ Chosen by decision (`docs/adr/`), not yet used in code:
 and personal-data regions; secrets only as environment variable names). Connector enablement is ledger state
 (`ADAPTER_ACKNOWLEDGED`, `ADAPTER_DISABLED`, ADR 0010), written by `ooat connectors enable | disable` after the
 operator has read the connection consequences card; for client or personal data the operator also takes
-responsibility there (legal basis, processing agreement, region; ADR 0012), renewed every 12 months.
+responsibility there (legal basis, processing agreement, region; ADR 0012), renewed every 12 months. Hook files a
+connector's CLI would run are approved with `ooat connectors approve-hooks` (fingerprints on the acknowledgement,
+ADR 0015); a changed file stops the connector until it is approved again.
 Prices and the data-class policy: `catalog/routing.json`. Dev dependencies: `requirements-dev.txt`, then
 `pip install -e core -e adapters/claude-code -e adapters/codex -e adapters/anthropic-api -e adapters/typesafe-jev -e adapters/antigravity-cli`;
 run `python -m pytest`

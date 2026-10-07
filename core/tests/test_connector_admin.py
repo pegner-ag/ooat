@@ -195,3 +195,28 @@ def test_only_a_literal_true_states_that_training_is_off():
     with pytest.raises(ValueError, match="training on your inputs is switched off"):
         checked_classes(subscription().manifest, ["personal"], {"no_training": "yes"})
     assert checked_classes(subscription().manifest, ["personal"], {"no_training": True}) == ["personal"]
+
+
+def test_approving_hooks_records_them_on_a_new_acknowledgement_with_the_same_terms(ledger):
+    from ooat_core.connector_admin import acknowledgements, approve_hooks
+    connector = FakeConnector()
+    acknowledge(ledger, connector, "Martin", ["public"], True)
+    approve_hooks(ledger, connector, "Martin", [("C:/u/.gemini/config/hooks.json", "b" * 64)])
+    body = acknowledgements(ledger.events())[connector.manifest["id"]]
+    assert body["approved_hooks"] == [{"path": "C:/u/.gemini/config/hooks.json", "sha256": "b" * 64}]
+    assert body["allowed_data_classes"] == ["public"] and body["automation_confirmed"] is True
+    assert body["operator"] == "Martin"
+
+
+def test_hooks_of_a_connector_that_is_not_enabled_cannot_be_approved(ledger):
+    from ooat_core.connector_admin import approve_hooks
+    with pytest.raises(ValueError, match="enable it first"):
+        approve_hooks(ledger, FakeConnector(), "Martin", [("hooks.json", "c" * 64)])
+
+
+def test_hooks_cannot_be_approved_while_client_or_personal_data_is_allowed(ledger):
+    from ooat_core.connector_admin import approve_hooks
+    connector = FakeConnector()
+    acknowledge(ledger, connector, "Martin", ["internal", "personal"], True, {}, TODAY)
+    with pytest.raises(ValueError, match="hooks may receive"):
+        approve_hooks(ledger, connector, "Martin", [("hooks.json", "e" * 64)])
