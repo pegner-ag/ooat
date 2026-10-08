@@ -13,13 +13,14 @@ def record(question, confidence, engine=JEV, model=VERSION):
             "threshold": 0.8}
 
 
-def gate_event(*records):
-    return {"id": new_id("evt"), "type": "TOPOLOGY_DECIDED", "body": {"decisions": list(records)}}
+def gate_event(*records, task=None):
+    return {"id": new_id("evt"), "type": "TOPOLOGY_DECIDED", "task": task or new_id("tsk"),
+            "body": {"decisions": list(records)}}
 
 
-def acceptance_event(*records):
+def acceptance_event(*records, task=None):
     criteria = [{"id": r["question"].replace(".", "_"), "passed": True, "decision": r} for r in records]
-    return {"id": new_id("evt"), "type": "GATE_PASSED", "body": {"criteria": criteria}}
+    return {"id": new_id("evt"), "type": "GATE_PASSED", "task": task or new_id("tsk"), "body": {"criteria": criteria}}
 
 
 def rating(event, question, verdict):
@@ -105,3 +106,16 @@ def test_computed_threshold_needs_support_and_a_low_error_rate(outcomes, expecte
 def test_the_default_risk_class_is_the_stricter_r1():
     events = history("a1.1", [(0.9, True)] * 19 + [(0.9, False)])  # 5 % errors: enough for R0 only
     assert threshold(events, "a1", JEV, VERSION) == 1.0
+
+
+def test_ratings_from_a_single_task_never_leave_the_interim_threshold():
+    task = new_id("tsk")
+    events = []
+    for _ in range(6):
+        decided = gate_event(record("a1.1", 0.95, "prv.anthropic.api", "claude-haiku"), task=task)
+        events += [decided, rating(decided, "a1.1", "confirmed")]
+    assert threshold(events, "a1", "prv.anthropic.api", "claude-haiku", decision_engine=False) == 1.0
+    assert threshold(events, "a1", "prv.anthropic.api", "claude-haiku", decision_engine=True) == 0.8
+    other = gate_event(record("a1.1", 0.95, "prv.anthropic.api", "claude-haiku"))  # a second task
+    events += [other, rating(other, "a1.1", "confirmed")]
+    assert threshold(events, "a1", "prv.anthropic.api", "claude-haiku", decision_engine=False) == 0.8

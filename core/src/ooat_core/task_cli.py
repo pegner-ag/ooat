@@ -32,7 +32,10 @@ def add_commands(commands) -> None:
     submit.add_argument("--goal", required=True)
     submit.add_argument("--project", help="your project, e.g. sme-ai")
     submit.add_argument("--expected-output", dest="expected_output")
-    submit.add_argument("--acceptance", action="append", default=[], help="an acceptance criterion (repeatable)")
+    submit.add_argument("--acceptance", action="append", default=[],
+                        help="an acceptance criterion (repeatable): one thing per criterion, checkable from the "
+                             "delivered document; a criterion that bundles several checks lowers the confidence "
+                             "of the automatic check")
     value = submit.add_mutually_exclusive_group()
     value.add_argument("--value", choices=["A", "B", "C"], help="value class (USD amounts in ooat.toml [gate])")
     value.add_argument("--value-usd", dest="value_usd", type=float)
@@ -140,7 +143,8 @@ def _submit(args, ledger, runtime, stdin, stdout, ask) -> int:
     value = {"class": args.value} if args.value else ({"usd": args.value_usd} if args.value_usd is not None else None)
     task = runtime.submit(operator=args.operator, goal=args.goal, acceptance=args.acceptance, project=args.project,
                           expected_output=args.expected_output, value=value, budget_usd=args.budget,
-                          data_class=args.data_class, risk_class=args.risk_class, files=files)
+                          data_class=args.data_class, risk_class=args.risk_class, files=files,
+                          file_names=[Path(name).name for name in args.file])
     stdout.write(f"Submitted {task}.\n")
     if args.no_run:
         return 0
@@ -163,6 +167,15 @@ def _run_task(args, ledger, runtime, stdin, stdout, ask) -> int:
     return 0
 
 
+def _label(event: dict) -> str:
+    """The event type, except a decision gate whose unmet criteria all went to the critic: nothing failed there."""
+    criteria = event["body"].get("criteria", []) if event["type"] == "GATE_FAILED" else []
+    unmet = [c for c in criteria if not c["passed"]]
+    if unmet and all(c.get("note") == "sent to the critic" for c in unmet):
+        return "HANDED_TO_CRITIC"
+    return event["type"]
+
+
 def _show(args, ledger, runtime, stdin, stdout, ask) -> int:
     events = ledger.events(task=args.task)
     if not events:
@@ -171,7 +184,7 @@ def _show(args, ledger, runtime, stdin, stdout, ask) -> int:
     for event in events:
         usd = event.get("cost", {}).get("usd")
         cost = f"  {usd:.4f} USD" if usd is not None else ""
-        stdout.write(f"  {event['ts'][:19]}  {event['type']:<17} {event['actor']['id']}{cost}\n")
+        stdout.write(f"  {event['ts'][:19]}  {_label(event):<17} {event['actor']['id']}{cost}\n")
     decided = [e for e in events if e["type"] == "TOPOLOGY_DECIDED"]
     estimates = [c["model_usd"] for c in decided[-1]["body"]["candidates"] if "model_usd" in c] if decided else []
     closed = [e for e in events if e["type"] == "TASK_CLOSED"]

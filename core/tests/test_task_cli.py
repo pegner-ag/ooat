@@ -200,3 +200,12 @@ def test_confirm_all_leaves_decisions_the_critic_contradicted_for_the_operator(e
                        "--confirm-all")
     assert code == 0 and "5 decisions recorded" in rated and "Left out: 2 decisions the critic contradicted" in rated
     assert all(d["question"] != "c1" for d in events(env, task, "TASK_RATED")[0]["body"]["decisions"])
+
+
+def test_show_names_a_hand_over_to_the_critic_instead_of_a_failed_gate(env):
+    attachment = env["dir"] / "smlouva.txt"
+    attachment.write_text("Smlouva o dilu c. 12/2026.", encoding="utf-8")  # untrusted: every "met" goes to the critic
+    _, out = ooat(env, "task", "submit", "--operator", "Martin", "--goal", "Shrň přiloženou smlouvu.",
+                  "--acceptance", "Shrnutí má nejvýše 300 slov.", "--file", str(attachment))
+    code, shown = ooat(env, "task", "show", task_id(out))
+    assert code == 0 and "HANDED_TO_CRITIC" in shown and "GATE_FAILED" not in shown

@@ -52,3 +52,9 @@
   declared. This residual risk is stated to the operator.
 - The spec v0.2 revision (`tasks/spec/`) will carry these changes into §2, §4, §6 and §11.
 - Decided by the owner on 2026-10-01; the override of spec text was confirmed by the owner on 2026-10-02.
+
+## Amendment (owner, 2026-10-08)
+
+A key leaves its interim θ only when its ratings come from at least two tasks. In the seed calibration, the five
+ratings of one client task alone unlocked the fallback's a1 threshold. One task's decisions are not independent
+evidence: the same text and the same criteria rated five times.

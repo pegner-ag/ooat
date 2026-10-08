@@ -367,3 +367,19 @@ def test_the_runtime_constants_match_the_catalog_cards():
     assert (CAPABILITY_VERSION, MAX_ATTEMPTS, WORKER_TIER) == (
         capability["version"], capability["model_policy"]["max_attempts"], capability["model_policy"]["tier"])
     assert ROLE == f"{role['id']}@{role['version']}" and CAPABILITY in role["capabilities"]
+
+
+def test_the_worker_sees_each_attachment_by_its_file_name(tmp_path):
+    model = ScriptedModel()
+    setup = Setup(tmp_path, model=model)
+    task = setup.runtime.submit(operator="Martin", goal="Shrň smlouvu.", acceptance=CRITERIA,
+                                files=[b"Smlouva o dilu."], file_names=["smlouva-2026.txt"])
+    assert setup.last(task, "TASK_SUBMITTED")["body"]["attachment_names"] == ["smlouva-2026.txt"]
+    setup.runtime.run(task)
+    assert "Attachment smlouva-2026.txt (art_" in model.worker_prompts[0]
+
+
+def test_an_attachment_name_never_carries_a_path(tmp_path):
+    setup = Setup(tmp_path)
+    with pytest.raises(ValueError, match="file name"):
+        setup.runtime.submit(operator="Martin", goal="x", files=[b"x"], file_names=["C:/data/klient/smlouva.txt"])

@@ -307,3 +307,11 @@ def test_hooks_changed_after_approval_stop_the_call(tmp_path, monkeypatch):
 @pytest.mark.parametrize("text", ["{}", "[]", "null", "  \n"])
 def test_a_hook_file_without_hooks_needs_no_approval(tmp_path, text):
     assert hooked(tmp_path, text).hooks() == []
+
+
+def test_access_outside_the_workspace_stops_the_connector_with_a_clear_message(tmp_path, monkeypatch):
+    fake_cli(monkeypatch)
+    with pytest.raises(ConnectorError, match="allowNonWorkspaceAccess is true"):
+        connector(tmp_path, {"allowNonWorkspaceAccess": True}).complete(request(), None)
+    ok = connector(tmp_path, {"allowNonWorkspaceAccess": False, "statusLine": {"enabled": True}})
+    assert ok.complete(request(), None).text.strip() == "OK"
