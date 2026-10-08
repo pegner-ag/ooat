@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
 import math
+from pathlib import Path
 
 from .acceptance import GATE_OUTPUT, check_output
 from .catalog import load_card
@@ -86,7 +87,7 @@ class Runtime:
     def submit(self, *, operator: str, goal: str, acceptance: list[str] = (), project: str | None = None,
                expected_output: str | None = None, value: dict | None = None, budget_usd: float | None = None,
                data_class: str | None = None, risk_class: str | None = None,
-               files: list[bytes] = ()) -> str:
+               files: list[bytes] = (), file_names: list[str] = ()) -> str:
         """TASK_SUBMITTED by the named operator; files become untrusted artifacts of the task, stored under the
         declared class raised by the personal-data pre-scan of their text."""
         body = {"goal": goal.strip()}
@@ -96,9 +97,18 @@ class Runtime:
         if acceptance:
             body["acceptance"] = [criterion.strip() for criterion in acceptance]
         declared = data_class or "internal"
+        if file_names and len(file_names) != len(files):
+            raise ValueError("give one file name per attachment")
+        for name in file_names:
+            if not name.strip() or name in (".", "..") or any(c in name for c in "/\\:"):
+                raise ValueError(f"an attachment file name has no folder in it: {name!r}")
+        if file_names:
+            body["attachment_names"] = list(file_names)
         texts = [attachment_text(content) for content in files]  # stored as UTF-8, scanned as stored
+        names = list(file_names) or [""] * len(texts)  # a name with personal data raises the class as its text does
         staged = [self.artifacts.stage(text.encode("utf-8"), artifact_type="attachment", untrusted=True,
-                                       data_class=raised_class(declared, text)) for text in texts]
+                                       data_class=raised_class(declared, f"{name}\n{text}"))
+                  for name, text in zip(names, texts)]
         task = new_id("tsk")
         actor = {"kind": "hil", "id": checked_operator(operator)}
         self.ledger.append(new_event("TASK_SUBMITTED", task=task, actor=actor, refs=[s.ref for s in staged], body=body),
@@ -175,8 +185,9 @@ class Runtime:
         answered = self._budget_answer(task, contract, worker)
         if answered is not None:
             return answered
-        attachments = [Attachment(ref, ref, self.artifacts.read(ref).decode("utf-8", errors="replace"))
-                       for ref in submitted["refs"]]
+        names = submitted["body"].get("attachment_names") or submitted["refs"]
+        attachments = [Attachment(ref, name, self.artifacts.read(ref).decode("utf-8", errors="replace"))
+                       for ref, name in zip(submitted["refs"], names)]
         for attachment in attachments:  # the Gate never saw them; the worker sends them, so they count here
             data_class = higher_class(data_class, self.ledger.artifact(attachment.ref)["data_class"])
         resumed = True  # only the first pass of a run picks up a document delivered before an interruption

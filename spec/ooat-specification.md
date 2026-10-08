@@ -533,7 +533,7 @@ The decision layer is how OOAT reduces human interventions without hiding risk. 
 
 | Rated decisions for the key | θ |
 | --- | --- |
-| fewer than 5 | 0.8 for a decision connector; 1 for the text-model fallback, whose self-stated probability never acts alone before it is rated |
+| fewer than 5, or all from one task | 0.8 for a decision connector; 1 for the text-model fallback, whose self-stated probability never acts alone before it is rated (ratings must come from at least 2 tasks, ADR 0011 amendment 2026-10-08) |
 | 5 to 19 | max(0.8, θ\_computed) |
 | 20 or more | θ\_computed |
 

@@ -43,7 +43,8 @@ the operator's Google account and its existing login. Antigravity CLI replaced G
   `allow`, `ask` and `deny` lists. Keys accepted without refusing: `model`, `trustedWorkspaces` (present in the
   operator's file), `enableTelemetry` (data collection only; switching it off must not stop the connector) and
   the display keys `altScreenMode`, `colorScheme`, `runningLightSpeed`, `verbosity`, `showTips`,
-  `showFeedbackSurvey`, `notifications`, `editorMode`. Any other key, such as `editor` or `useG1Credits`
+  `showFeedbackSurvey`, `notifications`, `editorMode`, `statusLine`; `allowNonWorkspaceAccess` only when false
+  (true lets the agent read outside its empty workspace, so the connector refuses). Any other key, such as `editor` or `useG1Credits`
   (spends AI credits when the quota runs out), stops the connector until it is reviewed.
 
 ## Prices

@@ -112,7 +112,7 @@ _NO_MCP, _NO_PLUGINS = "No MCP servers configured.", "No imported plugins."
 # Settings keys measured or documented as harmless (description.md); "permissions" is checked separately.
 SAFE_SETTINGS = frozenset({"model", "trustedWorkspaces", "permissions", "enableTelemetry", "altScreenMode",
                            "colorScheme", "runningLightSpeed", "verbosity", "showTips", "showFeedbackSurvey",
-                           "notifications", "editorMode"})
+                           "notifications", "editorMode", "statusLine", "allowNonWorkspaceAccess"})
 
 
 def settings_risk(settings_path: Path) -> str | None:
@@ -123,6 +123,9 @@ def settings_risk(settings_path: Path) -> str | None:
         return f"cannot read {settings_path}; refusing to run without knowing its permissions"
     if not isinstance(settings, dict):
         return f"{settings_path} is not a JSON object; refusing to run without knowing its permissions"
+    if settings.get("allowNonWorkspaceAccess", False) is not False:  # the empty workspace would no longer isolate
+        return (f"{settings_path}: allowNonWorkspaceAccess is true, so the agent could read files outside its empty "
+                "workspace; set it to false (or remove it) to use this connector")
     unknown = sorted(set(settings) - SAFE_SETTINGS)
     if unknown:  # fail closed: a key OOAT does not know could approve tools or run hooks
         return f"{settings_path} has settings OOAT has not checked ({', '.join(unknown)}); see description.md"

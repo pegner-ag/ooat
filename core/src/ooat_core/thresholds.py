@@ -12,6 +12,7 @@ INTERIM_DECISION_ENGINE = 0.8  # a decision connector (Jev) before 5 ratings
 INTERIM_FALLBACK_ENGINE = 1.0  # a text model's self-stated probability never acts alone before it is rated
 FLOOR = 0.8  # holds from 5 to 19 ratings
 MIN_RATED = 5
+MIN_TASKS = 2  # ratings from one task alone never leave the interim threshold (owner, 2026-10-08)
 FULL_HISTORY = 20
 MIN_SUPPORT = 5  # rated decisions at or above a candidate θ
 EPSILON = {"R0": 0.05, "R1": 0.02}  # tolerated error rate; R2 and R3 never act on a decision alone
@@ -26,6 +27,7 @@ class RatedDecision:
     model: str
     confidence: float
     correct: bool
+    task: str | None = None  # the task whose event holds the decision
 
 
 def acts_alone(confidence: float, theta: float) -> bool:
@@ -39,17 +41,18 @@ def decision_point(event_type: str, question: str) -> str:
     return "acceptance" if event_type in GATE_EVENTS else question.split(".")[0]
 
 
-def _records(events: list[dict]) -> dict[tuple[str, str], tuple[str, dict]]:
+def _records(events: list[dict]) -> dict[tuple[str, str], tuple[str, dict, str | None]]:
     records = {}
     for event in events:
         if event["type"] == "TOPOLOGY_DECIDED":
             for record in event["body"].get("decisions", []):
-                records[(event["id"], record["question"])] = (decision_point(event["type"], record["question"]), record)
+                records[(event["id"], record["question"])] = (decision_point(event["type"], record["question"]), record,
+                                                              event.get("task"))
         elif event["type"] in GATE_EVENTS:
             for criterion in event["body"].get("criteria", []):
                 record = criterion.get("decision")
                 if record is not None:
-                    records[(event["id"], record["question"])] = ("acceptance", record)
+                    records[(event["id"], record["question"])] = ("acceptance", record, event.get("task"))
     return records
 
 
@@ -65,9 +68,9 @@ def rated_decisions(events: Iterable[dict]) -> list[RatedDecision]:
     rated = []
     for key, verdict in verdicts.items():
         if key in records:
-            point, record = records[key]
+            point, record, task = records[key]
             rated.append(RatedDecision(point, record["engine"], record["model"], record["confidence"],
-                                       verdict == "confirmed"))
+                                       verdict == "confirmed", task))
     return rated
 
 
@@ -88,7 +91,7 @@ def threshold(events: Iterable[dict], point: str, engine: str, model: str, risk_
     if risk_class not in EPSILON:
         return 1.0
     rated = [r for r in rated_decisions(events) if (r.point, r.engine, r.model) == (point, engine, model)]
-    if len(rated) < MIN_RATED:
+    if len(rated) < MIN_RATED or len({r.task for r in rated}) < MIN_TASKS:
         return INTERIM_DECISION_ENGINE if decision_engine else INTERIM_FALLBACK_ENGINE
     computed = computed_threshold(rated, EPSILON[risk_class])
     return computed if len(rated) >= FULL_HISTORY else max(FLOOR, computed)
