@@ -73,6 +73,9 @@ def _ask_or_end(prompt: str, stdin, stdout) -> str | None:
 
 def main(argv=None, stdin=None, stdout=None, registry: Registry | None = None, today=None, routing=None,
          clock=None) -> int:
+    if stdout is None and hasattr(sys.stdout, "reconfigure") and (sys.stdout.encoding or "").lower() != "utf-8":
+        # A redirected stdout on Windows uses the ANSI code page, which cannot hold Czech text: write UTF-8.
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     stdin, stdout = stdin or sys.stdin, stdout or sys.stdout
     args = _parser().parse_args(argv)
     clock = clock or (lambda: datetime.now(timezone.utc))
