@@ -100,13 +100,15 @@ class Runtime:
         if file_names and len(file_names) != len(files):
             raise ValueError("give one file name per attachment")
         for name in file_names:
-            if not name.strip() or Path(name).name != name or "\\" in name or ":" in name:
+            if not name.strip() or name in (".", "..") or any(c in name for c in "/\\:"):
                 raise ValueError(f"an attachment file name has no folder in it: {name!r}")
         if file_names:
             body["attachment_names"] = list(file_names)
         texts = [attachment_text(content) for content in files]  # stored as UTF-8, scanned as stored
+        names = list(file_names) or [""] * len(texts)  # a name with personal data raises the class as its text does
         staged = [self.artifacts.stage(text.encode("utf-8"), artifact_type="attachment", untrusted=True,
-                                       data_class=raised_class(declared, text)) for text in texts]
+                                       data_class=raised_class(declared, f"{name}\n{text}"))
+                  for name, text in zip(names, texts)]
         task = new_id("tsk")
         actor = {"kind": "hil", "id": checked_operator(operator)}
         self.ledger.append(new_event("TASK_SUBMITTED", task=task, actor=actor, refs=[s.ref for s in staged], body=body),

@@ -209,3 +209,14 @@ def test_show_names_a_hand_over_to_the_critic_instead_of_a_failed_gate(env):
                   "--acceptance", "Shrnutí má nejvýše 300 slov.", "--file", str(attachment))
     code, shown = ooat(env, "task", "show", task_id(out))
     assert code == 0 and "HANDED_TO_CRITIC" in shown and "GATE_FAILED" not in shown
+
+
+def test_a_hand_over_after_the_decision_tier_failed_is_labelled_too():
+    from ooat_core.task_cli import _label
+    event = {"type": "GATE_FAILED", "body": {"gate": "gate.decision.check_criterion", "evidence": ["sent to the critic"],
+                                            "criteria": [{"id": "c1", "passed": False,
+                                                          "note": "decision tier did not answer"}]}}
+    assert _label(event) == "HANDED_TO_CRITIC"
+    event["body"] = {"gate": "gate.critic.check_criterion", "evidence": ["0 of 1"],
+                     "criteria": [{"id": "c1", "passed": False, "note": "Too long."}]}
+    assert _label(event) == "GATE_FAILED"

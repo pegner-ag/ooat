@@ -383,3 +383,16 @@ def test_an_attachment_name_never_carries_a_path(tmp_path):
     setup = Setup(tmp_path)
     with pytest.raises(ValueError, match="file name"):
         setup.runtime.submit(operator="Martin", goal="x", files=[b"x"], file_names=["C:/data/klient/smlouva.txt"])
+
+
+@pytest.mark.parametrize("name", ["..", ".", "a/b.txt", r"a\b.txt", "C:x.txt"])
+def test_attachment_names_that_are_not_plain_file_names_are_refused(tmp_path, name):
+    with pytest.raises(ValueError, match="file name"):
+        Setup(tmp_path).runtime.submit(operator="Martin", goal="x", files=[b"x"], file_names=[name])
+
+
+def test_personal_data_in_an_attachment_name_raises_the_class_of_the_attachment(tmp_path):
+    setup = Setup(tmp_path, classes=("public", "internal", "personal"))
+    task = setup.runtime.submit(operator="Martin", goal="x", files=[b"Obsah."], file_names=["jan.novak@example.cz.txt"])
+    attachment = setup.last(task, "TASK_SUBMITTED")["refs"][0]
+    assert setup.ledger.artifact(attachment)["data_class"] == "personal"

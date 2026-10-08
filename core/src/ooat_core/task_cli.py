@@ -171,7 +171,8 @@ def _label(event: dict) -> str:
     """The event type, except a decision gate whose unmet criteria all went to the critic: nothing failed there."""
     criteria = event["body"].get("criteria", []) if event["type"] == "GATE_FAILED" else []
     unmet = [c for c in criteria if not c["passed"]]
-    if unmet and all(c.get("note") == "sent to the critic" for c in unmet):
+    handed = "sent to the critic" in event["body"].get("evidence", [])  # the decision tier did not answer
+    if unmet and (handed or all(c.get("note") == "sent to the critic" for c in unmet)):
         return "HANDED_TO_CRITIC"
     return event["type"]
 

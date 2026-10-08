@@ -126,7 +126,7 @@
           ]
         },
         "budget_usd": {"$ref": "common.schema.json#/$defs/usd"},
-        "attachment_names": {"description": "File names of the attachments (no folders), in the order of refs, so the worker sees what each one is.", "type": "array", "items": {"$ref": "#/$defs/text"}},
+        "attachment_names": {"description": "File names of the attachments (no folders), in the order of refs, so the worker sees what each one is.", "type": "array", "items": {"type": "string", "minLength": 1, "pattern": "^(?!\\.{1,2}$)[^/\\\\:]+$"}},
         "risk_class": {"$ref": "common.schema.json#/$defs/risk_class"},
         "data_class": {"$ref": "common.schema.json#/$defs/data_class"},
         "profile": {"description": "Orchestrator profile, e.g. ceo, pm, key_account.", "type": "string", "pattern": "^[a-z][a-z0-9_]*$"},
