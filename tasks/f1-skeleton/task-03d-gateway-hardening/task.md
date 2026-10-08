@@ -82,3 +82,15 @@
 - [ ] `routing.json` `critic_other_vendor` is read by nothing in `core/`: the critic may run on the worker's vendor.
 - [ ] A `[routing.pin]` does not fall back when the pinned connector cools down (`QUOTA_EXHAUSTED`); decide whether
       a pin may fall back.
+
+### From the seed calibration runs (2026-10-07/08)
+- [ ] The acceptance decision gate is written as `GATE_FAILED` when its criteria are only sent to the critic (an
+      untrusted attachment, or an unsure answer); record it as passed-pending or name the hand-over, so the
+      timeline does not show a failure that did not happen.
+- [ ] The pre-start estimate ignores attachments, the critic and a second attempt: s1 0.021 → 0.058 USD, s2 0.021
+      → 0.238, s3 0.024 → 0.552. Count attachment tokens and an expected critic share.
+- [ ] Client-confidential tasks get no decision engine that may act: Jev takes only public/internal, and the
+      text-model fallback keeps θ = 1 until rated, so every criterion goes to the operator. Consider a decision
+      connector cleared for client data, or calibrating the fallback from eval cases.
+- [ ] Long compound acceptance criteria lower the decision tier's confidence (s2 criterion 1: 0.56 → 0.68 after a
+      clarification); advise one check per criterion in the submit help.

@@ -343,3 +343,16 @@ def test_approve_hooks_refuses_without_hooks_or_confirmation(config, connector, 
     code, out = run(config, "connectors", "approve-hooks", "prv.fake.api", "--operator", "Martin",
                     answers=answers, connectors=[connector])
     assert code == 1 and message in out and "approved_hooks" not in state_events(config)[-1]["body"]
+
+
+def test_redirected_output_is_utf8_whatever_the_windows_code_page(monkeypatch, config):
+    import sys
+    raw = io.BytesIO()
+    redirected = io.TextIOWrapper(raw, encoding="cp1252")  # what Windows gives a redirected stdout
+    monkeypatch.setattr(sys, "stdout", redirected)
+    code = main(["--config", str(config[0]), "connectors", "show", "prv.fake.api"],
+                registry=Registry([FakeConnector(fake_manifest(jurisdiction=dict(JURISDICTION,
+                                                                                  transfer_notes="Zpracování ť")))]),
+                today=TODAY)
+    sys.stdout.flush()
+    assert code == 0 and "Zpracování ť" in raw.getvalue().decode("utf-8")
