@@ -6,6 +6,7 @@ import json
 import os
 import re
 import shlex
+import shutil
 from pathlib import Path
 
 from ooat_core.connectors import ConnectorError, Detection, ModelRequest, ModelResponse
@@ -152,22 +153,37 @@ MAX_FOLDER_FILES = 200
 
 
 def _files(command: str) -> list[Path] | None:
-    """Every existing file a command names: the program and, for an interpreter (`node x.js`, `powershell -File
-    x.ps1`), its script. None when it names none, so nothing could be fingerprinted (fail closed)."""
+    """Every file a command names: the program and, for an interpreter (`node x.js`, `powershell -File x.ps1`),
+    its script. None when the program or any path-like argument does not resolve to an existing file by an absolute
+    path (an environment variable, a relative or PATH name): such a file could never be fingerprinted (fail closed)."""
     try:
         tokens = [t.strip('"') for t in shlex.split(command, posix=False)]
     except ValueError:
         return None
-    found = [Path(t) for t in tokens if t and Path(t).is_file()]
+    found = []
+    for index, token in enumerate(tokens):
+        path = Path(token)
+        path_like = index == 0 or "/" in token or "\\" in token or "%" in token or "$" in token \
+            or path.suffix.lower() in SCRIPT_SUFFIXES
+        if not path_like:
+            continue  # a flag or a plain argument
+        if index == 0 and not path.is_absolute() and shutil.which(token):  # a program found on PATH, e.g. node
+            path = Path(shutil.which(token))
+        if not (path.is_absolute() and path.is_file()):
+            return None
+        found.append(path)
     return found or None
 
 
-def _fingerprint(path: Path) -> tuple[str, str, str]:
+def _fingerprint(path: Path, show: bool = True) -> tuple[str, str, str]:
+    """(path, sha256, text). Only hooks.json and the scripts a command names are shown in full; a neighbour in the
+    same folder is shown by size, so a token file next to a script never reaches the terminal."""
     try:
         data = path.read_bytes()
     except OSError:
         return str(path), "", ""  # unreadable: an empty fingerprint is never approved, so the call refuses
-    return str(path), hashlib.sha256(data).hexdigest(), data.decode("utf-8", errors="replace")
+    text = data.decode("utf-8", errors="replace") if show else f"(not shown: {len(data)} bytes)"
+    return str(path), hashlib.sha256(data).hexdigest(), text
 
 
 def hook_files(gemini_home: Path) -> list[tuple[str, str, str]]:
@@ -186,16 +202,18 @@ def hook_files(gemini_home: Path) -> list[tuple[str, str, str]]:
         return [_fingerprint(path)]  # not JSON: agy may still read it, so it needs approval as it is
     if not parsed:  # {}, [] and null define no hooks
         return []
-    entries, folders, files = [_fingerprint(path)], set(), set()
+    entries, folders, files, shown = [_fingerprint(path)], set(), set(), set()
     for command in _commands(parsed):
         named = _files(command)
         if named is None:  # nothing to fingerprint: never approvable
             entries.append((f"{path}: command {command[:80]!r} names no file OOAT can check", "", ""))
             continue
-        for file in named:  # a script may call its neighbours; a program in a system folder does not
-            (folders if file.suffix.lower() in SCRIPT_SUFFIXES else files).add(file.parent if
-                                                                            file.suffix.lower() in SCRIPT_SUFFIXES
-                                                                            else file)
+        for file in named:
+            shown.add(file)
+            if file.suffix.lower() in SCRIPT_SUFFIXES:  # a script may call its neighbours
+                folders.add(file.parent)
+            else:  # a program such as powershell.exe in a system folder: itself only
+                files.add(file)
     for folder in sorted(folders):
         try:
             listed = sorted(f for f in folder.iterdir() if f.is_file())
@@ -206,7 +224,7 @@ def hook_files(gemini_home: Path) -> list[tuple[str, str, str]]:
             entries.append((f"{folder}: more than {MAX_FOLDER_FILES} files", "", ""))
             continue
         files.update(listed)
-    return entries + [_fingerprint(file) for file in sorted(files)]
+    return entries + [_fingerprint(file, show=file in shown) for file in sorted(files)]
 
 
 def hooks_risk(gemini_home: Path, approved: tuple[str, ...] = ()) -> str | None:

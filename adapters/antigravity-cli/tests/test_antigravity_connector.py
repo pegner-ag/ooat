@@ -359,7 +359,10 @@ def test_a_script_run_by_an_interpreter_is_part_of_the_approval(tmp_path):
     scripts.mkdir()
     (scripts / "hook.js").write_text("console.log('{}')", encoding="utf-8")
     (scripts / "lib.js").write_text("module.exports = 1", encoding="utf-8")
-    agy = hooked(tmp_path, json.dumps({"x": {"Stop": [{"command": f"node {scripts / 'hook.js'} --stop"}]}}))
+    node = tmp_path / "tools" / "node.exe"
+    node.parent.mkdir()
+    node.write_bytes(b"MZ")
+    agy = hooked(tmp_path, json.dumps({"x": {"Stop": [{"command": f"\"{node}\" {scripts / 'hook.js'} --stop"}]}}))
     assert {"hook.js", "lib.js"} <= {Path(path).name for path, _, _ in agy.hooks()}
 
 
@@ -379,3 +382,23 @@ def test_an_executable_in_a_system_folder_is_fingerprinted_alone(tmp_path):
     agy = hooked(tmp_path, json.dumps({"x": {"Stop": [{"command": f'"{system / "powershell.exe"}" -NoProfile'}]}}))
     names = {Path(path).name for path, _, _ in agy.hooks()}
     assert "powershell.exe" in names and "other.dll" not in names
+
+
+@pytest.mark.parametrize("arg", ["%APPDATA%/hook.ps1", "hook.ps1", "./scripts/hook.js"])
+def test_an_interpreter_whose_script_does_not_resolve_refuses(tmp_path, monkeypatch, arg):
+    fake_cli(monkeypatch)
+    program = tmp_path / "bin" / "powershell.exe"
+    program.parent.mkdir()
+    program.write_bytes(b"MZ")
+    agy = hooked(tmp_path, json.dumps({"x": {"Stop": [{"command": f'"{program}" -File {arg}'}]}}))
+    approved = tuple(sha for _, sha, _ in agy.hooks())
+    with pytest.raises(ConnectorError, match="approve-hooks"):
+        agy.complete(request(approved_hooks=approved), None)
+
+
+def test_neighbour_files_are_listed_by_size_and_hash_not_by_content(tmp_path):
+    agy, scripts = orca_like(tmp_path)
+    (scripts / "secrets.env").write_text("TOKEN=do-not-print", encoding="utf-8")
+    texts = {Path(path).name: text for path, _, text in agy.hooks()}
+    assert "do-not-print" not in texts["secrets.env"] and "bytes" in texts["secrets.env"]
+    assert "core.cmd" in texts["pre.cmd"]  # a directly named script is shown in full

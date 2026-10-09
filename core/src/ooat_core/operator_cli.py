@@ -174,8 +174,12 @@ def _approve_hooks(args, registry, ledger, stdin, stdout) -> int:
         stdout.write(f"{args.connector} does not run hooks; nothing to approve.\n")
         return REFUSED
     files = connector.hooks()
-    if not files or not all(sha for _, sha, _ in files):
-        stdout.write("There are no hooks to approve" + (" (a hook file could not be read)" if files else "") + ".\n")
+    if not files:
+        stdout.write("There are no hooks to approve.\n")
+        return REFUSED
+    unusable = [path for path, sha, _ in files if not sha]
+    if unusable:  # each entry names the file or the command that cannot be fingerprinted
+        stdout.write("These hooks cannot be approved:\n" + "".join(f"  {entry}\n" for entry in unusable))
         return REFUSED
     for path, sha, text in files:
         stdout.write(f"--- {path} (sha256 {sha[:12]}...)\n{text.rstrip()}\n")
