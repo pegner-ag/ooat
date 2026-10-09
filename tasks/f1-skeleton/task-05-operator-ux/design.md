@@ -263,7 +263,13 @@ answer, Host/Origin/CSRF and token-scope refusals, and the module test for `hil`
 - Spec §9: R3 answers need an authenticated web session (not the CLI, not a token). Spec §10: a Usage view in F1
   ahead of the F2 Economics view.
 
-## 13. Owner questions
+## 13. Owner decisions (2026-10-09)
+
+- The private bot gets OOAT as an additional engine per chat (`/engine ooat`); its direct CLI engines stay for coding
+  work (question 7).
+- The bridge token's data-class cap is `internal` (question 3): client or personal content stays in the web app.
+
+## 14. Owner questions (open)
 
 1. Dashboard language: JavaScript with JSDoc types checked by `tsc`, no build step (recommended), or TypeScript
    compiled at release with the output committed to the wheel?
