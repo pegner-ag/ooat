@@ -150,7 +150,6 @@ It narrows `family.communicator` (2.0 USD, 15 turns) and accumulates its gates: 
   "version": "0.1.0",
   "status": "draft",
   "summary": "Lists contract clauses that deviate from the operator's checklist, as a draft for a lawyer, not legal advice.",
-  "i18n": {"cs": {"summary": "Vypíše ustanovení smlouvy, která se odchylují od kontrolního seznamu provozovatele; podklad pro právníka, ne právní rada."}},
   "tags": ["contract", "checklist", "draft-only"],
   "impl": "llm",
   "input_schema": "schemas/contract_and_checklist.v1.json",
@@ -240,27 +239,26 @@ them.
 
 ## 8. Language (D3)
 
-Ids, schema keys, event types and reason codes stay English. Capability cards carry `i18n.cs.summary`; outputs are
-written in the task's working language; the legal `notice` has a fixed English and Czech text; categories and
-filing schemes are declared by the operator in their language. The role schema has no `i18n` today: `a2a.name` and
-`a2a.description` are English only, so a Czech dashboard would show English role names. Adding
-`i18n: {<lang>: {name, description}}` to `role.schema.json` is a spec change and is asked below.
+Everything inside the catalog is English (owner, 2026-10-09): ids, names, summaries, schema keys, event types and
+reason codes. The new business cards carry no `i18n` field, and `role.schema.json` stays unchanged. Outputs are
+written in the task's working language; the legal `notice` has a fixed English and Czech text, chosen by that
+language; categories and filing schemes are declared by the operator in their language. Translating role names for
+a Czech screen is the UI's job (design 05), not the catalog's.
 
-## 9. Owner questions
+## 9. Owner decisions (2026-10-09)
 
-1. **Which roles first?** The proposal is office assistant, contract reviewer, copywriter, claims reviewer, support
-   reply drafter and bookkeeping assistant. Should any be swapped for a later-wave role (for example the legal
-   drafter or the HR recruiting assistant)?
-2. **Order against row 02.** Row 02 plans 15 capabilities and 5 roles for the engineering seed tasks. Should the
+- First wave: the six roles of §4 as proposed (question 1).
+- Domains `legal`, `office`, `support`, `hr`, and `mkt` renamed to "Marketing, advertising and sales" (question 8).
+- No role `i18n`: the catalog stays English inside (question 7).
+
+## 10. Owner questions (open)
+
+1. **Order against row 02.** Row 02 plans 15 capabilities and 5 roles for the engineering seed tasks. Should the
    business wave follow as its own plan (02b) after 02 and 06, as proposed, or replace part of that set?
-3. **Calibration tasks.** Can you supply one real business task per first-wave role (anonymised, like the seed
+2. **Calibration tasks.** Can you supply one real business task per first-wave role (anonymised, like the seed
    tasks), or should the first runs use synthetic tasks only?
-4. **Languages.** Czech and English for eval cases and the legal notice; is any other language needed in the first
+3. **Languages.** Czech and English for eval cases and the legal notice; is any other language needed in the first
    wave (for example Slovak or German)?
-5. **Governing law.** Should contract-review eval sets cover Czech and EU law only, or also English or German law?
-6. **Data classes.** Is `personal` acceptable for the support, office, contract-review and bookkeeping roles (it runs
+4. **Governing law.** Should contract-review eval sets cover Czech and EU law only, or also English or German law?
+5. **Data classes.** Is `personal` acceptable for the support, office, contract-review and bookkeeping roles (it runs
    only through connectors you took responsibility for), with `special_category` excluded everywhere?
-7. **Role i18n.** May `role.schema.json` get an optional `i18n` field for role names and descriptions (spec §5
-   change, recorded in the v0.2 revision)?
-8. **New domains.** Are `legal`, `office`, `support` and `hr` acceptable names, and may `mkt` be renamed to
-   "Marketing, advertising and sales"?
