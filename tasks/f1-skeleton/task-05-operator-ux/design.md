@@ -265,22 +265,16 @@ answer, Host/Origin/CSRF and token-scope refusals, and the module test for `hil`
 
 ## 13. Owner decisions (2026-10-09)
 
+The owner approved this design on 2026-10-09 with these answers:
+- Dashboard: JavaScript with JSDoc types checked by `tsc --noEmit --checkJs`, no build step.
+- Tasks from chat without "Done when:" lines: today's rule A1 stays (one-tap clarify / run as it is / do not run).
+- The bridge token's data-class cap is `internal`; client or personal content stays in the web app.
+- 05a adds a human `cancel` action (a runtime path ending `CANCELLED`), used by the bot's `/cancel`.
+- Token and channel events go into the ledger (ADR 0016, §12).
 - The private bot gets OOAT as an additional engine per chat (`/engine ooat`); its direct CLI engines stay for coding
-  work (question 7).
-- The bridge token's data-class cap is `internal` (question 3): client or personal content stays in the web app.
+  work.
 
 ## 14. Owner questions (open)
 
-1. Dashboard language: JavaScript with JSDoc types checked by `tsc`, no build step (recommended), or TypeScript
-   compiled at release with the output committed to the wheel?
-2. Tasks from chat without "Done when:" lines: the Gate asks clarify / run as it is / do not run (today's rule A1,
-   one tap), or per-project default criteria in `ooat.toml` so short questions run at once?
-3. Data-class cap of your bridge token: `internal` (recommended; client or personal content stays in the web app)
-   or higher with your responsibility statement?
-4. Cancelling a running task (the bot's `/cancel`): add a human `cancel` action in 05a (a new runtime path ending
-   `CANCELLED`), or leave it for later?
-5. Token and channel events (§12, ADR 0016) in the ledger (recommended), or a token file outside it?
-6. Public install: `pipx install ooat` needs a PyPI release, which needs your approval (project rule); until then
-   the instructions install from git.
-7. Your bot: OOAT as an additional engine per chat (recommended, the direct CLI stays for coding work), or OOAT
-   replacing the direct engines, accepting document-only answers without tools or memory until T3+?
+- Public install: `pipx install ooat` needs a PyPI release, which needs the owner's explicit approval (project rule);
+  until then the instructions install from git.
