@@ -293,3 +293,12 @@ fails its evals. Translating role names for a screen is the UI's job (design 05)
 
 1. **Same-family critic.** Should the linter reject a critic from the role's own family as an error instead of a
    warning? That makes §7 rule 6 ("preferred") binding and is a spec change.
+
+## 11. Review points carried into the plan
+
+- Untrusted tickets: `cap.support.extract_ticket` and `cap.support.draft_reply` get a critic for every "met" answer
+  (ADR 0011, spec §7 acceptance pre-check), and a positive `qa.detect_injected_instructions` quarantines the ticket
+  (spec §7) instead of drafting a reply.
+- The legal critic is not `role.mkt.claims_reviewer`: the plan adds a domain-neutral reviewer (or a dedicated legal
+  reviewer) cleared for client and personal data, preferably on another vendor (spec §13), so a marketing role
+  never reads contracts.
