@@ -47,7 +47,7 @@ library: a Markdown renderer with raw HTML disabled (markdown-it, MIT). UI strin
 | Connectors | Connectors screen: card, consequences, typed confirmation | `ooat connectors` |
 | Costs, usage | Usage screen, or `/stats` in chat | — |
 
-The CLI stays as it is; nothing in 05 removes a command.
+Nothing in 05 removes a command. The one change in CLI behaviour: `ooat hil answer` refuses R3 requests (§6).
 
 ## 4. Screens
 
@@ -109,9 +109,9 @@ same steps as in the CLI, with the operator taken from the session, never from a
 ```
 USAGE   period [7 days ▾]   project [all ▾]          spend $3.10 (API $0.40 · subscription shadow $2.70)
  BY ROLE          calls  tokens in/out   cost      BY CONNECTOR                   calls  tokens in/out  cost
-  general.worker  12     410k / 38k      $2.60     anthropic.subscription_cli     14     420k / 40k     $2.70
-  gate            36     52k / —         $0.002    typesafe.api                   36     52k / —        $0.002
-  critic           5     61k / 2k        $0.40     anthropic.api                   5     61k / 2k       $0.40
+  general.worker  12     410k / 38k      $2.60     prv.anthropic.subscription_cli 14     420k / 40k     $2.70
+  gate            36     52k / —         $0.002    prv.typesafe.api               36     52k / —        $0.002
+  critic           5     61k / 2k        $0.40     prv.anthropic.api               5     61k / 2k       $0.40
  TASKS 12 · accepted 9 · partial 2 · abstained 1 · cost per accepted task $0.34 · estimate vs actual +8 %
  HIL 7 questions · median wait 14 min · defaults applied 1
 ```
@@ -134,7 +134,8 @@ USAGE   period [7 days ▾]   project [all ▾]          spend $3.10 (API $0.40 
 
 Codes: 400 `INVALID`, 401 `UNAUTHENTICATED`, 403 `SCOPE` / `DATA_CLASS_ABOVE_TOKEN` / `R3_NEEDS_BOUND_IDENTITY`, 404,
 409 `ALREADY_ANSWERED` / `NOT_CLOSED` / `ALREADY_RATED`, 413 `TOO_LARGE` (20 MB per request), 422
-`SPEC_VALIDATION` (the ledger's own errors), 503 `LEDGER_BUSY` (§7). Handlers call the same functions the CLI
+`SPEC_VALIDATION` (the ledger's own errors), 503 `LEDGER_BUSY` (§7). Every `read` endpoint applies the token's
+data-class cap and returns the redacted stub of §6 for content above it. Handlers call the same functions the CLI
 calls (`Runtime.submit`, `rate`, `connector_admin.*`); the API adds no second rule set.
 
 ## 6. Security and identity
@@ -152,20 +153,27 @@ calls (`Runtime.submit`, `rate`, `connector_admin.*`); the API adds no second ru
   only its SHA-256, compared in constant time. `ooat tokens revoke`. Sent as `Authorization: Bearer`.
 - **HIL identity:** the actor of every human event written through the API (`actor.kind = hil`) is the operator
   bound to the session or token, never a name from the request body; the event records the channel (`web` or the
-  token id). Only these paths write `hil` events: the API handlers (submit, answer, rate, cancel, connectors),
-  the 04 CLI commands (`task_cli`), `connector_admin` (`ADAPTER_ACKNOWLEDGED`, `ADAPTER_DISABLED`), the new
-  `ooat tokens` commands (`OPERATOR_TOKEN_ISSUED`, `OPERATOR_TOKEN_REVOKED`) and the runtime's
-  `default-on-silence`; a test fails if any other module builds a `hil` actor.
-- **R3** (named approver, spec §9): not answerable through any channel in 05. A web session from
-  `ooat login --operator NAME` carries the same self-declared name as the CLI's `--operator`: whoever holds the
-  terminal can claim any name, so it is not a named approver. R3 stays impossible (CLI, web and tokens alike, error
-  `R3_NEEDS_BOUND_IDENTITY`) until the operator is bound to something they hold, such as a passkey (WebAuthn) or
-  an OS-account check. No R3 action exists in F1, so this binding is a precondition for the first R3 gate, not
-  for 05 (ADR 0016).
+  token id). A test holds an allow-list of the modules that may build a `hil` actor and fails on any other:
+  `Runtime.submit` (`TASK_SUBMITTED` by the operator), `rating.py` (`TASK_RATED`), the HIL answer path
+  (`HIL_RESPONSE`, in `task_cli` today), the new cancel action, `connector_admin` (`ADAPTER_ACKNOWLEDGED`,
+  `ADAPTER_DISABLED`), the new `ooat tokens` commands (`OPERATOR_TOKEN_ISSUED`, `OPERATOR_TOKEN_REVOKED`), and the
+  runtime's `default-on-silence`. The API handlers and the CLI call these modules; they build no actor themselves.
+- **R3** (named approver, spec §9): refused everywhere until a bound identity exists: web, tokens and the CLI's
+  `ooat hil answer` alike (error `R3_NEEDS_BOUND_IDENTITY`). A web session from `ooat login --operator NAME`
+  carries the same self-declared name as the CLI's `--operator`: whoever holds the terminal can claim any name, so
+  neither is a named approver. The operator must first be bound to something they hold, such as a passkey
+  (WebAuthn) or an OS-account check. For the CLI this changes today's behaviour for R3 requests only; no R3
+  request exists in F1, so nothing breaks today. The binding is a precondition for the first R3 gate, not for 05
+  (ADR 0016).
 - **Data leaving through a chat platform:** a chat service stores messages on its own servers. A token's
-  `max_data_class` (default `internal`) caps what the API returns to it; a task above the cap is reported by state
-  and link only, its content stays in the web app. Raising a token's cap to `client_confidential` or `personal` is
-  the operator's responsibility statement, recorded like ADR 0012.
+  `max_data_class` (default `internal`) caps every read the token can make, not only what it submits. A task's
+  class is its gated class (declared, raised by the pre-scan or A10), an artifact's is its own. Content above the
+  cap comes back as a stub (`{"redacted": "above this token's data class; open in the web app", "link"}`) in place
+  of: the goal and summary in `GET /tasks` and `/tasks/{id}`, event bodies in the timeline and stream, HIL question
+  and option text, rating-queue entries, artifacts and diffs, and task titles in stats; ids, states, costs and
+  deadlines stay visible. Stats name a project only when it has a task within the cap. Raising a token's cap to
+  `client_confidential` or `personal` is the operator's responsibility statement, recorded like ADR 0012. Tests
+  cover the stub on each read endpoint.
 - **No secrets in the UI or ledger:** the UI shows environment variable names and whether they are set, never
   values; tokens appear once at creation; logs record method, path and status only (no headers, cookies or
   bodies). Headers: CSP `default-src 'self'` without inline script, `frame-ancestors 'none'`,
@@ -257,12 +265,15 @@ The same steps in the browser (first `ooat serve` without a configuration) and i
 
 05b and 05c can run in parallel after 05a. Tests stay offline: API through FastAPI's test client on a file
 ledger with fake connectors, an end-to-end submit → answer → rate through the API, a two-writer race on one HIL
-answer, Host/Origin/CSRF and token-scope refusals, and the module test for `hil` actors.
+answer, Host/Origin/CSRF and token-scope refusals, the data-class stub on each read endpoint, R3 refused on
+every channel, and the allow-list test for `hil` actors.
 
 ## 12. Schema and spec changes (ADR 0016, proposed)
 
 - Event types `OPERATOR_TOKEN_ISSUED` and `OPERATOR_TOKEN_REVOKED` (human actor, `task: null`; body: token id,
   operator, name, scopes, `max_data_class`, `sha256`, `expires`), so who could answer for whom is in the audit log.
+  This amends ADR 0003 §3 (only adapter events have `task: null`) and the event schema's null-task conditional to
+  admit the two token events.
 - Optional `channel` (`cli`, `web`, `token:<id>`) in the bodies of `TASK_SUBMITTED`, `HIL_RESPONSE`, `TASK_RATED`,
   `ADAPTER_ACKNOWLEDGED`, `ADAPTER_DISABLED`.
 - Optional `TASK_SUBMITTED.body.intake_key` (the client's idempotency key, unique per token), so a retried
