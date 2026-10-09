@@ -136,21 +136,51 @@ def settings_risk(settings_path: Path) -> str | None:
     return None
 
 
+def _commands(data) -> list[str]:
+    """Every "command" string anywhere in a hooks.json document."""
+    if isinstance(data, dict):
+        return [c for key, value in data.items()
+                for c in ([value] if key == "command" and isinstance(value, str) else _commands(value))]
+    if isinstance(data, list):
+        return [c for item in data for c in _commands(item)]
+    return []
+
+
+def _program(command: str) -> Path | None:
+    """The file a command starts, quoted or not; None when it names no existing file (e.g. a bare `node`)."""
+    command = command.strip()
+    head = command[1:].split('"', 1)[0] if command.startswith('"') else command.split()[0] if command else ""
+    path = Path(head)
+    return path if head and path.is_file() else None
+
+
+def _fingerprint(path: Path) -> tuple[str, str, str]:
+    try:
+        data = path.read_bytes()
+    except OSError:
+        return str(path), "", ""  # unreadable: an empty fingerprint is never approved, so the call refuses
+    return str(path), hashlib.sha256(data).hexdigest(), data.decode("utf-8", errors="replace")
+
+
 def hook_files(gemini_home: Path) -> list[tuple[str, str, str]]:
-    """(path, sha256 of the bytes, text) of each hook file agy reads: config/hooks.json. Gemini CLI's hooks in
-    ~/.gemini/settings.json are not run by agy (measured 2026-10-06: no process started during a call)."""
+    """(path, sha256 of the bytes, text) of config/hooks.json and of every file in the folder of each program its
+    commands start: a script may call its neighbours (Orca's per-event scripts call antigravity-hook.cmd), so a
+    change to any of them needs a new approval (ADR 0015). Gemini CLI's hooks in ~/.gemini/settings.json are not
+    run by agy (measured 2026-10-06: no process started during a call)."""
     path = gemini_home / "config" / "hooks.json"
     try:
         data = path.read_bytes() if path.is_file() else b""
     except OSError:
-        return [(str(path), "", "")]  # unreadable: an empty fingerprint is never approved, so the call refuses
+        return [(str(path), "", "")]
     try:
-        empty = not data.strip() or not json.loads(data)  # {}, [] and null define no hooks
+        parsed = json.loads(data) if data.strip() else None
     except ValueError:
-        empty = False  # not JSON: agy may still read it, so it needs approval
-    if empty:
+        return [_fingerprint(path)]  # not JSON: agy may still read it, so it needs approval as it is
+    if not parsed:  # {}, [] and null define no hooks
         return []
-    return [(str(path), hashlib.sha256(data).hexdigest(), data.decode("utf-8", errors="replace"))]
+    folders = sorted({program.parent for program in map(_program, _commands(parsed)) if program is not None})
+    scripts = [file for folder in folders for file in sorted(folder.iterdir()) if file.is_file()]
+    return [_fingerprint(path)] + [_fingerprint(file) for file in scripts]
 
 
 def hooks_risk(gemini_home: Path, approved: tuple[str, ...] = ()) -> str | None:

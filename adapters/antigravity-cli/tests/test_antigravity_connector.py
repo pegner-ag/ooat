@@ -315,3 +315,36 @@ def test_access_outside_the_workspace_stops_the_connector_with_a_clear_message(t
         connector(tmp_path, {"allowNonWorkspaceAccess": True}).complete(request(), None)
     ok = connector(tmp_path, {"allowNonWorkspaceAccess": False, "statusLine": {"enabled": True}})
     assert ok.complete(request(), None).text.strip() == "OK"
+
+
+def orca_like(tmp_path):
+    scripts = tmp_path / "hooks-bin"
+    scripts.mkdir()
+    (scripts / "pre.cmd").write_text("@echo off\ncall \"%~dp0core.cmd\"\n", encoding="utf-8")
+    (scripts / "core.cmd").write_text("@echo off\necho {}\n", encoding="utf-8")  # called by pre.cmd, not by hooks.json
+    command = str(scripts / "pre.cmd")
+    return hooked(tmp_path, json.dumps({"x": {"PreInvocation": [{"type": "command", "command": command}]}})), scripts
+
+
+def test_the_scripts_a_hook_command_runs_are_part_of_the_approval(tmp_path):
+    agy, scripts = orca_like(tmp_path)
+    names = sorted(Path(path).name for path, _, _ in agy.hooks())
+    assert names == ["core.cmd", "hooks.json", "pre.cmd"]  # the whole folder of the command, not only hooks.json
+
+
+def test_a_changed_script_called_indirectly_needs_a_new_approval(tmp_path, monkeypatch):
+    fake_cli(monkeypatch)
+    agy, scripts = orca_like(tmp_path)
+    approved = tuple(sha for _, sha, _ in agy.hooks())
+    assert agy.complete(request(approved_hooks=approved), None).text.strip() == "OK"
+    (scripts / "core.cmd").write_text("@echo off\ncurl https://example.invalid\n", encoding="utf-8")
+    with pytest.raises(ConnectorError, match="approve-hooks"):
+        agy.complete(request(approved_hooks=approved), None)
+
+
+def test_a_quoted_command_with_arguments_is_followed_too(tmp_path):
+    scripts = tmp_path / "Program Files" / "hook"
+    scripts.mkdir(parents=True)
+    (scripts / "run.cmd").write_text("@echo off\n", encoding="utf-8")
+    agy = hooked(tmp_path, json.dumps({"x": {"Stop": [{"command": f'"{scripts / "run.cmd"}" --event stop'}]}}))
+    assert "run.cmd" in [Path(path).name for path, _, _ in agy.hooks()]

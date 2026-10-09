@@ -26,3 +26,10 @@ registers such hooks for its own panes, and wants Orca and OOAT to use `agy` sid
 - Schema change: `body_adapter_acknowledged.approved_hooks` (array of `{path, sha256}`), additive.
 - Orca's hooks in `config/hooks.json` can be approved once; after Orca rewrites the file, OOAT asks again.
 - Decided by the owner on 2026-10-06 ("postav schvalování hooků"); recorded on 2026-10-07.
+
+## Amendment (owner, 2026-10-09)
+
+The approval first covered `hooks.json` only, so a script its commands call could change without a new approval:
+Orca's per-event scripts call `antigravity-hook.cmd`, which `hooks.json` never names. `hooks()` now also lists every
+file in the folder of each program a hook command starts, and each needs the operator's approval. A change to any
+of them stops the connector until it is approved again.
