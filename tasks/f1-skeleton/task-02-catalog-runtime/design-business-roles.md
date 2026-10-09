@@ -65,8 +65,9 @@ systems (publish, spend, file), which needs the verified HIL identity of sub-pro
    `send:external` / `write:prod` gates: HIL approval of each action by a named approver, never delegated, never
    decided by a model (§9, ADR 0011). F1's local `--operator` name is self-declared, so these actions are not built
    before 05 verifies remote identity (`tasks/f1-skeleton/README.md`, constraints).
-2. **Legal outputs are drafts, never advice.** Legal output schemas require a `notice` field whose value is one of
-   two fixed texts (English, Czech) saying the document is a draft for review by a qualified lawyer. A task asking
+2. **Legal outputs are drafts, never advice.** Legal output schemas require a non-empty `notice` field: a draft for
+   review by a qualified lawyer, not legal advice. Its canonical text is English; the worker writes it in the task's
+   working language, and the critic rubric fails an output whose notice is missing, weakened or in another language. A task asking
    "may I sign this?" or for a legal opinion is an `ABSTAIN_INCAPABLE`. The critic rubric
    `rubrics/legal_draft_not_advice.md` fails any recommendation to sign, any statement of legal certainty and any
    claim about law not given in the inputs.
@@ -221,7 +222,9 @@ Measurement per role, after sub-projects 02 (loader) and 06 (eval runner):
 
 1. **Capability evals** (`cap.ai.run_eval`): p_accept vs. prior, abstention precision ≥ 70 %, zero silent errors,
    median cost ≤ 1.3 × prior; 10 % of judge verdicts checked by the operator.
-2. **Business calibration tasks:** one real, anonymised task per role, kept as the engineering seed is: the real
+2. **Business calibration tasks:** real tasks from the owner's work, arriving through the chat bridge once 05c
+   connects the private bot (owner, 2026-10-09); until then the roles stay in `shadow` on their eval sets. They are
+   kept as the engineering seed is: the real
    material and every attachment stay in the operator's working folder (`ooat-work/business/`) and never enter the
    repository; at most an anonymised task description without client data (goal, acceptance, value class, data
    class, risk class) is committed to `evals/calibration/business/`, as in `evals/calibration/seed/`. Each runs twice: with the role (`shadow`)
@@ -263,27 +266,30 @@ them.
 ## 8. Language (D3)
 
 Everything inside the catalog is English (owner, 2026-10-09): ids, names, summaries, schema keys, event types and
-reason codes. The new business cards carry no `i18n` field, and `role.schema.json` stays unchanged. Outputs are
-written in the task's working language; the legal `notice` has a fixed English and Czech text, chosen by that
-language; categories and filing schemes are declared by the operator in their language. Translating role names for
-a Czech screen is the UI's job (design 05), not the catalog's.
+reason codes. The new business cards carry no `i18n` field, and `role.schema.json` stays unchanged.
+
+Operators may work in any language (owner, 2026-10-09): a task in French or Russian must work as one in Czech or
+English. So nothing in a business role depends on a fixed list of languages: outputs are written in the task's
+working language, the legal notice is rendered in that language (§3 rule 2), and categories and filing schemes are
+declared by the operator in their own language. Every eval set has Czech and English cases and at least one case in
+a third language (French, German or Russian, rotating between sets), so a role that only works in two languages
+fails its evals. Translating role names for a screen is the UI's job (design 05), not the catalog's.
 
 ## 9. Owner decisions (2026-10-09)
 
-- First wave: the six roles of §4 as proposed (question 1).
-- Domains `legal`, `office`, `support`, `hr`, and `mkt` renamed to "Marketing, advertising and sales" (question 8).
-- No role `i18n`: the catalog stays English inside (question 7).
+- First wave: the six roles of §4 as proposed.
+- Domains `legal`, `office`, `support`, `hr`, and `mkt` renamed to "Marketing, advertising and sales".
+- No role `i18n`: the catalog stays English inside.
+- The business wave is an addition to plan 02 (the role system grows): a section appended to plan 02 once it is
+  written, neither a separate plan nor a replacement of plan 02's engineering roles and capabilities.
+- Calibration on real tasks, arriving through the private chat bot once 05c connects it.
+- Any working language must work (§8); first eval languages Czech and English plus a rotating third language.
+- Contract review covers any jurisdiction through the model; eval sets cover EU, US and Czech law first, other
+  jurisdictions later. The abstain condition stays: no governing law in the contract or the task.
+- `personal` data is allowed for the support, office, contract-review and bookkeeping roles (through connectors with
+  the operator's responsibility, ADR 0012); `special_category` stays refused by the gateway.
 
 ## 10. Owner questions (open)
 
-1. **Order against row 02.** Row 02 plans 15 capabilities and 5 roles for the engineering seed tasks. Should the
-   business wave follow as its own plan (02b) after 02 and 06, as proposed, or replace part of that set?
-2. **Calibration tasks.** Can you supply one real business task per first-wave role (anonymised, like the seed
-   tasks), or should the first runs use synthetic tasks only?
-3. **Languages.** Czech and English for eval cases and the legal notice; is any other language needed in the first
-   wave (for example Slovak or German)?
-4. **Governing law.** Should contract-review eval sets cover Czech and EU law only, or also English or German law?
-5. **Data classes.** Is `personal` acceptable for the support, office, contract-review and bookkeeping roles (it runs
-   only through connectors you took responsibility for), with `special_category` excluded everywhere?
-6. **Same-family critic.** Should the linter reject a critic from the role's own family as an error instead of a
+1. **Same-family critic.** Should the linter reject a critic from the role's own family as an error instead of a
    warning? That makes §7 rule 6 ("preferred") binding and is a spec change.
