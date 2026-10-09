@@ -113,6 +113,20 @@ def test_failed_calls_count_with_their_charged_cost():
     assert contract_costs(events, CC, "workhorse") == [pytest.approx(0.14)]
 
 
+def test_an_abstained_run_counts_with_its_cost():
+    events = contract([("ABSTAIN", 0.05)])
+    assert contract_costs(events, CC, "workhorse") == [pytest.approx(0.05)]
+
+
+def test_a_run_belongs_to_the_adapter_of_its_first_worker_call():
+    events = contract([("RESULT", 0.10)], adapter="prv.openai.subscription_cli")
+    ctr = events[0]["contract"]
+    events.insert(1, {**events[0], "type": "RESULT",
+                      "cost": {**events[0]["cost"], "adapter": CC, "usd": 0.20}})  # a later attempt elsewhere
+    assert contract_costs(events, "prv.openai.subscription_cli", "workhorse") == [pytest.approx(0.30)]
+    assert contract_costs(events, CC, "workhorse") == [] and ctr
+
+
 def test_open_contracts_do_not_count():
     assert contract_costs(contract([("RESULT", 0.2)], closed=False), CC, "workhorse") == []
 
@@ -143,7 +157,7 @@ def test_the_prior_adds_the_critic_by_its_share_and_scales_by_the_retry_prior():
 
 - [ ] **Step 2: Run to verify they fail**
 
-Run: `.venv\Scripts\python.exe -m pytest core/tests/test_estimate.py -q`
+Run: `python -m pytest core/tests/test_estimate.py -q`
 Expected: FAIL with `ModuleNotFoundError: No module named 'ooat_core.estimate'`
 
 - [ ] **Step 3: Implement**
@@ -175,7 +189,8 @@ def contract_costs(events: list[dict], adapter: str, tier: str) -> list[float]:
             continue
         run = runs.setdefault(ctr, {"usd": 0.0, "worker": None})
         run["usd"] += cost.get("usd", 0.0)
-        if event["type"] == "RESULT" and run["worker"] is None:
+        # the run belongs to the adapter of its first worker call (a RESULT or an ABSTAIN with a cost)
+        if event["type"] in ("RESULT", "ABSTAIN") and run["worker"] is None:
             run["worker"] = (cost.get("adapter"), cost.get("tier"), cost.get("price_ver"))
     mine = [r for r in runs.values() if r["worker"] and r["worker"][:2] == (adapter, tier)]
     if not mine:
@@ -208,8 +223,8 @@ def prior_usd(worker_usd: float, checks_usd: float, critic_usd: float, priors: P
 
 - [ ] **Step 4: Run the tests**
 
-Run: `.venv\Scripts\python.exe -m pytest core/tests/test_estimate.py -q`
-Expected: 7 passed
+Run: `python -m pytest core/tests/test_estimate.py -q`
+Expected: 9 passed
 
 - [ ] **Step 5: Commit**
 
@@ -335,6 +350,15 @@ def test_an_attachment_counts_only_what_the_worker_receives():
         pytest.approx(candidate_usd(capped, capped.submit_with_attachment()))
 
 
+def test_four_runs_keep_the_prior_and_the_fifth_switches_to_observation():
+    setup = GateSetup()
+    for usd in (0.10, 0.20, 0.30, 0.40):
+        setup.closed_run(usd)
+    prior = candidate_usd(setup, setup.submit())
+    setup.closed_run(0.50)
+    assert prior != pytest.approx(0.30) and candidate_usd(setup, setup.submit()) == pytest.approx(0.30)
+
+
 def test_from_five_runs_the_estimate_is_the_observed_p50():
     setup = GateSetup()
     for usd in (0.003, 0.058, 0.086, 0.238, 0.469, 0.507):
@@ -386,7 +410,7 @@ def test_estimate_priors_in_gate_are_range_checked(gate, ok):
 
 - [ ] **Step 2: Run to verify they fail**
 
-Run: `.venv\Scripts\python.exe -m pytest core/tests/test_gate.py core/tests/test_gateway_decide.py core/tests/test_config.py -q`
+Run: `python -m pytest core/tests/test_gate.py core/tests/test_gateway_decide.py core/tests/test_config.py -q`
 Expected: the new tests FAIL (`attachment_chars`, `estimate_p90_usd`, `fallback_output_tokens` do not exist; the
 new `[gate]` keys are refused as unknown).
 
@@ -442,8 +466,9 @@ key.
         worker = self._gateway.estimate(ModelRequest(
             tier=WORKER_TIER, prompt=state + "x" * chars, system=worker_system(), data_class=data_class,
             expected_output_tokens=tokens, task=task))
-        observed = contract_costs(self._ledger.events(types=["RESULT", "GATE_PASSED", "GATE_FAILED", "DECISION",
-                                                             "TASK_CLOSED"]), worker.connector, WORKER_TIER)
+        observed = contract_costs(self._ledger.events(types=["RESULT", "ABSTAIN", "GATE_PASSED", "GATE_FAILED",
+                                                             "DECISION", "TASK_CLOSED"]),
+                                  worker.connector, WORKER_TIER)
         if len(observed) >= MIN_RUNS and not narrowings:
             return percentile(observed, 0.5), percentile(observed, 0.9)
         checks = critic = 0.0
@@ -484,7 +509,7 @@ len(self.artifacts.read(ref).decode("utf-8", errors="replace")) for ref in refs)
 
 - [ ] **Step 4: Run gate, gateway, config and runtime tests**
 
-Run: `.venv\Scripts\python.exe -m pytest core/tests/test_gate.py core/tests/test_gateway_decide.py core/tests/test_config.py core/tests/test_runtime.py core/tests/test_task_cli.py -q`
+Run: `python -m pytest core/tests/test_gate.py core/tests/test_gateway_decide.py core/tests/test_config.py core/tests/test_runtime.py core/tests/test_task_cli.py -q`
 Expected: all pass. Tests that pin an estimate or a budget question (search `estimate_usd`, `model_usd`,
 `budget_usd=0.0`, `Raise the budget` in `core/tests/`) may change; recompute each expected value from the formula,
 not from the test output, and record each change as a ruling in the execution ledger.
@@ -506,17 +531,18 @@ git commit -m "feat(core): the Gate estimates contract p50/p90 per adapter and c
 
 - [ ] **Step 1: Check on the operator's ledger (read-only, nothing is written)**
 
-Run from the working folder:
+Run from the working folder, with the repository's virtual environment active:
 
 ```bash
-.venv\Scripts\python.exe -c "from ooat_core.ledger import Ledger; from ooat_core.estimate import contract_costs, percentile; l = Ledger.open('sqlite:///ledger.sqlite'); c = contract_costs(l.events(), 'prv.anthropic.subscription_cli', 'workhorse'); print(len(c), percentile(c, 0.5), percentile(c, 0.9))"
+python -c "from ooat_core.ledger import Ledger; from ooat_core.estimate import contract_costs, percentile; l = Ledger.open('sqlite:///ledger.sqlite'); c = contract_costs(l.events(), 'prv.anthropic.subscription_cli', 'workhorse'); print(len(c), percentile(c, 0.5), percentile(c, 0.9))"
 ```
 
 Expected: `6 0.0858… 0.5074…` (the evidence table). Record the output in the execution ledger.
 
 - [ ] **Step 2: Docs**
   - design 04 §4: the estimate is the p50 / p90 of the last 50 closed contracts on the worker's adapter and tier
-    (spec §11), p50 for `model_usd` and the value check, p90 for the budget check and question; before 5 runs, or
+    (spec §11); a contract's whole cost, abstentions and failed calls included, belongs to the adapter of its
+    first worker call (a failover later in the contract does not move it), p50 for `model_usd` and the value check, p90 for the budget check and question; before 5 runs, or
     for a narrowed scope, the prior: worker (with the attachment text the worker receives, at most 100,000
     characters each) + decision checks + critic × its share (1 with an untrusted attachment or no decision route),
     times (1 + retry prior); priors in `[gate]`. The ledger has no model id per call, so the price version stands
@@ -528,7 +554,7 @@ Expected: `6 0.0858… 0.5074…` (the evidence table). Record the output in the
 
 - [ ] **Step 3: Full suite and commit**
 
-Run: `.venv\Scripts\python.exe -m pytest -q`
+Run: `python -m pytest -q`
 Expected: all pass
 
 ```bash
