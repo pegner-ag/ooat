@@ -31,5 +31,8 @@ registers such hooks for its own panes, and wants Orca and OOAT to use `agy` sid
 
 The approval first covered `hooks.json` only, so a script its commands call could change without a new approval:
 Orca's per-event scripts call `antigravity-hook.cmd`, which `hooks.json` never names. `hooks()` now also lists every
-file in the folder of each program a hook command starts, and each needs the operator's approval. A change to any
+file a hook command names (the program, and an interpreter's script such as `node x.js`), and for a script
+(`.cmd`, `.bat`, `.ps1`, `.py`, `.js`, `.sh`, …) every file in its folder, up to 200; a program elsewhere, such as
+`powershell.exe` in a system folder, is fingerprinted alone. A command that names no existing file, or a folder
+that cannot be read, can never be approved (fail closed). Each listed file needs the operator's approval. A change to any
 of them stops the connector until it is approved again.

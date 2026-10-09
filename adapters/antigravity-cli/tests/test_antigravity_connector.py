@@ -272,7 +272,11 @@ def test_gemini_cli_hooks_do_not_stop_the_connector(tmp_path, monkeypatch):
     assert agy.detect().available and agy.complete(request(), None).text.strip() == "OK"
 
 
-def hooked(tmp_path, text='{"PreToolUse": [{"command": "orca.cmd"}]}'):
+def hooked(tmp_path, text=None):
+    scripts = tmp_path / "orca"
+    scripts.mkdir(exist_ok=True)
+    (scripts / "orca.cmd").write_text("@echo off\n", encoding="utf-8")
+    text = text or json.dumps({"PreToolUse": [{"command": str(scripts / "orca.cmd")}]})
     gemini = tmp_path / ".gemini"
     (gemini / "config").mkdir(parents=True, exist_ok=True)
     (gemini / "config" / "hooks.json").write_text(text, encoding="utf-8")
@@ -282,8 +286,8 @@ def hooked(tmp_path, text='{"PreToolUse": [{"command": "orca.cmd"}]}'):
 def test_hooks_lists_each_hook_file_with_its_fingerprint(tmp_path):
     import hashlib
     agy = hooked(tmp_path)
-    [(path, sha, text)] = agy.hooks()
-    assert path.endswith("hooks.json") and "orca.cmd" in text
+    (path, sha, text), (script, _, _) = agy.hooks()
+    assert path.endswith("hooks.json") and "orca.cmd" in text and script.endswith("orca.cmd")
     assert sha == hashlib.sha256((tmp_path / ".gemini" / "config" / "hooks.json").read_bytes()).hexdigest()
     assert AntigravityConnector(gemini_home=tmp_path / "none").hooks() == []
 
@@ -291,17 +295,17 @@ def test_hooks_lists_each_hook_file_with_its_fingerprint(tmp_path):
 def test_approved_hooks_let_the_call_run(tmp_path, monkeypatch):
     fake_cli(monkeypatch)
     agy = hooked(tmp_path)
-    [(_, sha, _)] = agy.hooks()
-    assert agy.complete(request(approved_hooks=(sha,)), None).text.strip() == "OK"
+    approved = tuple(sha for _, sha, _ in agy.hooks())
+    assert agy.complete(request(approved_hooks=approved), None).text.strip() == "OK"
 
 
 def test_hooks_changed_after_approval_stop_the_call(tmp_path, monkeypatch):
     fake_cli(monkeypatch)
     agy = hooked(tmp_path)
-    [(_, sha, _)] = agy.hooks()
-    hooked(tmp_path, '{"PreToolUse": [{"command": "other.cmd"}]}')
+    approved = tuple(sha for _, sha, _ in agy.hooks())
+    (tmp_path / "orca" / "orca.cmd").write_text("@echo off\necho changed\n", encoding="utf-8")
     with pytest.raises(ConnectorError, match="approve-hooks"):
-        agy.complete(request(approved_hooks=(sha,)), None)
+        agy.complete(request(approved_hooks=approved), None)
 
 
 @pytest.mark.parametrize("text", ["{}", "[]", "null", "  \n"])
@@ -348,3 +352,30 @@ def test_a_quoted_command_with_arguments_is_followed_too(tmp_path):
     (scripts / "run.cmd").write_text("@echo off\n", encoding="utf-8")
     agy = hooked(tmp_path, json.dumps({"x": {"Stop": [{"command": f'"{scripts / "run.cmd"}" --event stop'}]}}))
     assert "run.cmd" in [Path(path).name for path, _, _ in agy.hooks()]
+
+
+def test_a_script_run_by_an_interpreter_is_part_of_the_approval(tmp_path):
+    scripts = tmp_path / "js"
+    scripts.mkdir()
+    (scripts / "hook.js").write_text("console.log('{}')", encoding="utf-8")
+    (scripts / "lib.js").write_text("module.exports = 1", encoding="utf-8")
+    agy = hooked(tmp_path, json.dumps({"x": {"Stop": [{"command": f"node {scripts / 'hook.js'} --stop"}]}}))
+    assert {"hook.js", "lib.js"} <= {Path(path).name for path, _, _ in agy.hooks()}
+
+
+def test_a_command_that_names_no_existing_file_refuses(tmp_path, monkeypatch):
+    fake_cli(monkeypatch)
+    agy = hooked(tmp_path, json.dumps({"x": {"Stop": [{"command": "node %APPDATA%\\hook.js"}]}}))
+    approved = tuple(sha for _, sha, _ in agy.hooks())
+    with pytest.raises(ConnectorError, match="approve-hooks"):
+        agy.complete(request(approved_hooks=approved), None)
+
+
+def test_an_executable_in_a_system_folder_is_fingerprinted_alone(tmp_path):
+    system = tmp_path / "System32"
+    system.mkdir()
+    (system / "powershell.exe").write_bytes(b"MZ")
+    (system / "other.dll").write_bytes(b"x")
+    agy = hooked(tmp_path, json.dumps({"x": {"Stop": [{"command": f'"{system / "powershell.exe"}" -NoProfile'}]}}))
+    names = {Path(path).name for path, _, _ in agy.hooks()}
+    assert "powershell.exe" in names and "other.dll" not in names

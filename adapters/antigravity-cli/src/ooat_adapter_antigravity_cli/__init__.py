@@ -5,6 +5,7 @@ import hashlib
 import json
 import os
 import re
+import shlex
 from pathlib import Path
 
 from ooat_core.connectors import ConnectorError, Detection, ModelRequest, ModelResponse
@@ -146,12 +147,19 @@ def _commands(data) -> list[str]:
     return []
 
 
-def _program(command: str) -> Path | None:
-    """The file a command starts, quoted or not; None when it names no existing file (e.g. a bare `node`)."""
-    command = command.strip()
-    head = command[1:].split('"', 1)[0] if command.startswith('"') else command.split()[0] if command else ""
-    path = Path(head)
-    return path if head and path.is_file() else None
+SCRIPT_SUFFIXES = frozenset({".cmd", ".bat", ".ps1", ".py", ".js", ".mjs", ".cjs", ".sh", ".vbs"})
+MAX_FOLDER_FILES = 200
+
+
+def _files(command: str) -> list[Path] | None:
+    """Every existing file a command names: the program and, for an interpreter (`node x.js`, `powershell -File
+    x.ps1`), its script. None when it names none, so nothing could be fingerprinted (fail closed)."""
+    try:
+        tokens = [t.strip('"') for t in shlex.split(command, posix=False)]
+    except ValueError:
+        return None
+    found = [Path(t) for t in tokens if t and Path(t).is_file()]
+    return found or None
 
 
 def _fingerprint(path: Path) -> tuple[str, str, str]:
@@ -178,9 +186,27 @@ def hook_files(gemini_home: Path) -> list[tuple[str, str, str]]:
         return [_fingerprint(path)]  # not JSON: agy may still read it, so it needs approval as it is
     if not parsed:  # {}, [] and null define no hooks
         return []
-    folders = sorted({program.parent for program in map(_program, _commands(parsed)) if program is not None})
-    scripts = [file for folder in folders for file in sorted(folder.iterdir()) if file.is_file()]
-    return [_fingerprint(path)] + [_fingerprint(file) for file in scripts]
+    entries, folders, files = [_fingerprint(path)], set(), set()
+    for command in _commands(parsed):
+        named = _files(command)
+        if named is None:  # nothing to fingerprint: never approvable
+            entries.append((f"{path}: command {command[:80]!r} names no file OOAT can check", "", ""))
+            continue
+        for file in named:  # a script may call its neighbours; a program in a system folder does not
+            (folders if file.suffix.lower() in SCRIPT_SUFFIXES else files).add(file.parent if
+                                                                            file.suffix.lower() in SCRIPT_SUFFIXES
+                                                                            else file)
+    for folder in sorted(folders):
+        try:
+            listed = sorted(f for f in folder.iterdir() if f.is_file())
+        except OSError:
+            entries.append((str(folder), "", ""))
+            continue
+        if len(listed) > MAX_FOLDER_FILES:
+            entries.append((f"{folder}: more than {MAX_FOLDER_FILES} files", "", ""))
+            continue
+        files.update(listed)
+    return entries + [_fingerprint(file) for file in sorted(files)]
 
 
 def hooks_risk(gemini_home: Path, approved: tuple[str, ...] = ()) -> str | None:
