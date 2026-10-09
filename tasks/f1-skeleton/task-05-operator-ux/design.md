@@ -301,3 +301,14 @@ The owner approved this design on 2026-10-09 with these answers:
 
 - Public install: the owner approved publishing `ooat` on PyPI (2026-10-09), so `pipx install ooat` becomes the
   documented install once a release is cut; each release is still published only on the owner's go.
+
+## 14. Review points carried into the 05a plan
+
+- A server bound beyond loopback (`--host`) caps web sessions like tokens, or the operator records a responsibility
+  statement for it (ADR 0012 style); the plan picks one.
+- A token's data-class cap gates writes too: answering, rating or cancelling a task above the cap is refused with
+  `DATA_CLASS_ABOVE_TOKEN`, with a test.
+- The owner's PyPI approval is recorded in ADR 0016 (CLAUDE.md gates publishing on the owner); each release still on
+  the owner's go.
+- The runner's queue is rebuilt from the ledger on start, so tasks from `ooat task submit` and tasks queued before a
+  restart are picked up.
