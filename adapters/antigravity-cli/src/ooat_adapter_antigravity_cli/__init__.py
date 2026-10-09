@@ -5,6 +5,8 @@ import hashlib
 import json
 import os
 import re
+import shlex
+import shutil
 from pathlib import Path
 
 from ooat_core.connectors import ConnectorError, Detection, ModelRequest, ModelResponse
@@ -136,21 +138,93 @@ def settings_risk(settings_path: Path) -> str | None:
     return None
 
 
+def _commands(data) -> list[str]:
+    """Every "command" string anywhere in a hooks.json document."""
+    if isinstance(data, dict):
+        return [c for key, value in data.items()
+                for c in ([value] if key == "command" and isinstance(value, str) else _commands(value))]
+    if isinstance(data, list):
+        return [c for item in data for c in _commands(item)]
+    return []
+
+
+SCRIPT_SUFFIXES = frozenset({".cmd", ".bat", ".ps1", ".py", ".js", ".mjs", ".cjs", ".sh", ".vbs"})
+MAX_FOLDER_FILES = 200
+
+
+def _files(command: str) -> list[Path] | None:
+    """Every file a command names: the program and, for an interpreter (`node x.js`, `powershell -File x.ps1`),
+    its script. None when the program or any path-like argument does not resolve to an existing file by an absolute
+    path (an environment variable, a relative or PATH name): such a file could never be fingerprinted (fail closed)."""
+    try:
+        tokens = [t.strip('"') for t in shlex.split(command, posix=False)]
+    except ValueError:
+        return None
+    found = []
+    for index, token in enumerate(tokens):
+        path = Path(token)
+        path_like = index == 0 or "/" in token or "\\" in token or "%" in token or "$" in token \
+            or path.suffix.lower() in SCRIPT_SUFFIXES
+        if not path_like:
+            continue  # a flag or a plain argument
+        if index == 0 and not path.is_absolute() and shutil.which(token):  # a program found on PATH, e.g. node
+            path = Path(shutil.which(token))
+        if not (path.is_absolute() and path.is_file()):
+            return None
+        found.append(path)
+    return found or None
+
+
+def _fingerprint(path: Path, show: bool = True) -> tuple[str, str, str]:
+    """(path, sha256, text). Only hooks.json and the scripts a command names are shown in full; a neighbour in the
+    same folder is shown by size, so a token file next to a script never reaches the terminal."""
+    try:
+        data = path.read_bytes()
+    except OSError:
+        return str(path), "", ""  # unreadable: an empty fingerprint is never approved, so the call refuses
+    text = data.decode("utf-8", errors="replace") if show else f"(not shown: {len(data)} bytes)"
+    return str(path), hashlib.sha256(data).hexdigest(), text
+
+
 def hook_files(gemini_home: Path) -> list[tuple[str, str, str]]:
-    """(path, sha256 of the bytes, text) of each hook file agy reads: config/hooks.json. Gemini CLI's hooks in
-    ~/.gemini/settings.json are not run by agy (measured 2026-10-06: no process started during a call)."""
+    """(path, sha256 of the bytes, text) of config/hooks.json and of every file in the folder of each program its
+    commands start: a script may call its neighbours (Orca's per-event scripts call antigravity-hook.cmd), so a
+    change to any of them needs a new approval (ADR 0015). Gemini CLI's hooks in ~/.gemini/settings.json are not
+    run by agy (measured 2026-10-06: no process started during a call)."""
     path = gemini_home / "config" / "hooks.json"
     try:
         data = path.read_bytes() if path.is_file() else b""
     except OSError:
-        return [(str(path), "", "")]  # unreadable: an empty fingerprint is never approved, so the call refuses
+        return [(str(path), "", "")]
     try:
-        empty = not data.strip() or not json.loads(data)  # {}, [] and null define no hooks
+        parsed = json.loads(data) if data.strip() else None
     except ValueError:
-        empty = False  # not JSON: agy may still read it, so it needs approval
-    if empty:
+        return [_fingerprint(path)]  # not JSON: agy may still read it, so it needs approval as it is
+    if not parsed:  # {}, [] and null define no hooks
         return []
-    return [(str(path), hashlib.sha256(data).hexdigest(), data.decode("utf-8", errors="replace"))]
+    entries, folders, files, shown = [_fingerprint(path)], set(), set(), set()
+    for command in _commands(parsed):
+        named = _files(command)
+        if named is None:  # nothing to fingerprint: never approvable
+            entries.append((f"{path}: command {command[:80]!r} names no file OOAT can check", "", ""))
+            continue
+        for file in named:
+            shown.add(file)
+            if file.suffix.lower() in SCRIPT_SUFFIXES:  # a script may call its neighbours
+                folders.add(file.parent)
+            else:  # a program such as powershell.exe in a system folder: itself only
+                files.add(file)
+    for folder in sorted(folders):
+        try:
+            listed = sorted(f for f in folder.iterdir() if f.is_file())
+        except OSError:
+            entries.append((str(folder), "", ""))
+            continue
+        if len(listed) > MAX_FOLDER_FILES:
+            entries.append((f"{folder}: more than {MAX_FOLDER_FILES} files", "", ""))
+            continue
+        files.update(listed)
+    return entries + [_fingerprint(file, show=file in shown) for file in sorted(files)]
 
 
 def hooks_risk(gemini_home: Path, approved: tuple[str, ...] = ()) -> str | None:

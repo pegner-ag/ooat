@@ -15,8 +15,9 @@ the operator's Google account and its existing login. Antigravity CLI replaced G
 - Before each call the connector refuses to run when the agy setup could give the agent a tool: settings keys
   it has not checked, `permissions` other than an empty allow list and deny rules, an MCP server
   (`agy mcp list`) or a plugin (`agy plugin list`), or hooks in `~/.gemini/config/hooks.json` that the operator
-  has not approved with `ooat connectors approve-hooks` (sha256 of the file on the acknowledgement, ADR 0015;
-  any change to the file needs a new approval). Gemini CLI's
+  has not approved with `ooat connectors approve-hooks` (sha256 of `hooks.json` and of every file in the folder of
+  each program its commands start, on the acknowledgement, ADR 0015; any change to any of them needs a new
+  approval). Gemini CLI's
   hooks in `~/.gemini/settings.json` do not count: watching every new process during a call (2026-10-06) showed
   that agy starts none for them. The workspace is a fresh empty directory, so no workspace `.agents/hooks.json`
   or settings apply. `detect()` checks only the files, so it stays offline.

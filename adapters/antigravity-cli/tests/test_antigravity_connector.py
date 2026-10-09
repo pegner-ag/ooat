@@ -272,7 +272,11 @@ def test_gemini_cli_hooks_do_not_stop_the_connector(tmp_path, monkeypatch):
     assert agy.detect().available and agy.complete(request(), None).text.strip() == "OK"
 
 
-def hooked(tmp_path, text='{"PreToolUse": [{"command": "orca.cmd"}]}'):
+def hooked(tmp_path, text=None):
+    scripts = tmp_path / "orca"
+    scripts.mkdir(exist_ok=True)
+    (scripts / "orca.cmd").write_text("@echo off\n", encoding="utf-8")
+    text = text or json.dumps({"PreToolUse": [{"command": str(scripts / "orca.cmd")}]})
     gemini = tmp_path / ".gemini"
     (gemini / "config").mkdir(parents=True, exist_ok=True)
     (gemini / "config" / "hooks.json").write_text(text, encoding="utf-8")
@@ -282,8 +286,8 @@ def hooked(tmp_path, text='{"PreToolUse": [{"command": "orca.cmd"}]}'):
 def test_hooks_lists_each_hook_file_with_its_fingerprint(tmp_path):
     import hashlib
     agy = hooked(tmp_path)
-    [(path, sha, text)] = agy.hooks()
-    assert path.endswith("hooks.json") and "orca.cmd" in text
+    (path, sha, text), (script, _, _) = agy.hooks()
+    assert path.endswith("hooks.json") and "orca.cmd" in text and script.endswith("orca.cmd")
     assert sha == hashlib.sha256((tmp_path / ".gemini" / "config" / "hooks.json").read_bytes()).hexdigest()
     assert AntigravityConnector(gemini_home=tmp_path / "none").hooks() == []
 
@@ -291,17 +295,17 @@ def test_hooks_lists_each_hook_file_with_its_fingerprint(tmp_path):
 def test_approved_hooks_let_the_call_run(tmp_path, monkeypatch):
     fake_cli(monkeypatch)
     agy = hooked(tmp_path)
-    [(_, sha, _)] = agy.hooks()
-    assert agy.complete(request(approved_hooks=(sha,)), None).text.strip() == "OK"
+    approved = tuple(sha for _, sha, _ in agy.hooks())
+    assert agy.complete(request(approved_hooks=approved), None).text.strip() == "OK"
 
 
 def test_hooks_changed_after_approval_stop_the_call(tmp_path, monkeypatch):
     fake_cli(monkeypatch)
     agy = hooked(tmp_path)
-    [(_, sha, _)] = agy.hooks()
-    hooked(tmp_path, '{"PreToolUse": [{"command": "other.cmd"}]}')
+    approved = tuple(sha for _, sha, _ in agy.hooks())
+    (tmp_path / "orca" / "orca.cmd").write_text("@echo off\necho changed\n", encoding="utf-8")
     with pytest.raises(ConnectorError, match="approve-hooks"):
-        agy.complete(request(approved_hooks=(sha,)), None)
+        agy.complete(request(approved_hooks=approved), None)
 
 
 @pytest.mark.parametrize("text", ["{}", "[]", "null", "  \n"])
@@ -315,3 +319,86 @@ def test_access_outside_the_workspace_stops_the_connector_with_a_clear_message(t
         connector(tmp_path, {"allowNonWorkspaceAccess": True}).complete(request(), None)
     ok = connector(tmp_path, {"allowNonWorkspaceAccess": False, "statusLine": {"enabled": True}})
     assert ok.complete(request(), None).text.strip() == "OK"
+
+
+def orca_like(tmp_path):
+    scripts = tmp_path / "hooks-bin"
+    scripts.mkdir()
+    (scripts / "pre.cmd").write_text("@echo off\ncall \"%~dp0core.cmd\"\n", encoding="utf-8")
+    (scripts / "core.cmd").write_text("@echo off\necho {}\n", encoding="utf-8")  # called by pre.cmd, not by hooks.json
+    command = str(scripts / "pre.cmd")
+    return hooked(tmp_path, json.dumps({"x": {"PreInvocation": [{"type": "command", "command": command}]}})), scripts
+
+
+def test_the_scripts_a_hook_command_runs_are_part_of_the_approval(tmp_path):
+    agy, scripts = orca_like(tmp_path)
+    names = sorted(Path(path).name for path, _, _ in agy.hooks())
+    assert names == ["core.cmd", "hooks.json", "pre.cmd"]  # the whole folder of the command, not only hooks.json
+
+
+def test_a_changed_script_called_indirectly_needs_a_new_approval(tmp_path, monkeypatch):
+    fake_cli(monkeypatch)
+    agy, scripts = orca_like(tmp_path)
+    approved = tuple(sha for _, sha, _ in agy.hooks())
+    assert agy.complete(request(approved_hooks=approved), None).text.strip() == "OK"
+    (scripts / "core.cmd").write_text("@echo off\ncurl https://example.invalid\n", encoding="utf-8")
+    with pytest.raises(ConnectorError, match="approve-hooks"):
+        agy.complete(request(approved_hooks=approved), None)
+
+
+def test_a_quoted_command_with_arguments_is_followed_too(tmp_path):
+    scripts = tmp_path / "Program Files" / "hook"
+    scripts.mkdir(parents=True)
+    (scripts / "run.cmd").write_text("@echo off\n", encoding="utf-8")
+    agy = hooked(tmp_path, json.dumps({"x": {"Stop": [{"command": f'"{scripts / "run.cmd"}" --event stop'}]}}))
+    assert "run.cmd" in [Path(path).name for path, _, _ in agy.hooks()]
+
+
+def test_a_script_run_by_an_interpreter_is_part_of_the_approval(tmp_path):
+    scripts = tmp_path / "js"
+    scripts.mkdir()
+    (scripts / "hook.js").write_text("console.log('{}')", encoding="utf-8")
+    (scripts / "lib.js").write_text("module.exports = 1", encoding="utf-8")
+    node = tmp_path / "tools" / "node.exe"
+    node.parent.mkdir()
+    node.write_bytes(b"MZ")
+    agy = hooked(tmp_path, json.dumps({"x": {"Stop": [{"command": f"\"{node}\" {scripts / 'hook.js'} --stop"}]}}))
+    assert {"hook.js", "lib.js"} <= {Path(path).name for path, _, _ in agy.hooks()}
+
+
+def test_a_command_that_names_no_existing_file_refuses(tmp_path, monkeypatch):
+    fake_cli(monkeypatch)
+    agy = hooked(tmp_path, json.dumps({"x": {"Stop": [{"command": "node %APPDATA%\\hook.js"}]}}))
+    approved = tuple(sha for _, sha, _ in agy.hooks())
+    with pytest.raises(ConnectorError, match="approve-hooks"):
+        agy.complete(request(approved_hooks=approved), None)
+
+
+def test_an_executable_in_a_system_folder_is_fingerprinted_alone(tmp_path):
+    system = tmp_path / "System32"
+    system.mkdir()
+    (system / "powershell.exe").write_bytes(b"MZ")
+    (system / "other.dll").write_bytes(b"x")
+    agy = hooked(tmp_path, json.dumps({"x": {"Stop": [{"command": f'"{system / "powershell.exe"}" -NoProfile'}]}}))
+    names = {Path(path).name for path, _, _ in agy.hooks()}
+    assert "powershell.exe" in names and "other.dll" not in names
+
+
+@pytest.mark.parametrize("arg", ["%APPDATA%/hook.ps1", "hook.ps1", "./scripts/hook.js"])
+def test_an_interpreter_whose_script_does_not_resolve_refuses(tmp_path, monkeypatch, arg):
+    fake_cli(monkeypatch)
+    program = tmp_path / "bin" / "powershell.exe"
+    program.parent.mkdir()
+    program.write_bytes(b"MZ")
+    agy = hooked(tmp_path, json.dumps({"x": {"Stop": [{"command": f'"{program}" -File {arg}'}]}}))
+    approved = tuple(sha for _, sha, _ in agy.hooks())
+    with pytest.raises(ConnectorError, match="approve-hooks"):
+        agy.complete(request(approved_hooks=approved), None)
+
+
+def test_neighbour_files_are_listed_by_size_and_hash_not_by_content(tmp_path):
+    agy, scripts = orca_like(tmp_path)
+    (scripts / "secrets.env").write_text("TOKEN=do-not-print", encoding="utf-8")
+    texts = {Path(path).name: text for path, _, text in agy.hooks()}
+    assert "do-not-print" not in texts["secrets.env"] and "bytes" in texts["secrets.env"]
+    assert "core.cmd" in texts["pre.cmd"]  # a directly named script is shown in full

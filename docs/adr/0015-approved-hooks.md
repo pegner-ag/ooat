@@ -26,3 +26,17 @@ registers such hooks for its own panes, and wants Orca and OOAT to use `agy` sid
 - Schema change: `body_adapter_acknowledged.approved_hooks` (array of `{path, sha256}`), additive.
 - Orca's hooks in `config/hooks.json` can be approved once; after Orca rewrites the file, OOAT asks again.
 - Decided by the owner on 2026-10-06 ("postav schvalování hooků"); recorded on 2026-10-07.
+
+## Amendment (owner, 2026-10-09)
+
+The approval first covered `hooks.json` only, so a script its commands call could change without a new approval:
+Orca's per-event scripts call `antigravity-hook.cmd`, which `hooks.json` never names. `hooks()` now also lists every
+file a hook command names (the program, and an interpreter's script such as `node x.js`), and for a script
+(`.cmd`, `.bat`, `.ps1`, `.py`, `.js`, `.sh`, …) every file in its folder, up to 200; a program elsewhere, such as
+`powershell.exe` in a system folder, is fingerprinted alone. A command whose program or any path-like argument does not
+resolve to an existing file by an absolute path (a program may also be found on PATH), or a folder that cannot be
+read or holds more than 200 files, can never be approved (fail closed). Each listed file needs the operator's
+approval. `approve-hooks` shows `hooks.json` and the named scripts in full and every other file by size and hash,
+so a token file next to a script is never printed. Not covered: subfolders, and scripts without one of the listed
+suffixes (such as an extensionless POSIX script or `.psm1`) count as programs, fingerprinted alone. A change to any
+of them stops the connector until it is approved again.
