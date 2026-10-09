@@ -72,7 +72,7 @@ TASKS                                   state        topology  cost / budget   u
 ```
 TASK  Release notes 0.3                         CLOSED_DONE · T2 · $0.08 of $1.00 (estimate $0.10)
 TIMELINE (live)                                 RESULT
- 10:02 Submitted by Martin (web)                [Document v2 ▾]  [Markdown | Source | Diff v1→v2]
+ 10:02 Submitted by Operator (web)                [Document v2 ▾]  [Markdown | Source | Diff v1→v2]
  10:02 Gate: T2 · A1 checkable 0.93 (θ 0.80)    ┌───────────────────────────────────────────┐
  10:03 Attempt 1 → document v1  $0.03           │ # Release notes 0.3                        │
  10:04 ✗ "mentions breaking changes" 0.41→critic│ …rendered Markdown…                        │
@@ -258,7 +258,7 @@ The same steps in the browser (first `ooat serve` without a configuration) and i
 
 | Plan | Content | Depends on |
 |---|---|---|
-| 05a | `ooat serve`: API, sessions, tokens, runner, runner lock, SQLite threading, `stats.py`, schema additions (§12) | 04 |
+| 05a | `ooat serve`: API, sessions, tokens, runner, runner lock, SQLite threading, `stats.py`, schema additions (§12) | 04, ADR 0016 accepted by the owner |
 | 05b | Web app: inbox, task page with timeline and artifact viewer, HIL cards, rating, connectors, usage, `en`/`cs` | 05a |
 | 05c | Python client in `sdk/python`, chat bridge contract in `docs/`, a reference bridge test; the private bot's change is done in its own repository | 05a |
 | 01c | Setup wizard, browser and terminal | 05a (browser), 01 |
@@ -276,8 +276,9 @@ every channel, and the allow-list test for `hil` actors.
   admit the two token events.
 - Optional `channel` (`cli`, `web`, `token:<id>`) in the bodies of `TASK_SUBMITTED`, `HIL_RESPONSE`, `TASK_RATED`,
   `ADAPTER_ACKNOWLEDGED`, `ADAPTER_DISABLED`.
-- Optional `TASK_SUBMITTED.body.intake_key` (the client's idempotency key, unique per token), so a retried
-  submission never runs a task twice, also across a restart.
+- Optional `TASK_SUBMITTED.body.intake_key` (the client's idempotency key), unique per `(channel, key)` and checked
+  inside the same `BEGIN IMMEDIATE` transaction as `Ledger.append`, so two concurrent or retried deliveries of one
+  chat message never create two tasks, also across a restart.
 - Spec §9: R3 needs an operator identity bound to something the operator holds (passkey/WebAuthn or an OS-account
   check); a self-declared name (CLI `--operator`, `ooat login --operator`) or a token never answers R3. Since F1 has
   no R3 action, the binding is a precondition for the first R3 gate, not part of 05.
@@ -291,12 +292,12 @@ The owner approved this design on 2026-10-09 with these answers:
 - Dashboard: JavaScript with JSDoc types checked by `tsc --noEmit --checkJs`, no build step.
 - Tasks from chat without "Done when:" lines: today's rule A1 stays (one-tap clarify / run as it is / do not run).
 - The bridge token's data-class cap is `internal`; client or personal content stays in the web app.
+- Web sessions have no data-class cap: the operator sees everything in their own browser on their own machine; caps
+  apply to tokens, which leave the machine.
 - 05a adds a human `cancel` action (a runtime path ending `CANCELLED`), used by the bot's `/cancel`.
 - Token and channel events go into the ledger (ADR 0016, §12).
 - The private bot gets OOAT as an additional engine per chat (`/engine ooat`); its direct CLI engines stay for coding
   work.
 
-## 14. Owner questions (open)
-
-- Public install: `pipx install ooat` needs a PyPI release, which needs the owner's explicit approval (project rule);
-  until then the instructions install from git.
+- Public install: the owner approved publishing `ooat` on PyPI (2026-10-09), so `pipx install ooat` becomes the
+  documented install once a release is cut; each release is still published only on the owner's go.
