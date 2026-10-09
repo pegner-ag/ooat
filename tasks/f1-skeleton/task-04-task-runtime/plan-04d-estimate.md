@@ -43,7 +43,9 @@ estimates 2.8 to 22 times too low. The prior path still matters for a new adapte
 - Priors live in `GateSettings` (`ooat.toml [gate]`); a rate prior is a number from 0 to 1, a token prior a positive
   integer, both checked when the config is read.
 - History is split per adapter and tier. The ledger's cost record has no model id yet, so "split when the model
-  behind a tier changes" is approximated by the price version (`cost.price_ver`); record this limit in design 04.
+  behind a tier changes" is approximated by the price version (`cost.price_ver`). `price_ver` is the version of the
+  whole `routing.json`, so any price edit resets every adapter's history to the prior; record both limits in
+  design 04 and the model id in 03d.
 - No schema change; the estimate stays `candidates[].model_usd` (p50).
 - English for code, docs and commits.
 
@@ -53,8 +55,9 @@ estimates 2.8 to 22 times too low. The prior path still matters for a new adapte
    (Task 1 test `test_failed_calls_count_with_their_charged_cost`).
 2. Fewer than five runs on the routed adapter, but many on another → the prior applies; runs of another adapter
    never set this one's estimate (Task 1 test `test_runs_of_another_adapter_do_not_count`).
-3. A fresh ledger → the prior estimate is never below today's formula, computed independently, with and without a
-   decision route (Task 2 tests `test_..._never_below_the_old_one`).
+3. A fresh ledger → the prior estimate is never below today's formula, computed independently; without a decision
+   route the critic counts in full (Task 2 tests `test_without_observations_the_estimate_is_never_below_the_old_one`,
+   `test_without_a_decision_route_the_critic_is_certain`).
 4. An attachment larger than the worker's 100,000-character cap counts only up to the cap (Task 2 test
    `test_an_attachment_counts_only_what_the_worker_receives`).
 5. p90 above the budget, p50 below it → the budget question comes before the run, and its raise covers p90
@@ -320,12 +323,24 @@ def test_without_observations_the_estimate_is_never_below_the_old_one():
     assert candidate_usd(setup, task) >= old_formula(setup, task)
 
 
-def test_without_a_decision_route_the_estimate_is_never_below_the_old_one():
+def test_without_a_decision_route_the_critic_is_certain(monkeypatch):
+    routed, unrouted = GateSetup(), GateSetup()
+
+    def no_route(*args, **kwargs):
+        raise GatewayError("NOT_PERMITTED", "no decision route in this test")
+    monkeypatch.setattr(unrouted.gateway, "estimate_decision", no_route)
+    assert candidate_usd(unrouted, unrouted.submit()) > candidate_usd(routed, routed.submit())
+
+
+def test_narrowing_scales_the_observed_estimate():
     setup = GateSetup()
-    setup.ledger.append(new_event("ADAPTER_DISABLED", task=None, actor=HIL, body={
-        "adapter": setup.jev.manifest["id"], "operator": "Operator", "reason": "no decision route in this test"}))
-    task = setup.submit()
-    assert candidate_usd(setup, task) >= old_formula(setup, task, routed=False)
+    for usd in (0.10, 0.20, 0.30, 0.40, 0.50):
+        setup.closed_run(usd)
+    task = setup.submit(budget_usd=0.01)
+    first = setup.gate.run(task)
+    answer(setup, task, first.request, choice="narrow_scope", text="Jen první kapitola smlouvy.")
+    second = setup.gate.run(task)
+    assert second.estimate_usd == pytest.approx(first.estimate_usd / 2)
 
 
 def test_narrowing_still_lowers_the_prior_estimate():
@@ -377,8 +392,8 @@ def test_the_budget_check_uses_p90():
     assert raise_to["cost_usd"] >= 0.507
 ```
 
-(`answer`, `task_facts`, `GateSettings`, `new_event`, `new_id`, `HIL`, `GATE`, `pytest` exist in the file; add any
-that is missing. `GATE` is the Gate's actor dict used elsewhere in the tests.)
+(`answer`, `task_facts`, `GateSettings`, `GatewayError`, `new_event`, `new_id`, `HIL`, `GATE`, `pytest` exist in
+the file; add any that is missing. `GATE` is the Gate's actor dict used elsewhere in the tests.)
 
 Append to `core/tests/test_gateway_decide.py` (its `Setup` and `economy()` exist):
 
@@ -469,8 +484,9 @@ key.
         observed = contract_costs(self._ledger.events(types=["RESULT", "ABSTAIN", "GATE_PASSED", "GATE_FAILED",
                                                              "DECISION", "TASK_CLOSED"]),
                                   worker.connector, WORKER_TIER)
-        if len(observed) >= MIN_RUNS and not narrowings:
-            return percentile(observed, 0.5), percentile(observed, 0.9)
+        if len(observed) >= MIN_RUNS:  # a narrowed scope halves the observed cost, as it halves the prior's output
+            scale = 0.5 ** narrowings
+            return percentile(observed, 0.5) * scale, percentile(observed, 0.9) * scale
         checks = critic = 0.0
         routed = True
         if criteria:
@@ -491,8 +507,8 @@ key.
         return usd, usd
 ```
 
-A narrowed scope keeps the prior path, because the observed runs were of unnarrowed tasks; that keeps narrowing
-able to bring a task under its budget.
+Each narrowing halves the observed p50 / p90, as it halves the prior's output: the observed runs were of
+unnarrowed tasks, and falling back to the (too low) prior would let almost any narrowed task pass its budget check.
 
 In `Gate.run`: unpack `estimate, estimate_p90 = self._estimate(..., refs=<the TASK_SUBMITTED event's refs>)`;
 `model_usd` and the value check use `estimate` (p50); the budget check and the budget question use `estimate_p90`:
