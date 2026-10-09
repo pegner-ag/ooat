@@ -53,7 +53,7 @@ No new family is needed for the first wave. The existing three cover the busines
   family (§7 rule 6).
 
 Domain-specific rules (legal drafts are not advice, regulated claims are report-only) cannot live in a domain and
-are not worth a family each. They are enforced where they can be measured: in output schemas (a fixed notice
+are not worth a family each. They are enforced where they can be measured: in output schemas (a required notice
 field), in `abstain_conditions`, in decision acceptance checks and in critic rubrics. A later family is justified
 only if a whole class of roles needs different permissions; the candidate is a family for roles that act on external
 systems (publish, spend, file), which needs the verified HIL identity of sub-project 05 first.
