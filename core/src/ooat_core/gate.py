@@ -355,6 +355,7 @@ class Gate:
                     fallback_output_tokens=s.fallback_tokens_per_question * len(questions)).usd
             except GatewayError:
                 routed = False  # no decision route: the critic checks every criterion instead
+                checks = worker.usd  # as before plan 04d: the checks cost about another worker call
             critic = self._gateway.estimate(ModelRequest(
                 tier=CRITIC_TIER, prompt="x" * (4 * tokens) + " ".join(criteria), system=CRITIC_SYSTEM,
                 data_class=data_class, expected_output_tokens=s.critic_output_tokens + 100 * len(criteria),

@@ -592,3 +592,13 @@ def test_the_budget_check_uses_p90():
     assert outcome.action == "ask" and outcome.estimate_p90_usd == pytest.approx(0.507)
     raise_to = next(o for o in setup.events(task, "HIL_REQUEST")[0]["body"]["options"] if o["id"] == "raise_budget")
     assert raise_to["cost_usd"] >= 0.507
+
+
+def test_without_a_decision_route_the_prior_is_never_below_the_old_formula(monkeypatch):
+    setup = GateSetup()
+
+    def no_route(*args, **kwargs):
+        raise GatewayError("NOT_PERMITTED", "no decision route in this test")
+    monkeypatch.setattr(setup.gateway, "estimate_decision", no_route)
+    task = setup.submit()
+    assert candidate_usd(setup, task) >= old_formula(setup, task, routed=False)
