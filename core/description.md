@@ -27,6 +27,8 @@ its `ooat task` / `ooat hil` commands (one worker, acceptance checks, closing, r
   gateway runs it before routing and raises the data class to `personal` on a hit, never lowering it
 - `thresholds.py` — `threshold()`: θ per decision point, engine and model version from TASK_RATED verdicts on
   decision records (interim 0.8 for a decision connector, 1 for the text fallback; floor 0.8 until 20 ratings)
+- `estimate.py` — `contract_costs()` / `percentile()`: the p50 / p90 cost of closed contracts per worker adapter
+  and tier from the ledger (spec §11), and `prior_usd()` for an adapter with fewer than 5 runs (plan 04d)
 - `gate.py` — `Gate.run(task)`: step A as one decision batch (A1 per criterion, A4, A5, A7, A10), data class
   raised by pre-scan and by any A10 answer, estimate of worker plus acceptance checks, then T0 (closed: no permitted
   route, not worth its value, unclear after 3 clarifications, over budget after 3 budget questions, unanswered

@@ -126,9 +126,17 @@ which 04 does not have.
      recognise (names, free-text health details) is sent under the declared class. The declared class is the
      operator's statement (spec §9); an operator who submits such texts declares `personal` and Jev is then not
      used unless enabled for it.
-- **Pre-start estimate:** `Gateway.estimate()` for the worker contract (workhorse tier) plus the acceptance
-  checks. Estimate above the task budget → `HIL_REQUEST` "raise budget to X / narrow scope / do not run" (default on
-  silence: do not run). Estimate above the task value → T0 (value classes map to USD in `ooat.toml`, defaults
+- **Pre-start estimate (plan 04d, spec §11):** the p50 / p90 of the last 50 closed contracts on the worker's adapter
+  and tier. A contract's whole cost (worker, decision checks, critic, abstentions and failed calls) belongs to the
+  adapter of its first worker call; a failover later in the contract does not move it. p50 is `model_usd` and goes
+  to the value check, p90 to the budget check. Before 5 runs the prior applies: worker (with the attachment text the
+  worker receives, at most 100,000 characters each) + decision checks (a text-model fallback priced at
+  `fallback_tokens_per_question`) + critic × its share (1 with an untrusted attachment or no decision route), times
+  (1 + retry prior); priors in `[gate]`. Each narrowing of the scope halves the estimate, observed or prior. Limits:
+  cost records carry no model id, so the price version stands in for "the model behind a tier changed", and it is
+  the version of the whole `routing.json`, so any price edit restarts every adapter's history; the ledger is scanned
+  on each Gate run (cheap for SQLite, a view for Postgres later). p90 above the task budget → `HIL_REQUEST` "raise
+  budget to X / narrow scope / do not run" (default on silence: do not run). Estimate above the task value → T0 (value classes map to USD in `ooat.toml`, defaults
   A = 1000, B = 300, C = 50).
 - `TOPOLOGY_DECIDED` records the topology, rules applied, the candidates with estimates, and every decision
   (question id, engine, model version, answer, confidence, threshold used).
