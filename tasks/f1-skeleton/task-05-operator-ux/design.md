@@ -1,6 +1,6 @@
 # Operator experience: `ooat serve`, web app and chat bridge — design
 
-**Epic:** f1-skeleton · **Sub-project:** 05 (with 01c) · **Status:** design for owner review
+**Epic:** f1-skeleton · **Sub-project:** 05 (with 01c) · **Status:** approved by the owner 2026-10-09
 **Spec:** §3 (components, profiles, portability), §8 (lifecycle), §9 (HIL format and rules, security), §10
 (dashboard); ADR 0010, 0011, 0012, 0014, 0015; task runtime design (`../task-04-task-runtime/design.md`)
 
@@ -22,7 +22,7 @@ three client calls, and answers `/stats`.
 |---|---|---|---|
 | Install on 3 OSes | already there: Python + any browser | per-OS builds, code signing, notarisation, updater | Python only |
 | Markdown, code, diff | native in a browser | native | approximate; no images, poor wrapping |
-| Phone, remote | through the chat bridge (§6) | no | SSH only |
+| Phone, remote | through the chat bridge (§9) | no | SSH only |
 | Shares the API with bots | yes, the same REST API | needs the API anyway | no |
 | Maintainer cost | one codebase | three release pipelines, larger security surface | small, but a second UI later anyway |
 
@@ -32,7 +32,7 @@ one API, three thin clients. A desktop wrapper can be added later around the sam
 
 **No build step for the operator.** The page is plain ES modules served as static files from the `ooat-core`
 wheel: no Node, no npm, no bundler. Code is JavaScript with JSDoc types checked in CI by `tsc --noEmit --checkJs`,
-which keeps type safety without a build (the spec says "TypeScript web app": owner question 1). One vendored
+which keeps type safety without a build (owner decision, §13; a deviation from spec §3's "TypeScript web app", listed in §12). One vendored
 library: a Markdown renderer with raw HTML disabled (markdown-it, MIT). UI strings in `en` and `cs` (spec §10).
 
 ## 3. One way to do each thing
@@ -123,7 +123,7 @@ USAGE   period [7 days ▾]   project [all ▾]          spend $3.10 (API $0.40 
 
 | Endpoint | Purpose | Scope |
 |---|---|---|
-| `POST /tasks` | `{project, goal, expected_output?, acceptance[], value? | value_usd?, budget_usd?, data_class?, attachments[{name, content_base64}]}` → `202 {task, state}`; optional `Idempotency-Key` header (kept 24 h) so a retried chat message never runs twice | `submit` |
+| `POST /tasks` | `{project, goal, expected_output?, acceptance[], value? | value_usd?, budget_usd?, data_class?, attachments[{name, content_base64}]}` → `202 {task, state}`. Optional `Idempotency-Key` header, stored in `TASK_SUBMITTED.body.intake_key` (§12): a repeated key from the same token returns the existing task, also after a restart. `data_class` defaults to `internal` and may not exceed the token's cap (403 `DATA_CLASS_ABOVE_TOKEN`); the pre-scan can still raise it | `submit` |
 | `GET /tasks`, `GET /tasks/{id}` | list (filter `state`, `project`, cursor); detail: state, topology, costs, estimate, artifacts, open questions | `read` |
 | `GET /tasks/{id}/events?after=evt_…` | timeline after a cursor; with `Accept: text/event-stream` the same as Server-Sent Events | `read` |
 | `GET /artifacts/{ref}` · `GET /artifacts/{ref}/diff?against={ref}` | content (`nosniff`, attachment disposition unless text) · unified diff | `read` |
@@ -132,7 +132,7 @@ USAGE   period [7 days ▾]   project [all ▾]          spend $3.10 (API $0.40 
 | `GET /connectors`, `GET /connectors/{id}/card`, `POST /connectors/{id}/enable|disable|approve-hooks` | the `ooat connectors` actions | `connectors` |
 | `GET /stats?period=&project=&group=role|connector|project|tier` | the Usage figures of §8 | `read` |
 
-Codes: 400 `INVALID`, 401 `UNAUTHENTICATED`, 403 `SCOPE` / `DATA_CLASS_ABOVE_TOKEN` / `R3_NEEDS_WEB`, 404,
+Codes: 400 `INVALID`, 401 `UNAUTHENTICATED`, 403 `SCOPE` / `DATA_CLASS_ABOVE_TOKEN` / `R3_NEEDS_BOUND_IDENTITY`, 404,
 409 `ALREADY_ANSWERED` / `NOT_CLOSED` / `ALREADY_RATED`, 413 `TOO_LARGE` (20 MB per request), 422
 `SPEC_VALIDATION` (the ledger's own errors), 503 `LEDGER_BUSY` (§7). Handlers call the same functions the CLI
 calls (`Runtime.submit`, `rate`, `connector_admin.*`); the API adds no second rule set.
@@ -152,11 +152,16 @@ calls (`Runtime.submit`, `rate`, `connector_admin.*`); the API adds no second ru
   only its SHA-256, compared in constant time. `ooat tokens revoke`. Sent as `Authorization: Bearer`.
 - **HIL identity:** the actor of every human event written through the API (`actor.kind = hil`) is the operator
   bound to the session or token, never a name from the request body; the event records the channel (`web` or the
-  token id). Only these handlers, the CLI commands of 04 and the runtime's `default-on-silence` write `hil` events;
-  a test fails if any other module builds a `hil` actor.
-- **R3** (named approver, spec §9): answerable only in a web session younger than 15 minutes, with the operator
-  typing the confirmation word shown on the card. Tokens get `R3_NEEDS_WEB`; the CLI's self-declared `--operator`
-  can no longer answer an R3 request (the 04 constraint). 04 has no R3 action yet; the rule is in place before one.
+  token id). Only these paths write `hil` events: the API handlers (submit, answer, rate, cancel, connectors),
+  the 04 CLI commands (`task_cli`), `connector_admin` (`ADAPTER_ACKNOWLEDGED`, `ADAPTER_DISABLED`), the new
+  `ooat tokens` commands (`OPERATOR_TOKEN_ISSUED`, `OPERATOR_TOKEN_REVOKED`) and the runtime's
+  `default-on-silence`; a test fails if any other module builds a `hil` actor.
+- **R3** (named approver, spec §9): not answerable through any channel in 05. A web session from
+  `ooat login --operator NAME` carries the same self-declared name as the CLI's `--operator`: whoever holds the
+  terminal can claim any name, so it is not a named approver. R3 stays impossible (CLI, web and tokens alike, error
+  `R3_NEEDS_BOUND_IDENTITY`) until the operator is bound to something they hold, such as a passkey (WebAuthn) or
+  an OS-account check. No R3 action exists in F1, so this binding is a precondition for the first R3 gate, not
+  for 05 (ADR 0016).
 - **Data leaving through a chat platform:** a chat service stores messages on its own servers. A token's
   `max_data_class` (default `internal`) caps what the API returns to it; a task above the cap is reported by state
   and link only, its content stays in the web app. Raising a token's cap to `client_confidential` or `personal` is
@@ -229,7 +234,7 @@ What does change for a bot that ran a coding CLI in a project folder: an OOAT ta
 document. It has no tools (no file edits, no commands) and no conversation memory (each message is its own task,
 with clarifications inside the task), and every task pays for the Gate and the acceptance checks. The bridge is
 therefore best added as one more engine the bot can switch to per chat, next to the direct CLI, until tool
-capabilities and sessions exist (owner question 7).
+capabilities and sessions exist (owner decision, §13).
 
 ## 10. Setup wizard (01c)
 
@@ -260,8 +265,14 @@ answer, Host/Origin/CSRF and token-scope refusals, and the module test for `hil`
   operator, name, scopes, `max_data_class`, `sha256`, `expires`), so who could answer for whom is in the audit log.
 - Optional `channel` (`cli`, `web`, `token:<id>`) in the bodies of `TASK_SUBMITTED`, `HIL_RESPONSE`, `TASK_RATED`,
   `ADAPTER_ACKNOWLEDGED`, `ADAPTER_DISABLED`.
-- Spec §9: R3 answers need an authenticated web session (not the CLI, not a token). Spec §10: a Usage view in F1
-  ahead of the F2 Economics view.
+- Optional `TASK_SUBMITTED.body.intake_key` (the client's idempotency key, unique per token), so a retried
+  submission never runs a task twice, also across a restart.
+- Spec §9: R3 needs an operator identity bound to something the operator holds (passkey/WebAuthn or an OS-account
+  check); a self-declared name (CLI `--operator`, `ooat login --operator`) or a token never answers R3. Since F1 has
+  no R3 action, the binding is a precondition for the first R3 gate, not part of 05.
+- Spec §3: the dashboard is JavaScript with JSDoc types checked by `tsc --noEmit --checkJs`, without a build step,
+  instead of a "TypeScript web app" (owner decision, §13).
+- Spec §10: a Usage view in F1 ahead of the F2 Economics view.
 
 ## 13. Owner decisions (2026-10-09)
 
