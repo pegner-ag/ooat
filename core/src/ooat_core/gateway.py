@@ -165,14 +165,18 @@ class Gateway:
         self._warn_budget(request, cost["usd"])
         return GatewayResult(response, cost, candidate.estimate)
 
-    def estimate_decision(self, request: DecisionRequest) -> Estimate:
-        """Expected cost of the decision on the engine decide() would use; no provider call."""
+    def estimate_decision(self, request: DecisionRequest, fallback_output_tokens: int | None = None) -> Estimate:
+        """Expected cost of the decision on the engine decide() would use; no provider call. A text-model
+        fallback is priced at `fallback_output_tokens` when the caller knows them (the CLI ignores the cap)."""
         check_questions(request.questions)
         expanded = self._expanded(request)
         try:
             return self._route(expanded, kind="decision").estimate
         except GatewayError:
-            return self.estimate(self._fallback_request(expanded))
+            fallback = self._fallback_request(expanded)
+            if fallback_output_tokens is not None:
+                fallback = dataclasses.replace(fallback, expected_output_tokens=fallback_output_tokens)
+            return self.estimate(fallback)
 
     def decide(self, request: DecisionRequest) -> DecisionResult:
         """Answer typed questions on a decision connector, or on the economy text tier when none can answer.
