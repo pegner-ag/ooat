@@ -79,7 +79,8 @@ class Runtime:
                  clock: Callable[[], datetime] = lambda: datetime.now(timezone.utc)):
         self.ledger, self.gateway, self.artifacts = ledger, gateway, artifacts
         self.settings, self.clock = settings, clock
-        self.gate = Gate(ledger, gateway, settings, clock)
+        self.gate = Gate(ledger, gateway, settings, clock, attachment_chars=lambda refs: sum(
+            len(self.artifacts.read(ref).decode("utf-8", errors="replace")) for ref in refs))
         self.role_budget_usd = load_card("roles", ROLE_ID)["budget"]["max_usd_per_contract"]
 
     # Intake -------------------------------------------------------------------------------------------------------

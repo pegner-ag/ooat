@@ -344,3 +344,10 @@ def test_personal_data_on_a_new_line_of_a_question_is_found():
     with pytest.raises(GatewayError):
         setup.gateway.decide(setup.request(questions={"a1.1": question}))
     assert jev.calls == []
+
+
+def test_a_fallback_decision_can_be_priced_at_its_observed_output():
+    setup = Setup(economy())  # no decision connector: the economy text tier answers
+    small = setup.gateway.estimate_decision(setup.request()).usd
+    large = setup.gateway.estimate_decision(setup.request(), fallback_output_tokens=4000).usd
+    assert large > small

@@ -19,6 +19,8 @@ _CONNECTOR_KEYS = frozenset({"secret_env", "plan_fee_usd_month", "models"})
 _COUNTRY = re.compile(r"^[A-Z]{2}$")
 REGION = re.compile(r"^[a-z]{2}(-[a-z0-9-]+)?$")
 _GATE_NUMBERS = ("v_min_usd", "default_budget_usd", "hil_deadline_hours")
+_GATE_TOKENS = ("expected_output_tokens", "critic_output_tokens", "fallback_tokens_per_question")
+_GATE_SHARES = ("retry_prior", "critic_prior")  # estimate priors (plan 04d), a share from 0 to 1
 
 
 @dataclass(frozen=True)
@@ -54,13 +56,16 @@ def parse_config(data: dict) -> Config:
     blobs_dir = ledger.get("blobs")
     if blobs_dir is not None and (not isinstance(blobs_dir, str) or not blobs_dir.strip()):
         raise ValueError("ledger.blobs must be a folder path")
-    gate = _table(data, "gate", {"value_usd", "expected_output_tokens", *_GATE_NUMBERS})
+    gate = _table(data, "gate", {"value_usd", *_GATE_TOKENS, *_GATE_SHARES, *_GATE_NUMBERS})
     for key in _GATE_NUMBERS:
         if key in gate and not (type(gate[key]) in (int, float) and gate[key] > 0):
             raise ValueError(f"gate.{key} must be a positive number")
-    tokens = gate.get("expected_output_tokens", 1)
-    if not (type(tokens) is int and tokens > 0):
-        raise ValueError("gate.expected_output_tokens must be a positive whole number")
+    for key in _GATE_TOKENS:
+        if key in gate and not (type(gate[key]) is int and gate[key] > 0):
+            raise ValueError(f"gate.{key} must be a positive whole number")
+    for key in _GATE_SHARES:
+        if key in gate and not (type(gate[key]) in (int, float) and 0 <= gate[key] <= 1):
+            raise ValueError(f"gate.{key} must be a share from 0 to 1")
     values = _table(gate, "value_usd", {"A", "B", "C"})
     if not all(type(v) in (int, float) and v >= 0 for v in values.values()):
         raise ValueError("gate.value_usd must map A, B, C to amounts in USD")

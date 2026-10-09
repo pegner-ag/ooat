@@ -88,7 +88,7 @@
       untrusted attachment, or an unsure answer); record it as passed-pending or name the hand-over, so the
       timeline does not show a failure that did not happen.
       Done: `ooat task show` labels it `HANDED_TO_CRITIC`; the ledger event is unchanged.
-- [ ] The pre-start estimate ignores attachments, the critic and a second attempt: s1 0.021 → 0.058 USD, s2 0.021
+- [x] The pre-start estimate ignores attachments, the critic and a second attempt: s1 0.021 → 0.058 USD, s2 0.021
       → 0.238, s3 0.024 → 0.552. Count attachment tokens and an expected critic share.
 - [ ] Client-confidential tasks get no decision engine that may act: Jev takes only public/internal, and the
       text-model fallback keeps θ = 1 until rated, so every criterion goes to the operator. Consider a decision
@@ -104,3 +104,5 @@
 - [ ] Static checks in CI: ruff first, then mypy on `core/` once the findings are triaged.
 - [ ] A sandbox preparation script for seed and F2 tasks (copy code only, by the exclusion list kept in the
       operator's folder), so the operator's verification runs the same way each time.
+- [ ] Record the model id in each cost record, so cost history splits exactly when the model behind a tier
+      changes (spec §11); today the price version of the whole routing.json stands in (plan 04d).

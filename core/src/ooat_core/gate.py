@@ -14,13 +14,16 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Literal
 
+from .acceptance import CRITIC_SYSTEM, CRITIC_TIER
 from .config import Config
 from .connectors import DecisionQuestion, DecisionRequest, ModelRequest
 from .gateway import Gateway, GatewayError
 from .ledger import Ledger, new_event
+from .estimate import MIN_RUNS, Priors, contract_costs, percentile, prior_usd
 from .pii import higher_class, raised_class
 from .state import task_state
 from .thresholds import GATE_EVENTS, acts_alone, decision_point, threshold
+from .worker import PREVIEW_CHARS, worker_system
 
 ACTOR = {"kind": "system", "id": "ooat-gate"}
 WORKER_TIER = "workhorse"
@@ -50,6 +53,10 @@ class GateSettings:
     v_min_usd: float = 15.0  # rule A3
     default_budget_usd: float = 2.0
     expected_output_tokens: int = 2000  # prior for the worker's deliverable
+    critic_output_tokens: int = 400  # prior for the critic's JSON verdict
+    fallback_tokens_per_question: int = 500  # prior for a text-model decision answer
+    retry_prior: float = 0.25  # share of contracts needing a second attempt, until measured
+    critic_prior: float = 0.5  # share of contracts in which the critic runs, until measured
     hil_deadline_hours: float = 48.0  # spec §8: CLARIFYING closes after 48 h without an answer
 
 
@@ -66,9 +73,10 @@ class GateOutcome:
     topology: str
     data_class: str
     budget_usd: float
-    estimate_usd: float | None = None
+    estimate_usd: float | None = None  # p50 of a contract (plan 04d)
     request: str | None = None  # the HIL_REQUEST to answer when action == "ask"
     closed: str | None = None  # the TASK_CLOSED state when action == "closed"
+    estimate_p90_usd: float | None = None  # what the budget is checked against (plan 04d)
 
 
 @dataclass(frozen=True)
@@ -202,8 +210,10 @@ def gate_questions(criteria: list[str], ask_a1: bool = True) -> dict[str, Decisi
 
 class Gate:
     def __init__(self, ledger: Ledger, gateway: Gateway, settings: GateSettings = GateSettings(),
-                 clock: Callable[[], datetime] = lambda: datetime.now(timezone.utc)):
+                 clock: Callable[[], datetime] = lambda: datetime.now(timezone.utc),
+                 attachment_chars: Callable[[list[str]], int] | None = None):
         self._ledger, self._gateway, self._settings, self._clock = ledger, gateway, settings, clock
+        self._attachment_chars = attachment_chars or (lambda refs: 0)
 
     def run(self, task: str) -> GateOutcome:
         events = self._ledger.events(task=task)
@@ -232,7 +242,9 @@ class Gate:
 
         # A task that can never run, or is not worth its cost, is closed before the operator is asked anything.
         try:
-            estimate = self._estimate(task, facts.state, criteria, data_class, facts.narrowings)
+            submitted = next(e for e in events if e["id"] == facts.submitted)
+            estimate, estimate_p90 = self._estimate(task, facts.state, criteria, data_class, facts.narrowings,
+                                                    refs=submitted.get("refs", []))
         except GatewayError as error:
             if error.code != "NOT_PERMITTED":  # a quota cool-down passes: the task stays SUBMITTED for a retry
                 if cost is not None:
@@ -264,24 +276,26 @@ class Gate:
                                 facts.submitted)
             return GateOutcome("ask", "T0", data_class, budget, estimate, request=request["id"])
 
-        if estimate > budget and facts.budget_questions >= MAX_BUDGET_QUESTIONS:
+        if estimate_p90 > budget and facts.budget_questions >= MAX_BUDGET_QUESTIONS:
             self._decided(task, "T0", rules, candidates, decided)
-            missing = (f"after {MAX_BUDGET_QUESTIONS} budget questions the estimated cost {estimate:.4f} USD still "
-                       f"exceeds the budget {budget:.2f} USD")
+            missing = (f"after {MAX_BUDGET_QUESTIONS} budget questions the estimated cost (up to {estimate_p90:.4f} "
+                       f"USD) still exceeds the budget {budget:.2f} USD")
             return self._close(task, data_class, budget, "CLOSED_ABSTAINED", "Not run: over budget.", missing,
                                estimate)
         self._decided(task, "T2", rules, candidates, decided)
-        if estimate > budget:
-            # a margin over the prior, which is no measurement yet; whole cents, never below the estimate
-            raised = max(math.ceil(estimate * 120) / 100, 0.01)
-            question = (f"The estimated cost {estimate:.4f} USD exceeds the task budget {budget:.2f} USD. Raise the "
-                        f"budget to {raised:.2f} USD, narrow the scope (answer with text), or do not run the task.")
+        if estimate_p90 > budget:
+            # a margin over p90 (plan 04d); whole cents, never below the estimate
+            raised = max(math.ceil(estimate_p90 * 120) / 100, 0.01)
+            question = (f"The estimated cost is up to {estimate_p90:.4f} USD (typically {estimate:.4f} USD), above "
+                        f"the task budget {budget:.2f} USD. Raise the budget to {raised:.2f} USD, narrow the scope "
+                        f"(answer with text), or do not run the task.")
             options = [{"id": "raise_budget", "label": f"Raise the budget to {raised:.2f} USD", "cost_usd": raised},
                        {"id": "narrow_scope", "label": "Narrow the scope: answer with text", "cost_usd": 0.0},
                        {"id": "do_not_run", "label": "Do not run", "cost_usd": 0.0, "acts": False}]
             request = self._hil(task, question, options, "raise_budget", facts.submitted)
-            return GateOutcome("ask", "T2", data_class, budget, estimate, request=request["id"])
-        return GateOutcome("run", "T2", data_class, budget, estimate)
+            return GateOutcome("ask", "T2", data_class, budget, estimate, request=request["id"],
+                               estimate_p90_usd=estimate_p90)
+        return GateOutcome("run", "T2", data_class, budget, estimate, estimate_p90_usd=estimate_p90)
 
     # Step A ------------------------------------------------------------------------------------------------------
 
@@ -314,25 +328,41 @@ class Gate:
 
     # Cost before start -------------------------------------------------------------------------------------------
 
-    def _estimate(self, task, state, criteria, data_class, narrowings=0) -> float:
-        """Worker plus acceptance checks, one attempt; raises GatewayError when no route is permitted.
-
-        The output prior dominates the estimate, so each narrowing of the scope halves it (at least 100 tokens);
-        otherwise narrowing could never bring a task under its budget.
-        """
-        tokens = max(self._settings.expected_output_tokens // 2 ** narrowings, 100)
-        worker = self._gateway.estimate(ModelRequest(tier=WORKER_TIER, prompt=state, data_class=data_class,
-                                                     expected_output_tokens=tokens, task=task))
-        checks = 0.0
+    def _estimate(self, task, state, criteria, data_class, narrowings=0, refs=()) -> tuple[float, float]:
+        """(p50, p90) of a contract (spec §11): observed on the worker's adapter from MIN_RUNS closed runs, else the
+        prior of one attempt times the expected attempts. Each narrowing of the scope halves either, as it halves
+        the output prior. Raises GatewayError when no route is permitted."""
+        s = self._settings
+        scale = 0.5 ** narrowings
+        tokens = max(int(s.expected_output_tokens * scale), 100)
+        chars = sum(min(self._attachment_chars([ref]), PREVIEW_CHARS) for ref in refs)  # what the worker receives
+        worker = self._gateway.estimate(ModelRequest(
+            tier=WORKER_TIER, prompt=state + "x" * chars, system=worker_system(), data_class=data_class,
+            expected_output_tokens=tokens, task=task))
+        observed = contract_costs(self._ledger.events(types=["RESULT", "ABSTAIN", "GATE_PASSED", "GATE_FAILED",
+                                                             "DECISION", "TASK_CLOSED"]),
+                                  worker.connector, WORKER_TIER)
+        if len(observed) >= MIN_RUNS:
+            return percentile(observed, 0.5) * scale, percentile(observed, 0.9) * scale
+        checks = critic = 0.0
+        routed = True
         if criteria:
             questions = {f"c{n}": DecisionQuestion("noul", f"Does the output meet: {c}") for n, c in
                          enumerate(criteria, 1)}
             try:  # the output's size is unknown before it exists: the prior stands in for it
                 checks = self._gateway.estimate_decision(
-                    DecisionRequest("x" * (4 * tokens), questions, data_class, task=task)).usd
+                    DecisionRequest("x" * (4 * tokens), questions, data_class, task=task),
+                    fallback_output_tokens=s.fallback_tokens_per_question * len(questions)).usd
             except GatewayError:
-                checks = worker.usd  # no decision route: the critic on the worker's tier checks instead
-        return worker.usd + checks
+                routed = False  # no decision route: the critic checks every criterion instead
+                checks = worker.usd  # as before plan 04d: the checks cost about another worker call
+            critic = self._gateway.estimate(ModelRequest(
+                tier=CRITIC_TIER, prompt="x" * (4 * tokens) + " ".join(criteria), system=CRITIC_SYSTEM,
+                data_class=data_class, expected_output_tokens=s.critic_output_tokens + 100 * len(criteria),
+                task=task)).usd
+        priors = Priors(tokens, s.critic_output_tokens, s.fallback_tokens_per_question, s.retry_prior, s.critic_prior)
+        usd = prior_usd(worker.usd, checks, critic, priors, critic_certain=bool(refs) or not routed)
+        return usd, usd
 
     # Events ------------------------------------------------------------------------------------------------------
 

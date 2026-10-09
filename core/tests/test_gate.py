@@ -1,6 +1,7 @@
 """Topology Gate for T0–T2 with fake connectors (design 04 §4, ADR 0011)."""
 
 import json
+from pathlib import Path
 import math
 from datetime import datetime, timezone
 
@@ -68,7 +69,7 @@ def fallback_reply(criteria=1):
 
 
 class GateSetup:
-    def __init__(self, answers=None, jev_error=None, worker_text=None, settings=GateSettings()):
+    def __init__(self, answers=None, jev_error=None, worker_text=None, settings=GateSettings(), attachment_chars=None):
         self.ledger = Ledger.open("sqlite:///:memory:")
         self.jev = FakeDecisionConnector(answers=answers or confident(), error=jev_error)
         self.worker = FakeConnector(fake_manifest("prv.fake.api", "api",
@@ -83,7 +84,7 @@ class GateSetup:
         self.gateway = Gateway(self.ledger, Registry([self.jev, self.worker]),
                                RoutingPolicy({"version": "0.1.0", "prices": PRICES, "data_class_policy": POLICY}),
                                config, SecretResolver(config, {}), clock=lambda: NOW)
-        self.gate = Gate(self.ledger, self.gateway, settings, clock=lambda: NOW)
+        self.gate = Gate(self.ledger, self.gateway, settings, clock=lambda: NOW, attachment_chars=attachment_chars)
 
     def submit(self, goal="Napiš shrnutí smlouvy pro jednatele.", acceptance=("Shrnutí má nejvýše 300 slov.",),
                **extra):
@@ -94,6 +95,42 @@ class GateSetup:
 
     def events(self, task, kind):
         return [e for e in self.ledger.events(task=task) if e["type"] == kind]
+
+    def submit_with_attachment(self, **extra):
+        import tempfile
+
+        from ooat_core.artifacts import ArtifactStore
+        from ooat_core.blobs import BlobStore
+        staged = ArtifactStore(self.ledger, BlobStore(Path(tempfile.mkdtemp(prefix="ooat-gate-")))).stage(
+            "Smlouva o dílo.".encode(), artifact_type="attachment", untrusted=True, data_class="internal")
+        task = new_id("tsk")
+        body = {"goal": "Shrň přiloženou smlouvu.", "acceptance": ["Shrnutí má nejvýše 300 slov."], **extra}
+        self.ledger.append(new_event("TASK_SUBMITTED", task=task, actor=HIL, body=body, refs=[staged.ref]), [staged])
+        return task
+
+    def closed_run(self, usd, adapter="prv.fake.api"):
+        """A closed contract of `usd` on the worker's adapter, as the runtime would leave it in the ledger."""
+        task, ctr = new_id("tsk"), new_id("ctr")
+        self.ledger.append(new_event("TASK_SUBMITTED", task=task, actor=HIL, body={"goal": "x"}))
+        self.ledger.append(new_event("CONTRACT_ISSUED", task=task, contract=ctr, actor=GATE, body={"contract": {
+            "id": ctr, "task": task, "capability": "cap.general.complete_task", "capability_version": "0.1.0",
+            "agent": new_id("agt"), "role": "role.general.worker@0.1.0", "goal": "x", "inputs": [],
+            "output_schema": "schemas/markdown_document.v1.json", "budget": {"max_usd": 5.0}}}))
+        import tempfile
+
+        from ooat_core.artifacts import ArtifactStore
+        from ooat_core.blobs import BlobStore
+        doc = ArtifactStore(self.ledger, BlobStore(Path(tempfile.mkdtemp(prefix="ooat-gate-")))).stage(
+            b"# Doc", artifact_type="markdown_document", data_class="internal")
+        self.ledger.append(new_event("RESULT", task=task, contract=ctr, refs=[doc.ref],
+                                     actor={"kind": "agent", "id": new_id("agt"), "role": "role.general.worker@0.1.0"},
+                                     body={"outcome": "DONE", "artifacts": [doc.ref]},
+                                     cost={"adapter": adapter, "tier": "workhorse", "tokens_in": 1, "tokens_cached": 0,
+                                           "tokens_out": 1, "usd": usd, "basis": "exact", "price_ver": "0.1.0",
+                                           "estimated_usd": usd}), [doc])
+        self.ledger.append(new_event("TASK_CLOSED", task=task, actor=GATE, body={
+            "state": "CLOSED_DONE", "summary": "x", "cost": {"contracts_usd": usd, "gate_usd": 0.0,
+                                                             "orchestrator_usd": 0.0, "critic_usd": 0.0}}))
 
 
 def test_a_clear_task_runs_as_t2_and_every_decision_is_recorded():
@@ -116,7 +153,8 @@ def test_a_clear_task_runs_as_t2_and_every_decision_is_recorded():
 def test_the_estimate_covers_the_worker_and_the_acceptance_checks():
     setup = GateSetup()
     outcome = setup.gate.run(setup.submit())
-    assert 2000 * 15 / 1e6 < outcome.estimate_usd < 0.04  # 2,000 workhorse output tokens dominate
+    # worker at 2,000 output tokens, plus the critic at its prior share 0.5, times 1.25 attempts (plan 04d)
+    assert 2000 * 15 / 1e6 * 1.25 < outcome.estimate_usd < 0.08
 
 
 def test_a_confident_a10_raises_the_class_and_never_lowers_it():
@@ -459,3 +497,108 @@ def test_a_refusal_stays_final_whatever_comes_later():
 def test_facts_of_an_unknown_task_are_a_clear_error():
     with pytest.raises(ValueError, match="no TASK_SUBMITTED"):
         task_facts([])
+
+
+# Estimate from observed runs (plan 04d) ----------------------------------------------------------------------
+
+from ooat_core.connectors import ModelRequest as _ModelRequest
+
+
+def candidate_usd(setup, task):
+    setup.gate.run(task)
+    decided = setup.events(task, "TOPOLOGY_DECIDED")[-1]
+    return next(c["model_usd"] for c in decided["body"]["candidates"] if "model_usd" in c)
+
+
+def old_formula(setup, task, routed=True):
+    """Today's estimate without the new code: the worker at 2,000 output tokens, plus the decision checks (about
+    nothing on the fake engine), or plus the worker again when no decision route exists."""
+    state = task_facts(setup.ledger.events(task=task)).state
+    worker = setup.gateway.estimate(_ModelRequest(tier="workhorse", prompt=state, data_class="internal",
+                                                  expected_output_tokens=2000, task=task)).usd
+    return worker + (0.0 if routed else worker)
+
+
+def test_without_observations_the_estimate_is_never_below_the_old_one():
+    setup = GateSetup()
+    task = setup.submit()
+    assert candidate_usd(setup, task) >= old_formula(setup, task)
+
+
+def test_without_a_decision_route_the_critic_is_certain(monkeypatch):
+    routed, unrouted = GateSetup(), GateSetup()
+
+    def no_route(*args, **kwargs):
+        raise GatewayError("NOT_PERMITTED", "no decision route in this test")
+    monkeypatch.setattr(unrouted.gateway, "estimate_decision", no_route)
+    assert candidate_usd(unrouted, unrouted.submit()) > candidate_usd(routed, routed.submit())
+
+
+def test_narrowing_scales_the_observed_estimate():
+    setup = GateSetup()
+    for usd in (0.10, 0.20, 0.30, 0.40, 0.50):
+        setup.closed_run(usd)
+    task = setup.submit(budget_usd=0.01)
+    first = setup.gate.run(task)
+    answer(setup, task, first.request, choice="narrow_scope", text="Jen první kapitola smlouvy.")
+    second = setup.gate.run(task)
+    assert second.estimate_usd == pytest.approx(first.estimate_usd / 2)
+
+
+def test_narrowing_still_lowers_the_prior_estimate():
+    setup = GateSetup()
+    task = setup.submit(budget_usd=0.001)
+    first = setup.gate.run(task)
+    answer(setup, task, first.request, choice="narrow_scope", text="Jen první kapitola smlouvy.")
+    second = setup.gate.run(task)
+    assert second.estimate_usd < first.estimate_usd * 0.75
+
+
+def test_an_untrusted_attachment_always_counts_the_critic():
+    plain = GateSetup()
+    attached = GateSetup(attachment_chars=lambda refs: 4_000 if refs else 0)
+    assert candidate_usd(attached, attached.submit_with_attachment()) > candidate_usd(plain, plain.submit())
+
+
+def test_an_attachment_counts_only_what_the_worker_receives():
+    capped = GateSetup(attachment_chars=lambda refs: 100_000)
+    huge = GateSetup(attachment_chars=lambda refs: 5_000_000)
+    assert candidate_usd(huge, huge.submit_with_attachment()) == \
+        pytest.approx(candidate_usd(capped, capped.submit_with_attachment()))
+
+
+def test_four_runs_keep_the_prior_and_the_fifth_switches_to_observation():
+    setup = GateSetup()
+    for usd in (0.10, 0.20, 0.30, 0.40):
+        setup.closed_run(usd)
+    prior = candidate_usd(setup, setup.submit())
+    setup.closed_run(0.50)
+    assert prior != pytest.approx(0.30) and candidate_usd(setup, setup.submit()) == pytest.approx(0.30)
+
+
+def test_from_five_runs_the_estimate_is_the_observed_p50():
+    setup = GateSetup()
+    for usd in (0.003, 0.058, 0.086, 0.238, 0.469, 0.507):
+        setup.closed_run(usd)
+    assert candidate_usd(setup, setup.submit()) == pytest.approx(0.086)
+
+
+def test_the_budget_check_uses_p90():
+    setup = GateSetup()
+    for usd in (0.003, 0.058, 0.086, 0.238, 0.469, 0.507):
+        setup.closed_run(usd)
+    task = setup.submit(budget_usd=0.30)  # above p50, below p90
+    outcome = setup.gate.run(task)
+    assert outcome.action == "ask" and outcome.estimate_p90_usd == pytest.approx(0.507)
+    raise_to = next(o for o in setup.events(task, "HIL_REQUEST")[0]["body"]["options"] if o["id"] == "raise_budget")
+    assert raise_to["cost_usd"] >= 0.507
+
+
+def test_without_a_decision_route_the_prior_is_never_below_the_old_formula(monkeypatch):
+    setup = GateSetup()
+
+    def no_route(*args, **kwargs):
+        raise GatewayError("NOT_PERMITTED", "no decision route in this test")
+    monkeypatch.setattr(setup.gateway, "estimate_decision", no_route)
+    task = setup.submit()
+    assert candidate_usd(setup, task) >= old_formula(setup, task, routed=False)

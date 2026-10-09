@@ -163,3 +163,18 @@ def test_relative_sqlite_ledger_is_resolved_against_the_config_folder(tmp_path, 
 def test_absolute_paths_of_either_convention_are_kept(tmp_path, url):
     (tmp_path / "ooat.toml").write_text(f'[ledger]\nurl = "{url}"\n', encoding="utf-8")
     assert load_config(tmp_path / "ooat.toml").ledger_url == url
+
+
+@pytest.mark.parametrize("gate, ok", [
+    ({"retry_prior": 0.4, "critic_prior": 0, "critic_output_tokens": 300, "fallback_tokens_per_question": 600}, True),
+    ({"retry_prior": 1.5}, False), ({"critic_prior": -0.1}, False), ({"critic_output_tokens": 0}, False),
+    ({"fallback_tokens_per_question": 2.5}, False),
+])
+def test_estimate_priors_in_gate_are_range_checked(gate, ok):
+    from ooat_core.gate import settings_from_config
+    if ok:
+        settings = settings_from_config(parse_config({"gate": gate}))
+        assert settings.retry_prior == 0.4 and settings.critic_prior == 0
+    else:
+        with pytest.raises(ValueError):
+            parse_config({"gate": gate})
