@@ -289,10 +289,10 @@ fails its evals. Translating role names for a screen is the UI's job (design 05)
 - `personal` data is allowed for the support, office, contract-review and bookkeeping roles (through connectors with
   the operator's responsibility, ADR 0012); `special_category` stays refused by the gateway.
 
-## 10. Owner questions (open)
+## 10. Owner decision on the critic rule (2026-10-10)
 
-1. **Same-family critic.** Should the linter reject a critic from the role's own family as an error instead of a
-   warning? That makes §7 rule 6 ("preferred") binding and is a spec change.
+A critic from the role's own family stays a linter **warning**, as spec §7 rule 6 ("preferred") says; no spec
+change.
 
 ## 11. Review points carried into the plan
 
