@@ -184,7 +184,9 @@ def create_app(settings: ServeSettings, *, config: Config, registry: Registry, r
     _errors(app)
     app.include_router(login_routes())
     app.include_router(session_routes(), prefix="/api/v1")
+    from .endpoints import resource_routes  # endpoints.py builds on this module
 
+    app.include_router(resource_routes(), prefix="/api/v1")
     return app
 
 
