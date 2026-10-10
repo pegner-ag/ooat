@@ -4,7 +4,7 @@ import pytest
 
 from ooat_core.backends import LedgerIntegrityError
 from ooat_core.ids import new_id
-from ooat_core.ledger import Ledger, StagedArtifact, _event_row, new_event
+from ooat_core.ledger import DuplicateIntake, Ledger, StagedArtifact, _event_row, new_event
 from ooat_core.validation import SpecValidationError
 
 HIL = {"kind": "hil", "id": "operator"}
@@ -260,3 +260,33 @@ def test_r3_response_needs_an_explicit_choice(ledger):
     with pytest.raises(SpecValidationError, match="choice"):
         ledger.append(new_event("HIL_RESPONSE", task=task, actor=HIL,
                                 body={"request": request["id"], "text": "Asi ano."}))
+
+
+def submission(key, channel="web"):
+    return new_event("TASK_SUBMITTED", task=new_id("tsk"), actor=HIL,
+                     body={"goal": "Shrnout výroční zprávu.", "channel": channel, "intake_key": key})
+
+
+def test_a_repeated_intake_key_on_its_channel_is_refused_and_names_the_first_task(ledger):
+    first = ledger.append(submission("msg-7"))
+    with pytest.raises(DuplicateIntake) as refused:
+        ledger.append(submission("msg-7"))
+    assert refused.value.task == first["task"]
+    assert len(ledger.events(types=["TASK_SUBMITTED"])) == 1
+
+
+def test_the_same_intake_key_on_another_channel_is_another_task(ledger):
+    ledger.append(submission("msg-7"))
+    ledger.append(submission("msg-7", channel="token:" + new_id("tok")))
+    ledger.append(new_event("TASK_SUBMITTED", task=new_id("tsk"), actor=HIL, body={"goal": "Bez klíče."}))
+    assert len(ledger.events(types=["TASK_SUBMITTED"])) == 3
+
+
+def test_a_refused_event_inside_the_transaction_leaves_the_ledger_writable(ledger):
+    task = new_id("tsk")
+    request = ledger.append(hil_request(task, "R1", "hold"))
+    answer = new_event("HIL_RESPONSE", task=task, actor=HIL, body={"request": request["id"], "choice": "maybe"})
+    with pytest.raises(SpecValidationError):
+        ledger.append(answer)  # refused inside the write transaction, which must be rolled back
+    ledger.append(new_event("HIL_RESPONSE", task=task, actor=HIL, body={"request": request["id"], "choice": "hold"}))
+    assert len(ledger.events(task=task)) == 2

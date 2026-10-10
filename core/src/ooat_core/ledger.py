@@ -38,6 +38,14 @@ class StagedArtifact:
     uri: str
 
 
+class DuplicateIntake(ValueError):
+    """A TASK_SUBMITTED repeats an intake key already used on its channel; `task` is the task that key created."""
+
+    def __init__(self, task: str):
+        super().__init__(f"this intake key already created {task}")
+        self.task = task
+
+
 def utc_now() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
 
@@ -125,27 +133,41 @@ class Ledger:
         too_large = [key for key in _COST_INTEGERS if event.get("cost", {}).get(key, 0) > _SQL_INT_MAX]
         if too_large:
             raise SpecValidationError("event", [f"$.cost.{key}: exceeds a 64-bit integer" for key in too_large])
-        self._check_hil(event)
         artifacts = list(artifacts)
-        self._check_staged(artifacts)
         staged_refs = {a.ref for a in artifacts}
         unreferenced = sorted(staged_refs - set(event["refs"]))
         if unreferenced:
             raise ValueError(f"staged artifacts must be referenced by their event: {unreferenced}")
-        unknown = sorted(ref for ref in _artifact_refs([event["refs"], event["body"]])
-                         if ref not in staged_refs and self.artifact(ref) is None)
-        if unknown:
-            raise ValueError(f"event references unknown artifacts: {unknown}")
-        artifact_rows = []
-        for artifact in artifacts:
-            artifact_id, version = parse_artifact_ref(artifact.ref)
-            artifact_rows.append({
-                "id": artifact_id, "version": version, "type": artifact.type, "data_class": artifact.data_class,
-                "untrusted": int(artifact.untrusted), "sha256": artifact.sha256, "uri": artifact.uri,
-                "produced_by_event": event["id"],
-            })
-        self.backend.insert(_event_row(event), artifact_rows)
+        # Checks that read the ledger run inside the write transaction, so another thread or process cannot slip an
+        # answer, an artifact version or an intake key in between the check and the insert (design 05 §7).
+        with self.backend.transaction():
+            self._check_hil(event)
+            self._check_intake(event)
+            self._check_staged(artifacts)
+            unknown = sorted(ref for ref in _artifact_refs([event["refs"], event["body"]])
+                             if ref not in staged_refs and self.artifact(ref) is None)
+            if unknown:
+                raise ValueError(f"event references unknown artifacts: {unknown}")
+            artifact_rows = []
+            for artifact in artifacts:
+                artifact_id, version = parse_artifact_ref(artifact.ref)
+                artifact_rows.append({
+                    "id": artifact_id, "version": version, "type": artifact.type, "data_class": artifact.data_class,
+                    "untrusted": int(artifact.untrusted), "sha256": artifact.sha256, "uri": artifact.uri,
+                    "produced_by_event": event["id"],
+                })
+            self.backend.insert(_event_row(event), artifact_rows)
         return event
+
+    def _check_intake(self, event: dict) -> None:
+        """One task per intake key and channel, also across restarts and racing deliveries (ADR 0016)."""
+        key = event["body"].get("intake_key") if event["type"] == "TASK_SUBMITTED" else None
+        if key is None:
+            return
+        channel = event["body"].get("channel")
+        for earlier in self.events(types=["TASK_SUBMITTED"]):
+            if earlier["body"].get("intake_key") == key and earlier["body"].get("channel") == channel:
+                raise DuplicateIntake(earlier["task"])
 
     def _check_hil(self, event: dict) -> None:
         """Cross-field HIL rules JSON Schema cannot express (spec §9, ADR 0003 #4)."""
