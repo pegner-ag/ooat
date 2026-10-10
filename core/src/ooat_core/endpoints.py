@@ -332,7 +332,9 @@ def resource_routes() -> APIRouter:
     def hooks(connector_id: str, request: Request, who: Principal = Depends(scope("connectors"))) -> dict:
         connector = installed(server_of(request), connector_id)
         listed = connector.hooks() if hasattr(connector, "hooks") else []
-        return {"hooks": [{"path": path, "sha256": sha, "text": text} for path, sha, text in listed]}
+        # The text may hold local secrets; a token's client may store it on a chat platform (web sessions only).
+        return {"hooks": [{"path": path, "sha256": sha} | ({"text": text} if who.channel == "web" else {})
+                          for path, sha, text in listed]}
 
     @api.post("/connectors/{connector_id}/approve-hooks", status_code=201)
     def approve_hooks(connector_id: str, body: HooksIn, request: Request,
@@ -392,3 +394,4 @@ def _stream(server: Server, task: str, cursor: str | None, recheck: Callable[[],
         if task_state(events) in CLOSED or time.monotonic() - started > SSE_MAX_S:
             return
         time.sleep(SSE_POLL_S)
+        yield ": keepalive\n\n"  # each next() returns: the thread goes back to the pool between polls

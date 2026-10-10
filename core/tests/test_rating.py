@@ -112,3 +112,18 @@ def test_a_critic_without_a_sure_verdict_disputes_nothing(tmp_path, critic):
     task = setup.submit(files=[b"Smlouva o dilu."])
     setup.runtime.run(task)
     assert not any(d.disputed for d in task_decisions(setup.ledger.events(task=task)))
+
+
+def test_two_ratings_at_once_record_one(tmp_path):
+    from test_runtime import Setup, stale_first_read
+
+    from ooat_core.rating import AlreadyRated
+
+    setup = Setup(tmp_path)
+    task = setup.submit()
+    setup.runtime.run(task)
+    rate(setup.ledger, task, operator="operator", accepted=True, value_class="B")
+    stale_first_read(setup.ledger, "TASK_RATED")  # a retried POST read the task before the first rating landed
+    with pytest.raises(AlreadyRated):
+        rate(setup.ledger, task, operator="operator", accepted=True, value_class="B")
+    assert len(setup.ledger.events(task=task, types=["TASK_RATED"])) == 1

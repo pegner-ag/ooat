@@ -149,3 +149,81 @@ def test_the_runner_lock_is_held_by_one_holder_at_a_time(tmp_path):
     assert other.acquire()
     other.release()
     assert for_ledger("sqlite:///:memory:") is None
+
+
+# Final review of plan 05a: retries and cancels the runner must not miss ------------------------------------------
+
+def test_a_gate_stopped_by_a_quota_cool_down_waits_a_growing_pause(tmp_path):
+    from ooat_core.ledger import new_event
+
+    setup = Setup(tmp_path)
+    start = setup.now = datetime.now(timezone.utc)
+    task = setup.submit()
+    resets = (start + timedelta(hours=1)).strftime("%Y-%m-%dT%H:%M:%SZ")  # the worker's window is used up
+    setup.ledger.append(new_event("QUOTA_WARNING", task=task, actor={"kind": "system", "id": "ooat-gate"}, body={
+        "adapter": setup.model.manifest["id"], "utilisation": 1.0, "window_resets_at": resets}))
+    runner = runner_for(setup)
+    for tick in range(10):  # ten minutes of ticks
+        setup.now = start + timedelta(seconds=61 * tick)
+        runner.tick()
+        runner.drain()
+    paid = [e for e in setup.ledger.events(task=task, types=["DECISION"]) if e["actor"]["id"] == "ooat-gate"]
+    assert state(setup, task) == "SUBMITTED" and 1 <= len(paid) <= 5  # 0, 60, 120, 240, 480 s: not every tick
+
+
+class FailsAfterCancel(ScriptedModel):
+    """The operator cancels, and the API queues the task, while the worker call is in flight; then it fails."""
+
+    def __init__(self, cancel):
+        super().__init__(outages={("worker", n): ConnectorError("UNAVAILABLE", "HTTP 529") for n in range(1, 9)})
+        self.cancel = cancel
+
+    def complete(self, request, secrets):
+        if self.cancel is not None:
+            cancel, self.cancel = self.cancel, None
+            cancel()
+        return super().complete(request, secrets)
+
+
+def test_a_cancel_while_a_failing_call_is_in_flight_closes_the_task_at_once(tmp_path):
+    def cancel():
+        setup.runtime.cancel(task, operator="operator", channel="web")
+        runner.enqueue(task)  # as the API does; the task is the one running
+
+    setup = Setup(tmp_path, model=FailsAfterCancel(cancel))
+    setup.now = datetime.now(timezone.utc)
+    task = setup.submit()
+    runner = runner_for(setup)
+    runner.enqueue(task)
+    runner.drain()
+    assert state(setup, task) == "CANCELLED"
+    assert "RESULT" in [e["type"] for e in setup.ledger.events(task=task)]  # the failed call's cost is recorded
+
+
+def test_a_task_queued_while_it_runs_runs_again_after(tmp_path):
+    class QueuedDuringTheCall(ScriptedModel):
+        def complete(self, request, secrets):
+            runner.enqueue(task)  # e.g. an answer arrives while the runner is in this task
+            return super().complete(request, secrets)
+
+    setup = Setup(tmp_path, model=QueuedDuringTheCall())
+    task = setup.submit()
+    runner = runner_for(setup)
+    runner.enqueue(task)
+    assert runner.drain() == [task, task]
+
+
+def test_a_cancel_of_a_paused_task_is_not_held_back_by_its_pause(tmp_path):
+    model = ScriptedModel(outages={("worker", n): ConnectorError("UNAVAILABLE", "HTTP 529") for n in range(1, 9)})
+    setup = Setup(tmp_path, model=model)
+    start = setup.now = datetime.now(timezone.utc)
+    task = setup.submit()
+    runner = runner_for(setup)
+    for _ in range(5):
+        runner.enqueue(task)
+        runner.drain()  # five failures: the next try is 16 minutes away
+    setup.runtime.cancel(task, operator="operator")  # e.g. `ooat` on another machine; nothing queued it
+    setup.now = start + timedelta(seconds=61)
+    runner.tick()
+    runner.drain()
+    assert state(setup, task) == "CANCELLED"

@@ -100,3 +100,19 @@ def test_only_the_listed_modules_build_a_human_actor():
              if HIL_ACTOR.search(path.read_text(encoding="utf-8"))}
     assert found <= MAY_BUILD_A_HUMAN_ACTOR, f"human actor outside the allow-list: {found - MAY_BUILD_A_HUMAN_ACTOR}"
     assert {"runtime.py", "rating.py", "hil.py", "connector_admin.py"} <= found  # the check finds what it guards
+
+
+def test_no_answer_or_default_lands_on_a_closed_task_and_a_cancelled_question_is_gone(tmp_path):
+    from ooat_core.validation import SpecValidationError
+
+    setup, task, request = waiting(tmp_path)
+    setup.runtime.cancel(task, operator="operator")
+    assert open_requests(setup.ledger) == []  # cancelled: its question is no longer asked
+    with pytest.raises(TaskClosed):
+        answer(setup.ledger, setup.runtime, request, operator="operator", choice="run_as_is")
+    setup.runtime.run(task)
+    for actor, body in (({"kind": "hil", "id": "operator"}, {"request": request, "choice": "run_as_is"}),
+                        ({"kind": "hil", "id": "default-on-silence"},
+                         {"request": request, "choice": "do_not_run", "default_applied": True})):
+        with pytest.raises(SpecValidationError, match="task is closed"):  # e.g. it closed after the caller read
+            setup.ledger.append(new_event("HIL_RESPONSE", task=task, actor=actor, body=body))

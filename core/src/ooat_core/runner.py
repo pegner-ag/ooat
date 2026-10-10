@@ -15,7 +15,7 @@ from collections import deque
 from collections.abc import Callable
 from datetime import datetime, timedelta
 
-from .runtime import Runtime
+from .runtime import Runtime, _cancel
 
 log = logging.getLogger("ooat.serve")
 FIRST_RETRY_S, MAX_RETRY_S = 60, 1800
@@ -33,7 +33,9 @@ def resume_after(events: list[dict]) -> datetime | None:
         failed = (event["type"] == "RESULT" and body["outcome"] == "FAILED"
                   and body["error"]["code"] != "INVALID_OUTPUT") or (
             event["type"] == "DECISION" and event["actor"]["id"] == "ooat-runtime"
-            and body["decision"].startswith("acceptance check paused"))
+            and body["decision"].startswith("acceptance check paused")) or (
+            event["type"] == "DECISION" and event["actor"]["id"] == "ooat-gate"
+            and body["decision"].startswith("Gate stopped before deciding"))
         if failed:
             failures, last = failures + 1, event["ts"]
         elif event["type"] in ("RESULT", "GATE_PASSED", "GATE_FAILED", "HIL_RESPONSE"):
@@ -50,6 +52,7 @@ class Runner:
         self._runtime: Runtime | None = None
         self._queue: deque[str] = deque()
         self._current: str | None = None
+        self._again = False  # the running task was queued meanwhile, e.g. answered or cancelled: run it again
         self._changed = threading.Condition()
         self._stopping = threading.Event()
         self._thread: threading.Thread | None = None
@@ -58,7 +61,9 @@ class Runner:
 
     def enqueue(self, task: str) -> None:
         with self._changed:
-            if task != self._current and task not in self._queue:
+            if task == self._current:
+                self._again = True
+            elif task not in self._queue:
                 self._queue.append(task)
                 self._changed.notify()
 
@@ -90,8 +95,9 @@ class Runner:
         """Apply defaults on silence and queue every task that can move, in the order it was submitted."""
         runtime, now = self.runtime(), self.clock()
         for task in runtime.runnable():  # applies expired defaults first
-            due = resume_after(runtime.ledger.events(task=task))
-            if due is None or due <= now:
+            events = runtime.ledger.events(task=task)
+            due = resume_after(events)
+            if due is None or due <= now or _cancel(events) is not None:  # a cancel does not wait for the pause
                 self.enqueue(task)
 
     def run_next(self) -> str | None:
@@ -108,6 +114,9 @@ class Runner:
         finally:
             with self._changed:
                 self._current = None
+                if self._again:
+                    self._again = False
+                    self._queue.append(task)
         return task
 
     def drain(self) -> list[str]:

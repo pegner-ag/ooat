@@ -8,7 +8,7 @@ on (the CLI) or queues it for the runner (the server); this module never runs a 
 
 from .connector_admin import checked_operator
 from .ledger import Ledger, new_event
-from .runtime import Runtime, TaskClosed
+from .runtime import CANCEL, Runtime, TaskClosed
 from .validation import SpecValidationError
 
 
@@ -27,11 +27,15 @@ class R3NeedsBoundIdentity(ValueError):
 
 
 def open_requests(ledger: Ledger) -> list[dict]:
-    """HIL_REQUEST events of open tasks without a HIL_RESPONSE, oldest first."""
-    events = ledger.events(types=["HIL_REQUEST", "HIL_RESPONSE", "TASK_CLOSED"])
+    """HIL_REQUEST events without a HIL_RESPONSE, of tasks neither closed nor cancelled, oldest first."""
+    events = ledger.events(types=["HIL_REQUEST", "HIL_RESPONSE", "TASK_CLOSED", "DECISION"])
     answered = {e["body"]["request"] for e in events if e["type"] == "HIL_RESPONSE"}
-    closed = {e["task"] for e in events if e["type"] == "TASK_CLOSED"}
+    closed = {e["task"] for e in events if e["type"] == "TASK_CLOSED" or _cancelled(e)}
     return [e for e in events if e["type"] == "HIL_REQUEST" and e["id"] not in answered and e["task"] not in closed]
+
+
+def _cancelled(event: dict) -> bool:
+    return event["type"] == "DECISION" and event["actor"]["kind"] == "hil" and event["body"]["decision"] == CANCEL
 
 
 def find_request(ledger: Ledger, request_id: str) -> dict | None:
@@ -54,11 +58,11 @@ def answer(ledger: Ledger, runtime: Runtime, request_id: str, *, operator: str, 
         raise R3NeedsBoundIdentity("an R3 request needs a named approver bound to something they hold (a passkey "
                                    "or an OS-account check); a typed name or a token is not one (ADR 0016)")
     runtime.expire(request["task"])  # past its deadline the default has applied; a late answer must not win
-    events = ledger.events(task=request["task"], types=["HIL_RESPONSE", "TASK_CLOSED"])
+    events = ledger.events(task=request["task"], types=["HIL_RESPONSE", "TASK_CLOSED", "DECISION"])
     if any(e["type"] == "HIL_RESPONSE" and e["body"]["request"] == request_id for e in events):
         raise AlreadyAnswered(f"{request_id} is already answered (after its deadline the default applies)")
-    if any(e["type"] == "TASK_CLOSED" for e in events):
-        raise TaskClosed(f"task {request['task']} is closed; its question needs no answer")
+    if any(e["type"] == "TASK_CLOSED" or _cancelled(e) for e in events):
+        raise TaskClosed(f"task {request['task']} is closed or cancelled; its question needs no answer")
     body = {"request": request_id}
     if choice is not None:
         body["choice"] = choice
@@ -72,4 +76,6 @@ def answer(ledger: Ledger, runtime: Runtime, request_id: str, *, operator: str, 
     except SpecValidationError as error:  # another writer answered between the check above and the append
         if any("is already answered" in message for message in error.messages):
             raise AlreadyAnswered(f"{request_id} is already answered") from None
+        if any(message.startswith("$.task: task is closed") for message in error.messages):
+            raise TaskClosed(f"task {request['task']} is closed; its question needs no answer") from None
         raise

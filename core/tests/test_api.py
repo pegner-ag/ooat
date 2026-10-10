@@ -367,3 +367,48 @@ def test_an_artifact_no_task_produced_is_not_found(tmp_path):
     for path in (f"/api/v1/artifacts/{staged.ref}", f"/api/v1/artifacts/{staged.ref}/diff?against={staged.ref}"):
         response = served.client.get(path, headers=served.token(cap="public"))
         assert response.status_code == 404 and response.json()["error"]["code"] == "NOT_FOUND", path
+
+
+def test_a_token_lists_hooks_without_their_text(tmp_path):
+    from runtime_fakes import ScriptedModel
+
+    class Hooked(ScriptedModel):
+        def hooks(self):
+            return [("hooks.json", "a" * 64, '{"env": {"TOKEN": "VERY-SECRET-HOOK-VALUE"}}')]
+
+    served = Served(tmp_path, model=Hooked())
+    by_token = get(served, "/api/v1/connectors/prv.fake.api/hooks", served.token(scopes=("connectors",)))
+    assert by_token["hooks"] == [{"path": "hooks.json", "sha256": "a" * 64}]  # it may leave for a chat platform
+    assert "VERY-SECRET" in get(served, "/api/v1/connectors/prv.fake.api/hooks", served.login())["hooks"][0]["text"]
+
+
+def test_an_idle_event_stream_returns_to_its_thread_between_polls(tmp_path, monkeypatch):
+    import threading
+
+    from ooat_core import endpoints
+
+    monkeypatch.setattr(endpoints, "SSE_POLL_S", 0.01)
+    served = Served(tmp_path)
+    bot = served.token()
+    task = served.submit(bot, acceptance=[])["task"]
+    served.run()  # waits for a clarification: nothing new arrives
+    stream = endpoints._stream(served.server, task, None, lambda: _reader(served, bot))
+    chunks = []
+
+    def pull():
+        for _ in range(8):
+            chunks.append(next(stream))
+    puller = threading.Thread(target=pull, daemon=True)
+    puller.start()
+    puller.join(5)
+    assert not puller.is_alive() and ": keepalive\n\n" in chunks  # a disconnected client is noticed at a poll
+
+
+def _reader(served, headers):
+    from starlette.requests import Request
+
+    from ooat_core.api import principal, scope
+
+    request = Request({"type": "http", "method": "GET", "path": "/", "app": served.app, "query_string": b"",
+                       "headers": [(b"authorization", headers["Authorization"].encode())]})
+    return scope("read")(principal(request))

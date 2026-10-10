@@ -13,6 +13,7 @@ from .ledger import Ledger, new_event
 from .runtime import CLOSED
 from .state import task_state
 from .thresholds import GATE_EVENTS
+from .validation import SpecValidationError
 
 
 CHOICE_OPTIONS = {"a5": set(BRANCHES), "a10": set(DATA_CLASSES)}  # the Gate's choice questions
@@ -102,5 +103,10 @@ def rate(ledger: Ledger, task: str, *, operator: str, accepted: bool, value_clas
     if channel is not None:
         body["channel"] = channel
     closed = [e["id"] for e in events if e["type"] == "TASK_CLOSED"]
-    return ledger.append(new_event("TASK_RATED", task=task, actor={"kind": "hil", "id": operator}, refs=closed,
-                                   body=body))
+    try:
+        return ledger.append(new_event("TASK_RATED", task=task, actor={"kind": "hil", "id": operator},
+                                       refs=closed, body=body))
+    except SpecValidationError as error:  # another rating landed after the read above
+        if any(message.startswith("$.task: task is already rated") for message in error.messages):
+            raise AlreadyRated(f"task {task} is already rated") from None
+        raise

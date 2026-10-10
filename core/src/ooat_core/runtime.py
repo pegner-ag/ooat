@@ -212,8 +212,9 @@ class Runtime:
                     self.ledger.append(new_event("HIL_RESPONSE", task=request["task"], actor=SILENCE, body={
                         "request": request["id"], "choice": request["body"]["default_on_silence"],
                         "default_applied": True}))
-                except SpecValidationError as error:  # the operator answered after the read above
-                    if any("is already answered" in message for message in error.messages):
+                except SpecValidationError as error:  # answered, or closed, after the read above
+                    if any("is already answered" in message or message.startswith("$.task: task is closed")
+                           for message in error.messages):
                         continue
                     raise
                 expired.append(request["id"])
@@ -309,7 +310,7 @@ class Runtime:
                     "decision": f"acceptance check paused ({error.code}); the document is checked again later",
                     "rationale": error.message[:500] or error.code}, None, refs=[artifact])
                 return self._ask_budget(task, contract, error) if error.code == "BUDGET" else \
-                    self._paused(task, error)
+                    self._stopped(task, artifacts=[artifact]) or self._paused(task, error)
             if result.usable and not result.unmet:
                 return self._close(task, "CLOSED_DONE", "Delivered; every acceptance criterion is met.",
                                    artifacts=[artifact])
@@ -458,7 +459,7 @@ class Runtime:
             return self._close(task, "CLOSED_ABSTAINED", f"Not done: {error.code}.", error.message[:300] or error.code)
         self._event("RESULT", task, contract, worker, {"outcome": "FAILED", "error": {
             "code": error.code, "message": error.message[:500] or error.code}}, error.cost)
-        return self._paused(task, error)
+        return self._stopped(task) or self._paused(task, error)  # cancelled during the failed call
 
     @staticmethod
     def _paused(task: str, error: GatewayError) -> RunOutcome:
