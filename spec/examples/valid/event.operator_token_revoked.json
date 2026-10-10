@@ -1,0 +1,13 @@
+{
+  "id": "evt_01J9ZQ81A0K3M5N7P9Q1R3S5T7",
+  "ts": "2026-10-11T09:00:00Z",
+  "task": null,
+  "actor": {"kind": "hil", "id": "operator"},
+  "type": "OPERATOR_TOKEN_REVOKED",
+  "refs": [],
+  "body": {
+    "token": "tok_01J9ZQ80B0K3M5N7P9Q1R3S5T7",
+    "operator": "operator",
+    "reason": "The bot moved to another server."
+  }
+}

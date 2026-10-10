@@ -1,6 +1,6 @@
 # ADR 0016 — Operator API: tokens, channels, intake keys and the R3 identity rule
 
-**Status:** proposed — the owner accepts it before Task 2 of plan 05a · **Date:** 2026-10-10 · **Context:** the
+**Status:** accepted · **Date:** 2026-10-10 · **Context:** the
 operator experience design (`tasks/f1-skeleton/task-05-operator-ux/design.md`, approved by the owner 2026-10-09,
 §6, §12, §13, §14) adds `ooat serve`: a REST API for the web app and the owner's chat bot. Bots act through API
 tokens, so who could act for whom must be in the audit log, and a chat platform stores what it receives.

@@ -18,6 +18,7 @@ v0.2 folds the accepted decision records (`docs/adr/`) into the text, so the spe
 - HIL rule 5 (§9): defaults applied on silence carry the reserved actor id `default-on-silence`.
 - ADR 0014: provider failures pause a running task; contract budget capped by the role and the budget HIL question; T2 critic exception (§2, §6, §7, §8, §9).
 - ADR 0015: the operator approves the hooks a connector's CLI runs (§7, §9).
+- ADR 0016: operator API tokens and channels in the ledger, `task: null` for token events, intake keys, R3 needs a bound identity, the dashboard in tsc-checked JavaScript, a Usage view in F1 (§2, §3, §7, §9, §10).
 - Design 03f: Google's subscription CLI is Antigravity CLI (`agy`), not Gemini CLI (§6).
 - Rule A3 aligned with the implemented Gate: it is recorded and skips step B, but the Gate may still close or clarify (§4).
 - Ledger-enforced HIL rules: options named by `recommended` / `default_on_silence`, one response per request, `default_applied` responses choose the default (§9).
@@ -113,7 +114,7 @@ Every `<ulid>` is a full 26-character ULID; IDs shortened in this text (e.g. `ev
 - A Contract references exactly one Capability and is assigned to exactly one Agent instance.
 - An Agent instance is created from a Role; a Role inherits from a Role family (single inheritance, max. depth 3).
 - An Agent instance calls models only through Provider adapters selected by the routing policy.
-- Every state change of a Task or Contract is an Event; state is never overwritten without one. Every event belongs to a Task except the connector events `ADAPTER_ACKNOWLEDGED` and `ADAPTER_DISABLED`, which have `task: null` (ADR 0003, ADR 0010).
+- Every state change of a Task or Contract is an Event; state is never overwritten without one. Every event belongs to a Task except the connector events `ADAPTER_ACKNOWLEDGED` and `ADAPTER_DISABLED` and the operator token events `OPERATOR_TOKEN_ISSUED` and `OPERATOR_TOKEN_REVOKED`, which have `task: null` (ADR 0003, ADR 0010, ADR 0016).
 - An Artifact is created only as a Contract output or as HIL input; it never has anonymous provenance.
 
 ### Contract outcomes
@@ -149,12 +150,12 @@ Orchestrator and workers only propose and return results. Only `ooat-core` write
 | `ooat-core` | Python 3.12+ | Reference runtime: Topology Gate, dispatcher, contracts, budgets, state machine |
 | `ooat-sdk` (Python, TypeScript) | Python, TypeScript | Define capabilities and deterministic checks, submit tasks, read the ledger |
 | `ooat-cli` | Python | Run tasks, validate and resolve the catalog, run evals |
-| Dashboard | TypeScript web app | HIL queue, exceptions, economics, calibration |
+| Dashboard | JavaScript web app (ES modules, JSDoc types checked by `tsc --noEmit --checkJs`, no build step; ADR 0016) | HIL queue, exceptions, usage, economics, calibration |
 | Starter catalog | JSON | 13 capability domains, 5 role families under `family.base` (ADR 0004), \~100 capability stubs, eval set templates |
 | Adapters | Python | Providers (API and subscription), stores, notifiers (e-mail, Slack, Microsoft Teams, messaging bots, webhooks) |
 | Integrations (optional) | various | Claude Code plugin, MCP server exposing OOAT as tools, A2A Agent Cards (F4) |
 
-Python for the core because most provider and agent SDKs ship there first; TypeScript for the UI and for teams building on Node. A Claude Code skill or plugin is a thin client of the framework, not the framework itself.
+Python for the core because most provider and agent SDKs ship there first; TypeScript for teams building on Node; the dashboard is JavaScript with types checked by `tsc`, so the operator needs no Node and no build step (ADR 0016). A Claude Code skill or plugin is a thin client of the framework, not the framework itself.
 
 ### Components
 
@@ -607,7 +608,7 @@ Agents never talk in free text. Every message is a typed event in an append-only
 }
 ```
 
-The example shows the language rule: keys, event types and reason codes are English, free-text fields follow the task language (`lang`). `body` is validated against the schema for its `type`; an event that fails is not written and the agent receives the error. `usd` is filled in by the gateway, next to the optional `estimated_usd` it made before the call (ADR 0010). IDs in the example are shortened; real IDs carry full 26-character ULIDs (ADR 0003). `task` is required on every event except `ADAPTER_ACKNOWLEDGED` and `ADAPTER_DISABLED`, which have `task: null` (ADR 0003, ADR 0010).
+The example shows the language rule: keys, event types and reason codes are English, free-text fields follow the task language (`lang`). `body` is validated against the schema for its `type`; an event that fails is not written and the agent receives the error. `usd` is filled in by the gateway, next to the optional `estimated_usd` it made before the call (ADR 0010). IDs in the example are shortened; real IDs carry full 26-character ULIDs (ADR 0003). `task` is required on every event except `ADAPTER_ACKNOWLEDGED`, `ADAPTER_DISABLED`, `OPERATOR_TOKEN_ISSUED` and `OPERATOR_TOKEN_REVOKED`, which have `task: null` (ADR 0003, ADR 0010, ADR 0016).
 
 ### Event types
 
@@ -630,8 +631,10 @@ The example shows the language rule: keys, event types and reason codes are Engl
 | `TASK_RATED` / `DEFECT_FOUND` | Human | Acceptance rating, value class, the operator's verdict per decision record (`decisions`: event, question, verdict, value; ADR 0011); defect found after closing | Calibration, decision thresholds |
 | `ADAPTER_ACKNOWLEDGED` | Human (named operator) | Connector enabled: manifest version, allowed data classes, `automation_confirmed`, `jurisdiction_sha256` (ADR 0010), optional `responsibility` (ADR 0012) and `approved_hooks` (ADR 0015); `task: null` | Gateway, dashboard |
 | `ADAPTER_DISABLED` | Human (named operator) | Connector disabled: adapter, operator, reason (ADR 0010); `task: null` | Gateway, dashboard |
+| `OPERATOR_TOKEN_ISSUED` | Human (named operator) | An API token acting as the operator: token id, name, scopes, `max_data_class`, SHA-256 of the token (never the token), expiry; `task: null` (ADR 0016) | API, dashboard |
+| `OPERATOR_TOKEN_REVOKED` | Human (named operator) | Token revoked: token id, operator, reason; `task: null` (ADR 0016) | API, dashboard |
 
-Only agents emit `CLAIM`, `RESULT` and `OBJECTION`; only humans emit `HIL_RESPONSE`, `TASK_RATED`, `DEFECT_FOUND`, `ADAPTER_ACKNOWLEDGED` and `ADAPTER_DISABLED`. The one exception: a default applied on silence is a `HIL_RESPONSE` written by the runtime under the reserved actor id `default-on-silence` (section 9, HIL rule 5).
+Only agents emit `CLAIM`, `RESULT` and `OBJECTION`; only humans emit `HIL_RESPONSE`, `TASK_RATED`, `DEFECT_FOUND`, `ADAPTER_ACKNOWLEDGED`, `ADAPTER_DISABLED`, `OPERATOR_TOKEN_ISSUED` and `OPERATOR_TOKEN_REVOKED`; their actor is the operator bound to the session or token, never a name from a request, and they record the `channel` (`cli`, `web`, `token:<id>`) they came from (ADR 0016). The one exception: a default applied on silence is a `HIL_RESPONSE` written by the runtime under the reserved actor id `default-on-silence` (section 9, HIL rule 5).
 
 ### Debate rules
 
@@ -661,7 +664,7 @@ CREATE TABLE event (
   seq           INTEGER PRIMARY KEY AUTOINCREMENT,  -- append order (identity), not rowid or ts
   id            TEXT NOT NULL UNIQUE,
   ts            TEXT NOT NULL,          -- ISO 8601 UTC
-  task_id       TEXT,                   -- NULL only for ADAPTER_ACKNOWLEDGED / ADAPTER_DISABLED
+  task_id       TEXT,                   -- NULL only for connector and operator token events
   contract_id   TEXT,
   actor_kind    TEXT NOT NULL CHECK (actor_kind IN ('agent','hil','system')),
   actor_id      TEXT NOT NULL,
@@ -765,6 +768,8 @@ HIL gates follow the risk class of the action, not the task type, and every HIL 
 
 Any `impl: llm` capability able to perform an R3 action requires a one-time named approval when it moves to `active`, separate from ordinary catalog review. This implements the AI4DataLeaders essay's recommendation directly. No model, including the decision tier, ever decides an R2 or R3 action on its own (ADR 0011, section 6).
 
+A named approver is an operator identity bound to something the operator holds, such as a passkey (WebAuthn) or an OS-account check. A self-declared name (the CLI's `--operator`, `ooat login --operator`) or an API token is never one. Until such a binding exists, every R3 request is refused on every channel (`R3_NEEDS_BOUND_IDENTITY`) and only its default on silence applies (ADR 0016).
+
 ### HIL request format
 
 ```json
@@ -793,6 +798,7 @@ The ledger enforces the cross-field rules a schema cannot express, and refuses a
 3. A response's `choice` is one of the request's options; an R3 request needs an explicit choice, not only text.
 4. A response with `default_applied: true` (written by the runtime when the deadline passes without an answer) must choose the request's `default_on_silence`.
 5. That response is written under the reserved actor id `default-on-silence` (`actor.kind = hil`); no operator may use the name, so a default is never mistaken for a human answer.
+6. A response to an R3 request is accepted only from `default-on-silence` until operator identities are bound (ADR 0016).
 
 ### Budget questions (ADR 0014, ADR 0009 amendment)
 
@@ -878,6 +884,7 @@ The dashboard shows exceptions and economics, not the flow of conversation. The 
 | --- | --- | --- | --- |
 | HIL queue | Blocking requests with deadline and default, then the digest; one-click actions | `HIL_REQUEST` without `HIL_RESPONSE` | F1 |
 | Rating queue | Closed tasks awaiting a 1-click acceptance rating and value class | `TASK_CLOSED` without `TASK_RATED` | F1 |
+| Usage | Calls, tokens and cost by role, connector, tier and project; metered vs. subscription shadow cost; tasks by outcome, cost per accepted task, estimate vs. actual; HIL waiting time | ledger | F1 (ADR 0016) |
 | Exceptions | `GATE_FAILED`, objections unresolved after round 2, budget and quota warnings, abstentions, stuck contracts (no event > 15 min) | ledger | F1 |
 | Tasks | List with topology, state, cost vs. budget, orchestrator profile | views | F1 |
 | Task detail | Contract DAG with states, event timeline, artifact versions, `TOPOLOGY_DECIDED` with all candidates and EU | ledger, artifacts | F1 (no DAG), F3 (DAG) |

@@ -10,7 +10,7 @@
     "id": {"$ref": "common.schema.json#/$defs/event_id"},
     "ts": {"description": "ISO 8601 UTC.", "type": "string", "format": "date-time", "pattern": "Z$"},
     "task": {
-      "description": "Task id. ADAPTER_ACKNOWLEDGED and ADAPTER_DISABLED are not tied to a task and use null.",
+      "description": "Task id. ADAPTER_ACKNOWLEDGED, ADAPTER_DISABLED, OPERATOR_TOKEN_ISSUED and OPERATOR_TOKEN_REVOKED are not tied to a task and use null (ADR 0003, ADR 0016).",
       "anyOf": [{"$ref": "common.schema.json#/$defs/task_id"}, {"type": "null"}]
     },
     "contract": {"anyOf": [{"$ref": "common.schema.json#/$defs/contract_id"}, {"type": "null"}]},
@@ -23,8 +23,13 @@
   },
   "allOf": [
     {
-      "if": {"properties": {"type": {"not": {"enum": ["ADAPTER_ACKNOWLEDGED", "ADAPTER_DISABLED"]}}}},
+      "if": {"properties": {"type": {"not": {"enum": ["ADAPTER_ACKNOWLEDGED", "ADAPTER_DISABLED", "OPERATOR_TOKEN_ISSUED", "OPERATOR_TOKEN_REVOKED"]}}}},
       "then": {"properties": {"task": {"$ref": "common.schema.json#/$defs/task_id"}}}
+    },
+    {
+      "description": "An operator token belongs to no task (ADR 0016).",
+      "if": {"properties": {"type": {"enum": ["OPERATOR_TOKEN_ISSUED", "OPERATOR_TOKEN_REVOKED"]}}},
+      "then": {"properties": {"task": {"type": "null"}}}
     },
     {
       "description": "Contract-level events must name their contract.",
@@ -37,8 +42,8 @@
       "then": {"properties": {"actor": {"properties": {"kind": {"const": "agent"}}}}}
     },
     {
-      "description": "Only a human answers, rates, reports defects, acknowledges or disables adapters.",
-      "if": {"properties": {"type": {"enum": ["HIL_RESPONSE", "TASK_RATED", "DEFECT_FOUND", "ADAPTER_ACKNOWLEDGED", "ADAPTER_DISABLED"]}}},
+      "description": "Only a human answers, rates, reports defects, acknowledges or disables adapters, issues or revokes operator tokens.",
+      "if": {"properties": {"type": {"enum": ["HIL_RESPONSE", "TASK_RATED", "DEFECT_FOUND", "ADAPTER_ACKNOWLEDGED", "ADAPTER_DISABLED", "OPERATOR_TOKEN_ISSUED", "OPERATOR_TOKEN_REVOKED"]}}},
       "then": {"properties": {"actor": {"properties": {"kind": {"const": "hil"}}}}}
     },
     {
@@ -64,7 +69,9 @@
     {"if": {"properties": {"type": {"const": "TASK_RATED"}}}, "then": {"properties": {"body": {"$ref": "#/$defs/body_task_rated"}}}},
     {"if": {"properties": {"type": {"const": "DEFECT_FOUND"}}}, "then": {"properties": {"body": {"$ref": "#/$defs/body_defect_found"}}}},
     {"if": {"properties": {"type": {"const": "ADAPTER_ACKNOWLEDGED"}}}, "then": {"properties": {"body": {"$ref": "#/$defs/body_adapter_acknowledged"}}}},
-    {"if": {"properties": {"type": {"const": "ADAPTER_DISABLED"}}}, "then": {"properties": {"body": {"$ref": "#/$defs/body_adapter_disabled"}}}}
+    {"if": {"properties": {"type": {"const": "ADAPTER_DISABLED"}}}, "then": {"properties": {"body": {"$ref": "#/$defs/body_adapter_disabled"}}}},
+    {"if": {"properties": {"type": {"const": "OPERATOR_TOKEN_ISSUED"}}}, "then": {"properties": {"body": {"$ref": "#/$defs/body_operator_token_issued"}}}},
+    {"if": {"properties": {"type": {"const": "OPERATOR_TOKEN_REVOKED"}}}, "then": {"properties": {"body": {"$ref": "#/$defs/body_operator_token_revoked"}}}}
   ],
   "$defs": {
     "event_type": {
@@ -72,7 +79,8 @@
         "TASK_SUBMITTED", "TOPOLOGY_DECIDED", "CONTRACT_ISSUED", "CLAIM", "RESULT", "ABSTAIN",
         "OBJECTION", "OBJECTION_RESOLVED", "DECISION", "GATE_PASSED", "GATE_FAILED",
         "HIL_REQUEST", "HIL_RESPONSE", "BUDGET_WARNING", "QUOTA_WARNING",
-        "TASK_CLOSED", "TASK_RATED", "DEFECT_FOUND", "ADAPTER_ACKNOWLEDGED", "ADAPTER_DISABLED"
+        "TASK_CLOSED", "TASK_RATED", "DEFECT_FOUND", "ADAPTER_ACKNOWLEDGED", "ADAPTER_DISABLED",
+        "OPERATOR_TOKEN_ISSUED", "OPERATOR_TOKEN_REVOKED"
       ]
     },
     "actor": {
@@ -107,6 +115,7 @@
       }
     },
     "text": {"type": "string", "minLength": 1},
+    "channel": {"description": "Where a human event came from: the CLI, a web session, or an operator token (ADR 0016).", "type": "string", "pattern": "^(cli|web|token:tok_[0-7][0-9A-HJKMNP-TV-Z]{25})$"},
 
     "body_task_submitted": {
       "description": "Acceptance and expected output may be missing; Gate rule A1 then sends the task to CLARIFYING.",
@@ -130,8 +139,11 @@
         "risk_class": {"$ref": "common.schema.json#/$defs/risk_class"},
         "data_class": {"$ref": "common.schema.json#/$defs/data_class"},
         "profile": {"description": "Orchestrator profile, e.g. ceo, pm, key_account.", "type": "string", "pattern": "^[a-z][a-z0-9_]*$"},
-        "deadline": {"type": "string", "format": "date-time"}
-      }
+        "deadline": {"type": "string", "format": "date-time"},
+        "channel": {"$ref": "#/$defs/channel"},
+        "intake_key": {"description": "The client's idempotency key; unique per channel, checked by the ledger (ADR 0016).", "type": "string", "pattern": "^[!-~]{1,128}$"}
+      },
+      "dependentRequired": {"intake_key": ["channel"]}
     },
     "body_topology_decided": {
       "type": "object",
@@ -277,7 +289,8 @@
         "title": {"$ref": "#/$defs/text"},
         "decision": {"$ref": "#/$defs/text"},
         "rationale": {"$ref": "#/$defs/text"},
-        "supersedes": {"$ref": "common.schema.json#/$defs/event_id"}
+        "supersedes": {"$ref": "common.schema.json#/$defs/event_id"},
+        "channel": {"$ref": "#/$defs/channel"}
       }
     },
     "body_gate": {
@@ -346,7 +359,8 @@
         "request": {"$ref": "common.schema.json#/$defs/event_id"},
         "choice": {"type": "string", "pattern": "^[a-z0-9_]+$"},
         "text": {"$ref": "#/$defs/text"},
-        "default_applied": {"description": "True when the deadline passed and the default was applied.", "type": "boolean"}
+        "default_applied": {"description": "True when the deadline passed and the default was applied.", "type": "boolean"},
+        "channel": {"$ref": "#/$defs/channel"}
       },
       "anyOf": [{"required": ["choice"]}, {"required": ["text"]}]
     },
@@ -405,6 +419,7 @@
         "accepted": {"type": "boolean"},
         "value_class": {"$ref": "common.schema.json#/$defs/value_class"},
         "note": {"$ref": "#/$defs/text"},
+        "channel": {"$ref": "#/$defs/channel"},
         "decisions": {
           "description": "The operator's verdict on decisions of the task; feeds the thresholds (ADR 0011).",
           "type": "array",
@@ -446,6 +461,7 @@
         "operator": {"description": "Name of the acknowledging operator.", "$ref": "#/$defs/text"},
         "automation_confirmed": {"description": "The operator checked that the plan terms allow unattended use (ADR 0010).", "type": "boolean"},
         "jurisdiction_sha256": {"description": "Fingerprint of the acknowledged jurisdiction block (ADR 0010).", "type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "channel": {"$ref": "#/$defs/channel"},
         "approved_hooks": {"description": "Hook files the operator reviewed and allows to run around the connector's CLI; any change to a file's content needs a new approval (ADR 0015).", "type": "array", "uniqueItems": true, "items": {"type": "object", "required": ["path", "sha256"], "additionalProperties": false, "properties": {"path": {"$ref": "#/$defs/text"}, "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}}}},
         "responsibility": {
           "description": "The operator takes responsibility for client or personal data on this connector: legal basis, processing agreement, where it is processed (ADR 0012). In force for 12 months from confirmed_on.",
@@ -466,6 +482,41 @@
       "additionalProperties": false,
       "properties": {
         "adapter": {"$ref": "common.schema.json#/$defs/provider_id"},
+        "operator": {"$ref": "#/$defs/text"},
+        "reason": {"$ref": "#/$defs/text"},
+        "channel": {"$ref": "#/$defs/channel"}
+      }
+    },
+    "token_scope": {"enum": ["submit", "read", "answer", "rate", "connectors"]},
+    "body_operator_token_issued": {
+      "description": "A named operator issued an API token that acts as them (ADR 0016). Only the token's SHA-256 is recorded, never the token. A cap above internal is the operator's responsibility statement (ADR 0012).",
+      "type": "object",
+      "required": ["token", "operator", "name", "scopes", "max_data_class", "sha256", "expires"],
+      "additionalProperties": false,
+      "properties": {
+        "token": {"$ref": "common.schema.json#/$defs/token_id"},
+        "operator": {"$ref": "#/$defs/text"},
+        "name": {"type": "string", "pattern": "^[a-z0-9][a-z0-9_-]{0,31}$"},
+        "scopes": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"$ref": "#/$defs/token_scope"}},
+        "max_data_class": {"enum": ["public", "internal", "client_confidential", "personal"]},
+        "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "expires": {"type": "string", "format": "date-time", "pattern": "Z$"},
+        "responsibility": {
+          "type": "object",
+          "required": ["confirmed_on"],
+          "additionalProperties": false,
+          "properties": {"confirmed_on": {"type": "string", "format": "date"}}
+        }
+      },
+      "if": {"properties": {"max_data_class": {"enum": ["client_confidential", "personal"]}}},
+      "then": {"required": ["responsibility"]}
+    },
+    "body_operator_token_revoked": {
+      "type": "object",
+      "required": ["token", "operator", "reason"],
+      "additionalProperties": false,
+      "properties": {
+        "token": {"$ref": "common.schema.json#/$defs/token_id"},
         "operator": {"$ref": "#/$defs/text"},
         "reason": {"$ref": "#/$defs/text"}
       }
