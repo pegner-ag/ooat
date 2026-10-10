@@ -28,14 +28,23 @@
 - No secrets, cookies, tokens, request bodies or query strings in logs, the ledger, error details or the UI; the API logs method, path and status only; uvicorn's access log is off.
 - Headers on every response: `Content-Security-Policy: default-src 'self'` (no inline script), `frame-ancestors 'none'`, `Referrer-Policy: no-referrer`, `X-Content-Type-Options: nosniff`; `Cache-Control: no-store` on `/api/`. Artifacts are served as `text/plain` (never HTML) or as an attachment.
 - Request bodies at most 20 MB (413 `TOO_LARGE`); errors as `{"error": {"code", "message", "details"}}`.
-- New dependencies, nothing else: `fastapi>=0.143` (Task 8) and `uvicorn>=0.54` (Task 10) in `core/pyproject.toml` (the API and its server, named in the CLAUDE.md stack); `httpx2>=2.13` in `requirements-dev.txt` (test-only: FastAPI's `TestClient` needs it; Starlette 1.x deprecates `httpx` for it).
+- New dependencies, nothing else: `fastapi>=0.143` (Task 8) and `uvicorn>=0.54` (Task 10) in `core/pyproject.toml` (the API and its server, named in the CLAUDE.md stack); `httpx2>=2.13` in `requirements-dev.txt` (test-only: FastAPI's `TestClient` imports it; current Starlette asks for it (its import error says `pip install httpx2`) and deprecates plain `httpx`; published by Pydantic, github.com/pydantic/httpx2; verified by the orchestrator 2026-10-10).
 - Tests are offline: `TestClient(app, base_url="http://127.0.0.1:8765")` in-process, `uvicorn.run` replaced in CLI tests, fake connectors from `core/tests/runtime_fakes.py`.
 - Code, comments, docs and commits in English; lines at most 120 characters; event types, error and reason codes English.
 
-**Decisions this plan takes where the design is silent** (the owner may overrule them):
+**Owner decisions (2026-10-10, review of PR #34):**
+- The plan is approved and is executed natively (superpowers:executing-plans). Execution stops after Task 1
+  until the owner accepts ADR 0016.
+- Cancel through the API only (web app and bot); no CLI `ooat task cancel` for now.
+- Accepted behaviour changes: a task is rated once (409 `ALREADY_RATED`); concurrent CLI runs on one ledger are
+  serialised by the runner lock.
+- PyPI distribution name: `ooat-core` (ADR 0016 point 10); each release still only on the owner's go.
+- Web sessions beyond loopback are capped at `internal`, and TLS is required (decision 1 below stands).
+
+**Decisions this plan takes where the design is silent** (accepted with the plan, 2026-10-10):
 1. Served beyond loopback, web sessions are capped at `internal` like a token (design §14 offered this or a responsibility statement); there is no override in 05a.
-2. Cancel is a human `DECISION` ("cancel the task", with `channel`); the runtime closes the task `CANCELLED` at its next step. A call in flight finishes first (its cost is recorded) and a document it delivered is kept, without paying for its checks. A cancelled task's open questions vanish from `GET /hil` and get no default. Cancelling needs the `submit` scope. No CLI command (the owner asked for it for the bot's `/cancel`).
-3. Beyond `hil.answer`'s refusal, the ledger itself accepts a response to an R3 request only from `default-on-silence`, so no code path can bypass the R3 rule.
+2. Cancel is a human `DECISION` ("cancel the task", with `channel`); the runtime closes the task `CANCELLED` at its next step. A call in flight finishes first (its cost is recorded) and a document it delivered is kept, without paying for its checks. A cancelled task's open questions vanish from `GET /hil` and get no default. Cancelling needs the `submit` scope. No CLI command (owner, 2026-10-10).
+3. Beyond `hil.answer`'s refusal, the ledger itself accepts a response to an R3 request only from `default-on-silence`, so no code path can bypass the R3 rule; and a response under `default-on-silence` must carry `default_applied: true` and choose the request's `default_on_silence` (review of PR #34), so the reserved name can never act.
 4. The runner retries a task paused by a provider failure after 60 s, doubling per further failure up to 30 minutes, so the 60-s tick does not spend the budget on retries during an outage (failed calls are charged their estimate, ADR 0014).
 5. A task is rated once (409 `ALREADY_RATED`); a second rating would count its verdicts twice in θ.
 6. A task's class for the cap is the class it runs under: gated (declared, pre-scan, A10) raised by its attachments.
@@ -45,6 +54,9 @@
 10. Projections are not cached by `seq` (design §7 allows it); Solo volumes are fast enough, and a cache is added when measured.
 11. Chunked request bodies are refused (411 `LENGTH_REQUIRED`) so the 20 MB limit holds by `Content-Length`.
 12. `ooat task run` (and `submit` / `hil answer` when they run) take the runner lock too, so two CLI runs on one ledger no longer run side by side either.
+13. Only the operator who issued a token (the operator it acts as) may revoke it; `OPERATOR_TOKEN_REVOKED.body.operator` and its actor are that operator. The other rule offered in review, any operator from a web session, would let one operator cut off another's bot. Revoking is CLI-only in 05a.
+14. Sign-in hardening (review of PR #34): a `Content-Length` that is not a number is 400 `INVALID`; `ooat-login/` is created with mode 0o700. On Windows the mode is ignored: the folder lies beside the ledger in the operator's profile and inherits its ACL, which OOAT does not change.
+15. Examples and tests use the operator name `operator` (and `second-operator`), as the existing fixtures do, not real first names.
 
 ## Review Focus
 
@@ -105,7 +117,8 @@ tokens, so who could act for whom must be in the audit log, and a chat platform 
 1. **Operator tokens are ledger events.** `ooat tokens create --operator NAME --name NAME --scopes ...` appends
    `OPERATOR_TOKEN_ISSUED` (human actor, `task: null`; body: `token` (`tok_<ULID>`), `operator`, `name`, `scopes`,
    `max_data_class`, `sha256`, `expires`, and `responsibility.confirmed_on` for a cap above `internal`).
-   `ooat tokens revoke` appends `OPERATOR_TOKEN_REVOKED` (`token`, `operator`, `reason`). The token is 256 random
+   `ooat tokens revoke` appends `OPERATOR_TOKEN_REVOKED` (`token`; `operator`, the operator who revokes it,
+   who must be the operator the token acts as, so one operator cannot cut off another's bot; `reason`). The token is 256 random
    bits with the prefix `ooat_`, printed once; the ledger keeps only its SHA-256, compared in constant time. Scopes:
    `submit` (also cancels), `read`, `answer`, `rate`, `connectors`. A token expires after 1 to 365 days (default 90)
    and acts as the operator who issued it.
@@ -133,21 +146,23 @@ tokens, so who could act for whom must be in the audit log, and a chat platform 
    operator holds, such as a passkey (WebAuthn) or an OS-account check. A self-declared name (the CLI's
    `--operator`, `ooat login --operator`) or a token never answers an R3 request. Until such a binding exists every
    R3 request is refused on every channel with `R3_NEEDS_BOUND_IDENTITY`, and the ledger accepts a response to an
-   R3 request only from `default-on-silence`. F1 has no R3 request, so nothing breaks today; the binding is a
+   R3 request only from `default-on-silence`. A response under `default-on-silence` must carry
+   `default_applied: true` and choose the request's `default_on_silence`, so the reserved name never acts. F1 has no R3 request, so nothing breaks today; the binding is a
    precondition for the first R3 gate, not part of 05.
 7. **The dashboard is JavaScript checked by tsc (amends spec §3).** Plain ES modules with JSDoc types, checked in
    CI by `tsc --noEmit --checkJs`, served as static files from the `ooat-core` wheel without a build step (owner,
-   2026-10-09). The TypeScript SDK stays TypeScript.
+   2026-10-09). The TypeScript SDK stays TypeScript. CLAUDE.md's stack line ("TypeScript dashboard") is
+   updated to match; this ADR is the owner's approval of that change.
 8. **A Usage view in F1 (amends spec §10)**, ahead of the F2 Economics view: calls, tokens and cost by role,
    connector, tier and project, metered and subscription shadow cost, tasks by outcome, cost per accepted task,
    HIL waiting time.
 9. **The operator cancels a task** with a `DECISION` ("cancel the task", human actor, `channel`). The runtime
    closes the task as `CANCELLED` at its next step; a call in flight finishes first, so its cost is recorded, and
    its document is kept. A cancelled task's open questions are no longer listed and get no default.
-10. **Publishing on PyPI.** The owner approved publishing OOAT on PyPI on 2026-10-09, so `pipx install ooat`
-    becomes the documented install once a release is cut. Each release is still published only on the owner's go;
-    the CLAUDE.md rule on publishing stays in force for every release. The distribution name (`ooat` or today's
-    `ooat-core`) is settled with the first release.
+10. **Publishing on PyPI.** The owner approved publishing OOAT on PyPI on 2026-10-09. The distribution name is
+    `ooat-core` (owner, 2026-10-10) and the command it installs is `ooat`, so `pipx install ooat-core` becomes the
+    documented install once a release is cut. Each release is still published only on the owner's go; the
+    CLAUDE.md rule on publishing stays in force for every release.
 
 ## Consequences
 
@@ -189,7 +204,7 @@ Report to the owner: ADR 0016 is drafted as "proposed"; Tasks 2–10 need it acc
 - Modify: `docs/adr/0016-operator-api-tokens.md` (status), `docs/adr/0003-schema-interpretations.md` (amendment)
 - Modify: `spec/schemas/common.schema.json`, `spec/schemas/event.schema.json`
 - Create: `spec/examples/valid/event.operator_token_issued.json`, `spec/examples/valid/event.operator_token_revoked.json`
-- Modify: `spec/tests/test_schemas.py`, `spec/ooat-specification.md`, `spec/README.md`
+- Modify: `spec/tests/test_schemas.py`, `spec/ooat-specification.md`, `spec/README.md`, `CLAUDE.md` (stack line)
 - Modify: `core/src/ooat_core/ids.py`, `core/tests/test_ids.py`
 
 **Interfaces:**
@@ -216,12 +231,12 @@ Create `spec/examples/valid/event.operator_token_issued.json`:
   "id": "evt_01J9ZQ80A0K3M5N7P9Q1R3S5T7",
   "ts": "2026-10-10T09:00:00Z",
   "task": null,
-  "actor": {"kind": "hil", "id": "Martin"},
+  "actor": {"kind": "hil", "id": "operator"},
   "type": "OPERATOR_TOKEN_ISSUED",
   "refs": [],
   "body": {
     "token": "tok_01J9ZQ80B0K3M5N7P9Q1R3S5T7",
-    "operator": "Martin",
+    "operator": "operator",
     "name": "telegram",
     "scopes": ["submit", "read", "answer", "rate"],
     "max_data_class": "internal",
@@ -238,12 +253,12 @@ Create `spec/examples/valid/event.operator_token_revoked.json`:
   "id": "evt_01J9ZQ81A0K3M5N7P9Q1R3S5T7",
   "ts": "2026-10-11T09:00:00Z",
   "task": null,
-  "actor": {"kind": "hil", "id": "Martin"},
+  "actor": {"kind": "hil", "id": "operator"},
   "type": "OPERATOR_TOKEN_REVOKED",
   "refs": [],
   "body": {
     "token": "tok_01J9ZQ80B0K3M5N7P9Q1R3S5T7",
-    "operator": "Martin",
+    "operator": "operator",
     "reason": "The bot moved to another server."
   }
 }
@@ -661,6 +676,18 @@ and after the line `- Referenced capabilities, roles, adapters and schema paths 
 - One `TASK_SUBMITTED` per `intake_key` and `channel`, and a response to an R3 request only from `default-on-silence` (the ledger, ADR 0016).
 ```
 
+In `CLAUDE.md` (owner-approved through ADR 0016 point 7) replace
+
+```text
+- Stack: Python 3.12+ (FastAPI, Pydantic v2, SQLite→Postgres), TypeScript dashboard, JSON Schema 2020-12.
+```
+
+with
+
+```text
+- Stack: Python 3.12+ (FastAPI, Pydantic v2, SQLite→Postgres), JavaScript dashboard with JSDoc types checked by `tsc --noEmit --checkJs`, no build step (ADR 0016), TypeScript SDK, JSON Schema 2020-12.
+```
+
 - [ ] **Step 7: Run the whole suite**
 
 Run: `python -m pytest -q`
@@ -669,7 +696,7 @@ Expected: PASS (nothing in the core uses the new schema parts yet)
 - [ ] **Step 8: Commit**
 
 ```bash
-git add docs/adr/0016-operator-api-tokens.md docs/adr/0003-schema-interpretations.md spec/schemas/common.schema.json spec/schemas/event.schema.json spec/examples/valid/event.operator_token_issued.json spec/examples/valid/event.operator_token_revoked.json spec/tests/test_schemas.py spec/ooat-specification.md spec/README.md core/src/ooat_core/ids.py core/tests/test_ids.py
+git add docs/adr/0016-operator-api-tokens.md docs/adr/0003-schema-interpretations.md spec/schemas/common.schema.json spec/schemas/event.schema.json spec/examples/valid/event.operator_token_issued.json spec/examples/valid/event.operator_token_revoked.json spec/tests/test_schemas.py spec/ooat-specification.md spec/README.md CLAUDE.md core/src/ooat_core/ids.py core/tests/test_ids.py
 git commit -m "feat(spec): token events, channel and intake_key; spec text of ADR 0016"
 ```
 
@@ -832,7 +859,7 @@ def test_two_threads_answering_one_request_write_one_answer_and_the_other_is_tol
     outcomes = []
     for request in requests:
         outcomes += _race(path, lambda r=request: new_event("HIL_RESPONSE", task=r["task"], actor={
-            "kind": "hil", "id": "Martin"}, body={"request": r["id"], "choice": "yes"}))
+            "kind": "hil", "id": "operator"}, body={"request": r["id"], "choice": "yes"}))
     for results in outcomes:
         assert results.count("written") == 1
         (loser,) = [r for r in results if r != "written"]
@@ -852,7 +879,7 @@ def test_two_deliveries_of_one_chat_message_at_once_create_one_task(tmp_path):
     for n in range(10):
         key = f"chat-1:msg-{n}"
         (results,) = _race(path, lambda k=key: new_event("TASK_SUBMITTED", task=new_id("tsk"), actor={
-            "kind": "hil", "id": "Martin"}, body={"goal": "Shrň smlouvu.", "channel": channel, "intake_key": k}))
+            "kind": "hil", "id": "operator"}, body={"goal": "Shrň smlouvu.", "channel": channel, "intake_key": k}))
         assert results.count("written") == 1
         (loser,) = [r for r in results if r != "written"]
         assert isinstance(loser, DuplicateIntake) and loser.task.startswith("tsk_")
@@ -1156,7 +1183,9 @@ git commit -m "feat(core): WAL ledger, BEGIN IMMEDIATE appends, one task per int
     asked); `runtime.CANCEL = "cancel the task"`; errors `runtime.UnknownTask`, `runtime.TaskClosed` (`ValueError`).
   - `rate(..., channel: str | None = None)`; errors `rating.NotClosed`, `rating.AlreadyRated` (`ValueError`).
   - `connector_admin.acknowledge(..., channel=None)`, `approve_hooks(..., channel=None)`, `disable(..., channel=None)`.
-  - `ledger.SILENCE_ACTOR_ID = "default-on-silence"`.
+  - `ledger.SILENCE_ACTOR_ID = "default-on-silence"`; the ledger refuses a response under that actor unless it
+    carries `default_applied: true` and chooses the request's `default_on_silence`, and refuses any other actor's
+    response to an R3 request.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -1201,9 +1230,9 @@ def r3_request(setup, task):
 
 def test_an_answer_records_the_operator_and_the_channel(tmp_path):
     setup, task, request = waiting(tmp_path)
-    response = answer(setup.ledger, setup.runtime, request, operator=" Martin ", text=" Nejvýše 300 slov. ",
+    response = answer(setup.ledger, setup.runtime, request, operator=" operator ", text=" Nejvýše 300 slov. ",
                       channel=TOKEN_CHANNEL)
-    assert response["actor"] == {"kind": "hil", "id": "Martin"}
+    assert response["actor"] == {"kind": "hil", "id": "operator"}
     assert response["body"] == {"request": request, "text": "Nejvýše 300 slov.", "channel": TOKEN_CHANNEL}
     assert open_requests(setup.ledger) == []
 
@@ -1214,28 +1243,28 @@ def test_an_r3_request_is_refused_on_every_channel(tmp_path, channel):
     request = r3_request(setup, task)
     for choice in ("send", "hold"):
         with pytest.raises(R3NeedsBoundIdentity):
-            answer(setup.ledger, setup.runtime, request["id"], operator="Martin", choice=choice, channel=channel)
+            answer(setup.ledger, setup.runtime, request["id"], operator="operator", choice=choice, channel=channel)
     assert not any(e["body"]["request"] == request["id"] for e in setup.ledger.events(types=["HIL_RESPONSE"]))
 
 
 def test_a_second_answer_and_a_late_answer_are_already_answered(tmp_path):
     setup, task, request = waiting(tmp_path)
-    answer(setup.ledger, setup.runtime, request, operator="Martin", choice="run_as_is", channel="web")
+    answer(setup.ledger, setup.runtime, request, operator="operator", choice="run_as_is", channel="web")
     with pytest.raises(AlreadyAnswered):
-        answer(setup.ledger, setup.runtime, request, operator="Eva", choice="do_not_run", channel="web")
+        answer(setup.ledger, setup.runtime, request, operator="second-operator", choice="do_not_run", channel="web")
     setup, task, request = waiting(tmp_path)
     setup.now = NOW + timedelta(hours=49)  # the default applies first
     with pytest.raises(AlreadyAnswered):
-        answer(setup.ledger, setup.runtime, request, operator="Martin", choice="run_as_is", channel="web")
+        answer(setup.ledger, setup.runtime, request, operator="operator", choice="run_as_is", channel="web")
     assert setup.last(task, "HIL_RESPONSE")["actor"]["id"] == "default-on-silence"
 
 
 def test_mistakes_are_refused_before_anything_is_written(tmp_path):
     setup, task, request = waiting(tmp_path)
     with pytest.raises(UnknownRequest):
-        answer(setup.ledger, setup.runtime, new_id("evt"), operator="Martin", choice="clarify")
+        answer(setup.ledger, setup.runtime, new_id("evt"), operator="operator", choice="clarify")
     with pytest.raises(ValueError, match="a choice, a text or both"):
-        answer(setup.ledger, setup.runtime, request, operator="Martin", text="  ")
+        answer(setup.ledger, setup.runtime, request, operator="operator", text="  ")
     with pytest.raises(ValueError, match="reserved"):
         answer(setup.ledger, setup.runtime, request, operator="default-on-silence", choice="do_not_run")
     assert len(open_requests(setup.ledger)) == 1
@@ -1243,11 +1272,11 @@ def test_mistakes_are_refused_before_anything_is_written(tmp_path):
 
 def test_the_question_of_a_cancelled_task_is_neither_open_nor_answerable(tmp_path):
     setup, task, request = waiting(tmp_path)
-    assert setup.runtime.cancel(task, operator="Martin", channel="web")
+    assert setup.runtime.cancel(task, operator="operator", channel="web")
     assert setup.runtime.run(task).state == "CANCELLED"
     assert open_requests(setup.ledger) == []
     with pytest.raises(TaskClosed):
-        answer(setup.ledger, setup.runtime, request, operator="Martin", choice="run_as_is")
+        answer(setup.ledger, setup.runtime, request, operator="operator", choice="run_as_is")
     setup.now = NOW + timedelta(hours=49)
     assert setup.runtime.expire() == []  # no default is applied to a closed task
 
@@ -1287,13 +1316,13 @@ def test_a_cancelled_waiting_task_closes_as_cancelled_at_its_next_run(tmp_path):
     setup = Setup(tmp_path)
     task = setup.submit(acceptance=())
     assert setup.runtime.run(task).state == "CLARIFYING"
-    assert setup.runtime.cancel(task, operator="Martin", channel="web") is True
-    assert setup.runtime.cancel(task, operator="Martin") is False  # asked once is enough
+    assert setup.runtime.cancel(task, operator="operator", channel="web") is True
+    assert setup.runtime.cancel(task, operator="operator") is False  # asked once is enough
     assert task in setup.runtime.runnable()  # the runner picks it up although it waits for an answer
     outcome = setup.runtime.run(task)
-    assert outcome.state == "CANCELLED" and outcome.summary == "Cancelled by Martin."
+    assert outcome.state == "CANCELLED" and outcome.summary == "Cancelled by operator."
     decision = setup.last(task, "DECISION")
-    assert decision["actor"] == {"kind": "hil", "id": "Martin"}
+    assert decision["actor"] == {"kind": "hil", "id": "operator"}
     assert decision["body"] == {"decision": "cancel the task", "channel": "web"}
     assert task not in setup.runtime.runnable()
 
@@ -1303,7 +1332,7 @@ def test_a_cancel_during_the_worker_call_keeps_the_document_and_skips_the_checks
         def complete(self, request, secrets):
             response = super().complete(request, secrets)
             if len(self.worker_prompts) == 1:  # the operator cancels while the worker writes
-                setup.runtime.cancel(task, operator="Martin")
+                setup.runtime.cancel(task, operator="operator")
             return response
 
     setup = Setup(tmp_path, model=CancelledWhileWriting())
@@ -1321,9 +1350,9 @@ def test_a_closed_or_unknown_task_cannot_be_cancelled(tmp_path):
     task = setup.submit()
     setup.runtime.run(task)
     with pytest.raises(TaskClosed):
-        setup.runtime.cancel(task, operator="Martin")
+        setup.runtime.cancel(task, operator="operator")
     with pytest.raises(UnknownTask):
-        setup.runtime.cancel("tsk_01J9ZQ7A1BK3M5N7P9Q1R3S5T7", operator="Martin")
+        setup.runtime.cancel("tsk_01J9ZQ7A1BK3M5N7P9Q1R3S5T7", operator="operator")
 ```
 
 In `core/tests/test_ledger.py` replace `HIL = {"kind": "hil", "id": "operator"}` with
@@ -1356,6 +1385,19 @@ def test_an_r3_request_is_answered_only_by_its_default_on_silence(ledger):
                                     body={"request": request["id"], "choice": choice}))
     ledger.append(new_event("HIL_RESPONSE", task=task, actor=SILENCE,
                             body={"request": request["id"], "choice": "hold", "default_applied": True}))
+
+
+@pytest.mark.parametrize("risk", ["R1", "R3"])
+@pytest.mark.parametrize("body", [{"choice": "send", "default_applied": True},  # an acting choice
+                                  {"choice": "hold"},  # default_applied missing
+                                  {"text": "Nikdo neodpověděl.", "default_applied": True}],  # no choice at all
+                         ids=["acting_choice", "without_default_applied", "without_choice"])
+def test_the_silence_actor_only_applies_the_declared_default(ledger, risk, body):
+    task = new_id("tsk")
+    request = ledger.append(hil_request(task, risk, "hold"))
+    with pytest.raises(SpecValidationError, match="default-on-silence only applies"):
+        ledger.append(new_event("HIL_RESPONSE", task=task, actor=SILENCE, body={"request": request["id"], **body}))
+    assert ledger.events(types=["HIL_RESPONSE"]) == []
 ```
 
 In `core/tests/test_rating.py` replace `def test_only_a_closed_task_can_be_rated(tmp_path):` with
@@ -1365,10 +1407,10 @@ def test_a_task_is_rated_once_and_the_rating_records_its_channel(tmp_path):
     from ooat_core.rating import AlreadyRated
 
     setup, task = closed_task(tmp_path)
-    event = rate(setup.ledger, task, operator="Martin", accepted=True, value_class="B", channel="web")
+    event = rate(setup.ledger, task, operator="operator", accepted=True, value_class="B", channel="web")
     assert event["body"]["channel"] == "web"
     with pytest.raises(AlreadyRated):  # a second rating would count its verdicts twice in the thresholds
-        rate(setup.ledger, task, operator="Martin", accepted=False, value_class="C")
+        rate(setup.ledger, task, operator="operator", accepted=False, value_class="C")
 
 
 def test_only_a_closed_task_can_be_rated(tmp_path):
@@ -1378,11 +1420,11 @@ In `core/tests/test_task_cli.py` replace `def test_a_hand_over_after_the_decisio
 
 ```python
 def test_cli_events_record_the_cli_channel(env):
-    _, out = ooat(env, "task", "submit", "--operator", "Martin", "--goal", "Shrň smlouvu.")
+    _, out = ooat(env, "task", "submit", "--operator", "operator", "--goal", "Shrň smlouvu.")
     task = task_id(out)
     request = out.split("Question ", 1)[1].split(" ", 1)[0]
-    ooat(env, "hil", "answer", request, "--operator", "Martin", "--text", "Shrnutí má nejvýše 300 slov.")
-    ooat(env, "task", "rate", task, "--operator", "Martin", "--accepted", "yes", "--value", "B", "--confirm-all")
+    ooat(env, "hil", "answer", request, "--operator", "operator", "--text", "Shrnutí má nejvýše 300 slov.")
+    ooat(env, "task", "rate", task, "--operator", "operator", "--accepted", "yes", "--value", "B", "--confirm-all")
     for kind in ("TASK_SUBMITTED", "HIL_RESPONSE", "TASK_RATED"):
         assert events(env, task, kind)[0]["body"]["channel"] == "cli", kind
 
@@ -1390,7 +1432,7 @@ def test_cli_events_record_the_cli_channel(env):
 def test_the_cli_refuses_to_answer_an_r3_request(env):
     from ooat_core.ledger import new_event
 
-    _, out = ooat(env, "task", "submit", "--operator", "Martin", "--goal", "Shrň smlouvu.", "--no-run")
+    _, out = ooat(env, "task", "submit", "--operator", "operator", "--goal", "Shrň smlouvu.", "--no-run")
     task = task_id(out)
     ledger = Ledger.open(env["ledger"])
     request = ledger.append(new_event("HIL_REQUEST", task=task, actor={"kind": "system", "id": "ooat-runtime"}, body={
@@ -1400,7 +1442,7 @@ def test_the_cli_refuses_to_answer_an_r3_request(env):
         "recommended": "send", "default_on_silence": "hold", "deadline": "2026-10-03T12:00:00Z", "blocking": True,
         "evidence": []}))
     ledger.close()
-    code, answered = ooat(env, "hil", "answer", request["id"], "--operator", "Martin", "--choice", "hold")
+    code, answered = ooat(env, "hil", "answer", request["id"], "--operator", "operator", "--choice", "hold")
     assert code == 1 and "named approver" in answered and events(env, task, "HIL_RESPONSE") == []
 
 
@@ -1726,6 +1768,11 @@ SILENCE_ACTOR_ID = "default-on-silence"  # the runtime applying a request's decl
 and in `_check_hil` replace `                if request["body"].get("risk_class") == "R3" and "choice" not in body:` with
 
 ```python
+                if event["actor"]["id"] == SILENCE_ACTOR_ID and not (
+                        body.get("default_applied") is True
+                        and body.get("choice") == request["body"]["default_on_silence"]):
+                    errors.append("$.body: default-on-silence only applies the request's default, with "
+                                  "default_applied: true")
                 if request["body"].get("risk_class") == "R3" and event["actor"]["id"] != SILENCE_ACTOR_ID:
                     # Spec §9 as amended by ADR 0016: no identity bound to something the operator holds exists yet.
                     errors.append("R3_NEEDS_BOUND_IDENTITY: an R3 request needs a named approver with a bound "
@@ -1971,7 +2018,7 @@ git commit -m "feat(core): shared human actions with channel, operator cancel, R
   `tokens.EVENTS`, `tokens.DEFAULT_DAYS = 90`; `@dataclass Token(id, operator, name, scopes: frozenset[str],
   max_data_class, expires: datetime, sha256, revoked=False)`; `tokens.issue(ledger, *, operator, name, scopes,
   max_data_class="internal", days=90, responsibility=False, now) -> tuple[str, dict]` (the secret, the event);
-  `tokens.tokens(events) -> dict[str, Token]`; `tokens.revoke(ledger, *, operator, token_id, reason) -> dict`;
+  `tokens.tokens(events) -> dict[str, Token]`; `tokens.revoke(ledger, *, operator, token_id, reason) -> dict` (only the operator the token acts as may revoke it);
   `tokens.authenticate(events, presented: str, now) -> Token | None`; `serve_cli.add_commands(commands)`,
   `serve_cli.run(args, config, path, stdin, stdout, clock, ask) -> int`.
 
@@ -2003,7 +2050,7 @@ def ledger():
 
 
 def issue(ledger, **extra):
-    return tokens.issue(ledger, **{"operator": "Martin", "name": "telegram", "scopes": ["submit", "read"],
+    return tokens.issue(ledger, **{"operator": "operator", "name": "telegram", "scopes": ["submit", "read"],
                                    "now": NOW, **extra})
 
 
@@ -2013,9 +2060,9 @@ def test_a_token_is_shown_once_and_only_its_hash_is_recorded(ledger):
     stored = json.dumps(ledger.events())
     assert secret not in stored and secret[5:] not in stored
     body = event["body"]
-    assert event["task"] is None and event["actor"] == {"kind": "hil", "id": "Martin"}
+    assert event["task"] is None and event["actor"] == {"kind": "hil", "id": "operator"}
     assert body["max_data_class"] == "internal" and body["expires"] == "2027-01-08T09:00:00Z"
-    assert tokens.authenticate(ledger.events(types=tokens.EVENTS), secret, NOW).operator == "Martin"
+    assert tokens.authenticate(ledger.events(types=tokens.EVENTS), secret, NOW).operator == "operator"
 
 
 def test_a_wrong_expired_or_revoked_token_does_not_authenticate(ledger):
@@ -2024,10 +2071,14 @@ def test_a_wrong_expired_or_revoked_token_does_not_authenticate(ledger):
     assert tokens.authenticate(events, secret[:-1] + ("A" if secret[-1] != "A" else "B"), NOW) is None
     assert tokens.authenticate(events, "Bearer " + secret, NOW) is None
     assert tokens.authenticate(events, secret, NOW + timedelta(days=1)) is None
-    tokens.revoke(ledger, operator="Martin", token_id=event["body"]["token"], reason="the bot moved")
+    with pytest.raises(ValueError, match="only they may revoke it"):  # another operator cannot cut off this bot
+        tokens.revoke(ledger, operator="second-operator", token_id=event["body"]["token"], reason="not mine")
+    assert tokens.authenticate(ledger.events(types=tokens.EVENTS), secret, NOW).operator == "operator"
+    revoked = tokens.revoke(ledger, operator="operator", token_id=event["body"]["token"], reason="the bot moved")
+    assert revoked["actor"] == {"kind": "hil", "id": "operator"} and revoked["body"]["operator"] == "operator"
     assert tokens.authenticate(ledger.events(types=tokens.EVENTS), secret, NOW) is None
     with pytest.raises(ValueError, match="already revoked"):
-        tokens.revoke(ledger, operator="Martin", token_id=event["body"]["token"], reason="again")
+        tokens.revoke(ledger, operator="operator", token_id=event["body"]["token"], reason="again")
 
 
 @pytest.mark.parametrize("extra, message", [
@@ -2064,23 +2115,23 @@ def ooat(config, *argv, answers=""):
 
 
 def test_create_list_and_revoke_from_the_command_line(config):
-    code, out = ooat(config, "tokens", "create", "--operator", "Martin", "--name", "telegram",
+    code, out = ooat(config, "tokens", "create", "--operator", "operator", "--name", "telegram",
                      "--scopes", "submit,read,answer,rate")
     assert code == 0 and "shown only now" in out
     secret = next(line.strip() for line in out.splitlines() if line.strip().startswith("ooat_"))
     token_id = out.split("Token ", 1)[1].split(" ", 1)[0]
     code, listed = ooat(config, "tokens", "list")
     assert code == 0 and token_id in listed and "[active]" in listed and secret not in listed
-    code, out = ooat(config, "tokens", "revoke", token_id, "--operator", "Martin", "--reason", "the bot moved")
+    code, out = ooat(config, "tokens", "revoke", token_id, "--operator", "operator", "--reason", "the bot moved")
     assert code == 0 and "[revoked]" in ooat(config, "tokens", "list")[1]
 
 
 def test_a_personal_cap_asks_for_the_responsibility_and_no_means_no_token(config):
-    code, out = ooat(config, "tokens", "create", "--operator", "Martin", "--name", "crm", "--scopes", "read",
+    code, out = ooat(config, "tokens", "create", "--operator", "operator", "--name", "crm", "--scopes", "read",
                      "--max-data-class", "personal", answers="no\n")
     assert code == 1 and "No token was created" in out and "ooat_" not in out
     assert ooat(config, "tokens", "list")[1] == "No tokens.\n"
-    code, out = ooat(config, "tokens", "create", "--operator", "Martin", "--name", "crm", "--scopes", "read",
+    code, out = ooat(config, "tokens", "create", "--operator", "operator", "--name", "crm", "--scopes", "read",
                      "--max-data-class", "personal", answers="yes\n")
     assert code == 0 and "data up to personal" in out
 ```
@@ -2184,12 +2235,16 @@ def tokens(events: list[dict]) -> dict[str, Token]:
 
 
 def revoke(ledger: Ledger, *, operator: str, token_id: str, reason: str) -> dict:
+    """OPERATOR_TOKEN_REVOKED. Only the operator who issued the token (and whom it acts as) may revoke it, so one
+    operator cannot cut off another's bot; the event's `operator` is that operator, its actor too."""
     operator, reason = checked_operator(operator), reason.strip()
     if not reason:
         raise ValueError("a reason is required")
     known = tokens(ledger.events(types=EVENTS)).get(token_id)
     if known is None:
         raise ValueError(f"no token {token_id} (see `ooat tokens list`)")
+    if known.operator != operator:
+        raise ValueError(f"{token_id} was issued by {known.operator}; only they may revoke it")
     if known.revoked:
         raise ValueError(f"{token_id} is already revoked")
     return ledger.append(new_event("OPERATOR_TOKEN_REVOKED", task=None, actor={"kind": "hil", "id": operator},
@@ -2526,7 +2581,7 @@ def test_the_runner_thread_runs_what_the_api_queues_and_stops(tmp_path):
         acknowledge(intake.ledger, connector)
     runner = Runner(file_runtime(path, model, jev), clock=lambda: NOW, tick_seconds=3600)
     runner.start()
-    task = intake.submit(operator="Martin", goal="Shrň smlouvu.", acceptance=CRITERIA, channel="web")
+    task = intake.submit(operator="operator", goal="Shrň smlouvu.", acceptance=CRITERIA, channel="web")
     runner.enqueue(task)
     deadline = time.monotonic() + 30
     while task_state(intake.ledger.events(task=task)) != "CLOSED_DONE" and time.monotonic() < deadline:
@@ -2557,7 +2612,7 @@ def test_while_the_server_holds_the_runner_lock_the_cli_only_records(env):
     lock = for_ledger(env["ledger"])
     assert lock.acquire()  # as `ooat serve` does
     try:
-        code, out = ooat(env, "task", "submit", "--operator", "Martin", "--goal", "Shrň smlouvu.")
+        code, out = ooat(env, "task", "submit", "--operator", "operator", "--goal", "Shrň smlouvu.")
         task = task_id(out)
         assert code == 0 and "ooat serve` runs it" in out and events(env, task, "TOPOLOGY_DECIDED") == []
         code, out = ooat(env, "task", "run", task)
@@ -2569,7 +2624,7 @@ def test_while_the_server_holds_the_runner_lock_the_cli_only_records(env):
     request = out.split("Question ", 1)[1].split(" ", 1)[0]
     assert lock.acquire()
     try:
-        code, out = ooat(env, "hil", "answer", request, "--operator", "Martin", "--text", "Nejvýše 300 slov.")
+        code, out = ooat(env, "hil", "answer", request, "--operator", "operator", "--text", "Nejvýše 300 slov.")
         assert code == 0 and "ooat serve` runs it" in out and events(env, task, "CONTRACT_ISSUED") == []
     finally:
         lock.release()
@@ -2947,7 +3002,7 @@ def call(task, minutes_ago, usd, basis="exact", adapter="prv.fake.api", tier="wo
 
 def submitted(task, project, minutes_ago=60):
     return {"id": new_id("evt"), "ts": at(minutes_ago), "task": task, "type": "TASK_SUBMITTED", "refs": [],
-            "actor": {"kind": "hil", "id": "Martin"}, "body": {"goal": "x", "project": project}}
+            "actor": {"kind": "hil", "id": "operator"}, "body": {"goal": "x", "project": project}}
 
 
 def test_cost_is_split_into_metered_and_subscription_shadow_by_connector():
@@ -2986,7 +3041,7 @@ def test_hil_waiting_time_is_the_median_of_human_answers_and_defaults_are_counte
                  "actor": {"kind": "system", "id": "ooat-gate"}, "body": {}} for m in (100, 90, 80)]
     answers = [{"id": new_id("evt"), "ts": at(m), "task": task, "type": "HIL_RESPONSE", "refs": [],
                 "actor": {"kind": "hil", "id": who}, "body": {"request": r["id"], **extra}}
-               for r, m, who, extra in ((requests[0], 90, "Martin", {}), (requests[1], 60, "Martin", {}),
+               for r, m, who, extra in ((requests[0], 90, "operator", {}), (requests[1], 60, "operator", {}),
                                         (requests[2], 0, "default-on-silence", {"default_applied": True}))]
     figures = usage(requests + answers, now=NOW)["hil"]
     assert figures == {"questions": 3, "answered": 2, "defaults_applied": 1, "median_wait_minutes": 20.0}
@@ -2997,7 +3052,7 @@ def test_a_real_task_shows_the_worker_the_gate_and_the_checks_and_its_cost_per_a
     setup.now = datetime.now(timezone.utc)  # the ledger stamps the real time
     task = setup.submit(project="docs")
     setup.runtime.run(task)
-    rate(setup.ledger, task, operator="Martin", accepted=True, value_class="B")
+    rate(setup.ledger, task, operator="operator", accepted=True, value_class="B")
     events = setup.ledger.events()
     figures = usage(events, now=setup.now + timedelta(minutes=1), group="role")
     assert {r["key"] for r in figures["groups"]} == {"role.general.worker", "gate", "acceptance"}
@@ -3038,7 +3093,7 @@ def test_the_cap_orders_the_classes():
 
 def test_a_personal_task_is_a_stub_above_an_internal_cap_but_its_state_and_costs_stay(tmp_path):
     setup = Setup(tmp_path, classes=("public", "internal", "personal"))
-    task = setup.runtime.submit(operator="Martin", goal=PERSONAL_GOAL, project="client-x")  # no criteria: asks
+    task = setup.runtime.submit(operator="operator", goal=PERSONAL_GOAL, project="client-x")  # no criteria: asks
     setup.runtime.run(task)
     tasks, found = classes(setup)
     assert found[task] == "personal"  # raised by the pre-scan
@@ -3082,7 +3137,7 @@ def test_an_internal_task_is_shown_whole_and_the_timeline_follows_a_cursor(tmp_p
 def test_the_rating_queue_holds_closed_unrated_tasks_with_their_decisions(tmp_path):
     setup = Setup(tmp_path)  # no connector for personal data: that task closes at the Gate
     plain = setup.submit()
-    personal = setup.runtime.submit(operator="Martin", goal=PERSONAL_GOAL, acceptance=["Odpověď je zdvořilá."])
+    personal = setup.runtime.submit(operator="operator", goal=PERSONAL_GOAL, acceptance=["Odpověď je zdvořilá."])
     for task in (plain, personal):
         assert setup.runtime.run(task).state.startswith("CLOSED")
     tasks, found = classes(setup)
@@ -3395,8 +3450,7 @@ In `core/pyproject.toml` replace
 `dependencies = ["jsonschema>=4.23", "referencing>=0.30", "rfc3339-validator>=0.1.4"]` with
 `dependencies = ["jsonschema>=4.23", "referencing>=0.30", "rfc3339-validator>=0.1.4", "fastapi>=0.143"]`
 (FastAPI with Pydantic v2 is the API stack CLAUDE.md names; it brings Starlette and Pydantic). Append to
-`requirements-dev.txt` the line `httpx2>=2.13` (test-only: FastAPI's `TestClient` needs it; Starlette 1.x deprecates
-plain `httpx` for it). Then run `python -m pip install -r requirements-dev.txt -e core`.
+`requirements-dev.txt` the line `httpx2>=2.13` (test-only: FastAPI's `TestClient` imports it; current Starlette asks for it (its import error says `pip install httpx2`) and deprecates plain `httpx`; published by Pydantic, github.com/pydantic/httpx2; verified by the orchestrator 2026-10-10). Then run `python -m pip install -r requirements-dev.txt -e core`.
 
 - [ ] **Step 2: Write the failing tests**
 
@@ -3435,7 +3489,7 @@ class Served:
         with self.ledger() as ledger:
             acknowledge(ledger, self.model, classes)
             acknowledge(ledger, self.jev)
-        self.settings = ServeSettings(ledger_url=self.url, blobs_dir=tmp_path / "blobs", operator="Martin",
+        self.settings = ServeSettings(ledger_url=self.url, blobs_dir=tmp_path / "blobs", operator="operator",
                                       **settings)
         self.app = create_app(self.settings, config=parse_config({}), registry=Registry([self.model, self.jev]),
                               routing=RoutingPolicy(routing_document()), clock=now, start_runner=False)
@@ -3455,11 +3509,11 @@ class Served:
 
     def token(self, scopes=("submit", "read", "answer", "rate"), cap="internal") -> dict:
         with self.ledger() as ledger:
-            secret, _ = tokens.issue(ledger, operator="Martin", name="telegram", scopes=list(scopes),
+            secret, _ = tokens.issue(ledger, operator="operator", name="telegram", scopes=list(scopes),
                                      max_data_class=cap, responsibility=cap in tokens.RESPONSIBLE_CAPS, now=now())
         return {"Authorization": f"Bearer {secret}"}
 
-    def login(self, operator="Martin") -> dict:
+    def login(self, operator="operator") -> dict:
         """A web session: the client keeps the cookie; unsafe requests need these headers."""
         code = issue_login_code(login_folder(self.url), operator, now())
         response = self.client.post("/api/v1/login", json={"code": code}, headers={"Origin": self.origin})
@@ -3491,6 +3545,8 @@ Create `core/tests/test_api_security.py`:
 """`ooat serve`'s shell: sign-in, sessions, tokens, Host / Origin / CSRF, limits and the log (design 05 §6, §14)."""
 
 import logging
+import os
+import stat
 from datetime import timedelta
 
 import pytest
@@ -3503,23 +3559,23 @@ from ooat_core.sessions import issue_login_code, login_folder
 
 def test_a_sign_in_code_works_once_and_its_session_acts_as_its_operator(tmp_path):
     served = Served(tmp_path)
-    code = issue_login_code(login_folder(served.url), "Martin", now())
+    code = issue_login_code(login_folder(served.url), "operator", now())
     assert not any(code in path.name for path in login_folder(served.url).iterdir())  # only its hash is on disk
     first = served.client.post("/api/v1/login", json={"code": code}, headers={"Origin": ORIGIN})
-    assert first.status_code == 200 and first.json()["operator"] == "Martin"
+    assert first.status_code == 200 and first.json()["operator"] == "operator"
     cookie = first.headers["set-cookie"].lower()
     assert "httponly" in cookie and "samesite=strict" in cookie and "max-age=43200" in cookie
     assert "secure" not in cookie  # plain http on loopback
     again = served.client.post("/api/v1/login", json={"code": code}, headers={"Origin": ORIGIN})
     assert again.status_code == 401 and again.json()["error"]["code"] == "UNAUTHENTICATED"
     me = served.client.get("/api/v1/me").json()
-    assert me["operator"] == "Martin" and me["channel"] == "web" and me["max_data_class"] is None
+    assert me["operator"] == "operator" and me["channel"] == "web" and me["max_data_class"] is None
     assert me["csrf"] == first.json()["csrf"]
 
 
 def test_an_expired_sign_in_code_is_refused(tmp_path):
     served = Served(tmp_path)
-    code = issue_login_code(login_folder(served.url), "Martin", now() - timedelta(minutes=6))
+    code = issue_login_code(login_folder(served.url), "operator", now() - timedelta(minutes=6))
     assert served.client.post("/api/v1/login", json={"code": code}, headers={"Origin": ORIGIN}).status_code == 401
 
 
@@ -3533,7 +3589,7 @@ def test_logging_out_ends_the_session(tmp_path):
 def test_a_page_of_another_site_cannot_sign_in_or_act_for_the_operator(tmp_path):
     served = Served(tmp_path)
     headers = served.login()
-    code = issue_login_code(login_folder(served.url), "Eva", now())
+    code = issue_login_code(login_folder(served.url), "second-operator", now())
     assert served.client.post("/api/v1/login", json={"code": code},
                               headers={"Origin": "http://evil.example"}).status_code == 403
     for refused in ({"Origin": "http://evil.example"}, {}, {"Origin": "http://127.0.0.1:9999"}, {"Origin": "null"},
@@ -3573,7 +3629,7 @@ def test_a_revoked_token_stops_working_at_once(tmp_path):
     assert served.client.get("/api/v1/me", headers=headers).status_code == 200
     with served.ledger() as ledger:
         (token,) = tokens.tokens(ledger.events(types=tokens.EVENTS))
-        tokens.revoke(ledger, operator="Martin", token_id=token, reason="leaked")
+        tokens.revoke(ledger, operator="operator", token_id=token, reason="leaked")
     assert served.client.get("/api/v1/me", headers=headers).status_code == 401
 
 
@@ -3597,6 +3653,21 @@ def test_a_request_above_twenty_megabytes_is_refused_unread(tmp_path):
     assert response.status_code == 413 and response.json()["error"]["code"] == "TOO_LARGE"
 
 
+def test_a_content_length_that_is_not_a_number_is_invalid(tmp_path):
+    served = Served(tmp_path)
+    for length in ("abc", "-1", "1e3"):
+        response = served.client.post("/api/v1/login", content=b'{"code": "x"}',
+                                      headers={"Origin": ORIGIN, "Content-Length": length})
+        assert response.status_code == 400 and response.json()["error"]["code"] == "INVALID", length
+
+
+@pytest.mark.skipif(os.name == "nt", reason="Windows ignores the mode; the folder inherits the profile's ACL")
+def test_the_sign_in_folder_is_private_to_its_owner(tmp_path):
+    folder = tmp_path / "ooat-login"
+    issue_login_code(folder, "operator", now())
+    assert stat.S_IMODE(folder.stat().st_mode) == 0o700
+
+
 def test_the_log_records_method_path_and_status_only(tmp_path, caplog):
     served = Served(tmp_path)
     headers = served.token()
@@ -3610,7 +3681,7 @@ def test_the_log_records_method_path_and_status_only(tmp_path, caplog):
 
 def test_served_beyond_loopback_a_web_session_is_capped_like_a_token(tmp_path):
     served = Served(tmp_path, host="192.168.1.10", hosts=("ooat.lan",), tls=True)
-    code = issue_login_code(login_folder(served.url), "Martin", now())
+    code = issue_login_code(login_folder(served.url), "operator", now())
     signed_in = served.client.post("/api/v1/login", json={"code": code}, headers={"Origin": served.origin})
     assert "secure" in signed_in.headers["set-cookie"].lower()
     assert served.client.get("/api/v1/me").json()["max_data_class"] == "internal"
@@ -3675,7 +3746,9 @@ def login_folder(ledger_url: str) -> Path | None:
 def issue_login_code(folder: Path, operator: str, now: datetime) -> str:
     """A fresh one-time code for the operator; only its hash is written, with its expiry."""
     operator = checked_operator(operator)
-    folder.mkdir(parents=True, exist_ok=True)
+    # Only its owner may read or add codes. On Windows the mode is ignored: the folder lies beside the ledger in the
+    # operator's profile and inherits that folder's ACL, which OOAT does not change.
+    folder.mkdir(mode=0o700, parents=True, exist_ok=True)
     for old in folder.glob("*.json"):  # codes nobody used
         try:
             if _utc(json.loads(old.read_text(encoding="utf-8"))["expires"]) <= now:
@@ -4000,6 +4073,8 @@ def _guards(app: FastAPI, settings: ServeSettings) -> None:
             response = error_response(403, "ORIGIN_NOT_ALLOWED", "an unsafe request needs this server's Origin")
         elif request.method not in SAFE_METHODS and length is None:
             response = error_response(411, "LENGTH_REQUIRED", "send a Content-Length")
+        elif length is not None and not (length.isascii() and length.isdigit()):
+            response = error_response(400, "INVALID", "Content-Length must be a number")
         elif int(length or 0) > MAX_BODY:
             response = error_response(413, "TOO_LARGE", "a request may carry at most 20 MB")
         else:
@@ -4194,7 +4269,7 @@ def test_submit_answer_and_rate_through_the_api(tmp_path):
     assert channel.startswith("token:tok_")
     for kind in ("HIL_RESPONSE", "TASK_RATED"):
         assert next(e for e in events if e["type"] == kind)["body"]["channel"] == submitted_channel
-    assert all(e["actor"]["id"] == "Martin" for e in events if e["actor"]["kind"] == "hil")
+    assert all(e["actor"]["id"] == "operator" for e in events if e["actor"]["kind"] == "hil")
 
 
 def test_a_repeated_idempotency_key_returns_the_first_task_also_after_a_restart(tmp_path):
@@ -4366,7 +4441,7 @@ def test_connectors_need_their_scope_and_a_typed_confirmation(tmp_path):
     with served.ledger() as ledger:
         state = ledger.events(types=["ADAPTER_ACKNOWLEDGED", "ADAPTER_DISABLED"])[-2:]
     assert [e["body"]["channel"] for e in state] == ["web", "web"]
-    assert all(e["actor"] == {"kind": "hil", "id": "Martin"} for e in state)
+    assert all(e["actor"] == {"kind": "hil", "id": "operator"} for e in state)
 
 
 def test_errors_are_typed_and_never_echo_an_attachment(tmp_path):
@@ -4941,7 +5016,7 @@ def ooat(config, *argv):
 
 
 def test_serve_listens_on_loopback_without_an_access_log_and_holds_the_runner_lock(tmp_path, started):
-    config = write_config(tmp_path, 'operator = "Martin"\n')
+    config = write_config(tmp_path, 'operator = "operator"\n')
     code, out = ooat(config, "serve", "--no-browser")
     assert code == 0
     (call,) = started
@@ -4952,7 +5027,7 @@ def test_serve_listens_on_loopback_without_an_access_log_and_holds_the_runner_lo
     client = TestClient(call["app"], base_url="http://127.0.0.1:8765")
     signed_in = client.post("/api/v1/login", json={"code": link.split("#code=")[1]},
                             headers={"Origin": "http://127.0.0.1:8765"})
-    assert signed_in.status_code == 200 and signed_in.json()["operator"] == "Martin"
+    assert signed_in.status_code == 200 and signed_in.json()["operator"] == "operator"
     assert RunnerLock(tmp_path / "ledger.sqlite.runner.lock").acquire()  # released when serving ends
 
 
@@ -4963,7 +5038,7 @@ def test_a_non_loopback_host_without_tls_refuses_to_start(tmp_path, started):
 
 def test_beyond_loopback_with_tls_the_certificate_is_used_and_the_link_names_the_host(tmp_path, started):
     config = write_config(tmp_path, 'host = "0.0.0.0"\nhosts = ["ooat.lan"]\ntls_cert = "cert.pem"\n'
-                                    'tls_key = "key.pem"\noperator = "Martin"\n')
+                                    'tls_key = "key.pem"\noperator = "operator"\n')
     code, out = ooat(config, "serve", "--no-browser")
     assert code == 0 and "https://ooat.lan:8765/login#code=" in out
     (call,) = started
@@ -4982,8 +5057,8 @@ def test_serve_refuses_while_another_process_runs_the_tasks(tmp_path, started):
 
 
 def test_login_prints_a_one_time_link_for_the_named_operator(tmp_path):
-    code, out = ooat(write_config(tmp_path), "login", "--operator", "Eva")
-    assert code == 0 and "Sign in as Eva" in out and "http://127.0.0.1:8765/login#code=" in out
+    code, out = ooat(write_config(tmp_path), "login", "--operator", "second-operator")
+    assert code == 0 and "Sign in as second-operator" in out and "http://127.0.0.1:8765/login#code=" in out
     assert len(list((tmp_path / "ooat-login").glob("*.json"))) == 1
     code, out = ooat(write_config(tmp_path), "login", "--operator", "default-on-silence")
     assert code == 1 and "reserved" in out
@@ -5454,7 +5529,7 @@ Append to `.claude/lessons.md`:
   `endpoints.resource_routes()`).
 - The ledger stamps `ts` with the real time while tests fake the runtime's clock. A test that compares event times
   with the clock (runner backoff, stats periods) starts its fake clock at `datetime.now(timezone.utc)`.
-- Starlette 1.x's `TestClient` wants `httpx2`; plain `httpx` still works but warns.
+- Starlette 1.x's `TestClient` wants `httpx2` (Pydantic's fork, github.com/pydantic/httpx2); plain `httpx` still works but warns.
 - Opening a SQLite connection runs the ledger's DDL, which needs the write lock: a connection opened while another
   writer holds it fails busy too. `SqliteBackend` maps that, like a busy `BEGIN IMMEDIATE`, to `LedgerBusyError`.
 - FastAPI runs sync endpoints in a thread pool and iterates a sync streaming generator there too: the API keeps one
@@ -5464,7 +5539,7 @@ Append to `.claude/lessons.md`:
 - [ ] **Step 9: Run the whole suite and check line lengths**
 
 Run: `python -m pytest -q`
-Expected: PASS (about 118 more tests than before Task 2)
+Expected: PASS (about 125 more tests than before Task 2)
 
 Run: `python -c "import pathlib,sys; bad=[f'{p}:{n}' for p in pathlib.Path('core').rglob('*.py') for n,l in enumerate(p.read_text(encoding='utf-8').splitlines(),1) if len(l)>120 and p.name in {'api.py','endpoints.py','hil.py','tokens.py','runner.py','runner_lock.py','stats.py','views.py','sessions.py','serve_cli.py','test_api.py','test_api_security.py','test_hil.py','test_tokens.py','test_runner.py','test_stats.py','test_views.py','test_serve_cli.py','api_fakes.py'}]; print(bad or 'ok')"`
 Expected: `ok`
