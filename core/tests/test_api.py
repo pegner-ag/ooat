@@ -348,7 +348,8 @@ def test_usage_of_a_project_above_the_tokens_cap_reads_like_an_unknown_project(t
     hidden = get(served, "/api/v1/stats?period=all&project=client-x", bot)
     unknown = get(served, "/api/v1/stats?period=all&project=no-such-project", bot)
     assert {**hidden, "project": None} == {**unknown, "project": None}  # neither spend nor existence leaks
-    assert get(served, "/api/v1/stats?period=all&project=client-x", {})["spend"]["metered_usd"] > 0  # the web session sees it
+    seen = get(served, "/api/v1/stats?period=all&project=client-x", {})  # the web session
+    assert seen["spend"]["metered_usd"] > 0
 
 
 def test_an_artifact_no_task_produced_is_not_found(tmp_path):
