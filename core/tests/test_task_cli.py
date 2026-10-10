@@ -238,6 +238,30 @@ def test_the_cli_refuses_to_answer_an_r3_request(env):
     assert code == 1 and "named approver" in answered and events(env, task, "HIL_RESPONSE") == []
 
 
+def test_while_the_server_holds_the_runner_lock_the_cli_only_records(env):
+    from ooat_core.runner_lock import for_ledger
+
+    lock = for_ledger(env["ledger"])
+    assert lock.acquire()  # as `ooat serve` does
+    try:
+        code, out = ooat(env, "task", "submit", "--operator", "operator", "--goal", "Shrň smlouvu.")
+        task = task_id(out)
+        assert code == 0 and "ooat serve` runs it" in out and events(env, task, "TOPOLOGY_DECIDED") == []
+        code, out = ooat(env, "task", "run", task)
+        assert code == 1 and "Nothing was run" in out
+    finally:
+        lock.release()
+    code, out = ooat(env, "task", "run", task)  # without the server the CLI runs it again
+    assert code == 0 and "CLARIFYING" in out
+    request = out.split("Question ", 1)[1].split(" ", 1)[0]
+    assert lock.acquire()
+    try:
+        code, out = ooat(env, "hil", "answer", request, "--operator", "operator", "--text", "Nejvýše 300 slov.")
+        assert code == 0 and "ooat serve` runs it" in out and events(env, task, "CONTRACT_ISSUED") == []
+    finally:
+        lock.release()
+
+
 def test_a_hand_over_after_the_decision_tier_failed_is_labelled_too():
     from ooat_core.task_cli import _label
     event = {"type": "GATE_FAILED", "body": {"gate": "gate.decision.check_criterion", "evidence": ["sent to the critic"],

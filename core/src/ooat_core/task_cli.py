@@ -8,7 +8,7 @@ runtime.py, rating.py and hil.py, which these commands call with the channel `cl
 import sqlite3
 from pathlib import Path, PurePosixPath, PureWindowsPath
 
-from . import hil
+from . import hil, runner_lock
 from .artifacts import ArtifactStore
 from .blobs import BlobStore
 from .catalog import routing_path
@@ -22,6 +22,8 @@ from .runtime import RunOutcome, Runtime
 from .state import task_state
 
 REFUSED = 1
+RUNS = {("task", "submit"), ("task", "run"), ("hil", "answer")}  # commands that run a task in the foreground
+SERVED = "`ooat serve` runs it within a minute; follow it in the web app.\n"
 
 
 def add_commands(commands) -> None:
@@ -100,7 +102,15 @@ def run(args, config, path, stdin, stdout, registry, routing, clock, ask) -> int
                           clock=clock)
         handler = {("task", "submit"): _submit, ("task", "run"): _run_task, ("task", "show"): _show,
                    ("task", "rate"): _rate, ("hil", "list"): _hil_list, ("hil", "answer"): _hil_answer}
-        return handler[(args.command, args.action)](args, ledger, runtime, stdin, stdout, ask)
+        runs = (args.command, args.action) in RUNS and not getattr(args, "no_run", False)
+        lock = runner_lock.for_ledger(config.ledger_url) if runs else None
+        # Another process holding the lock (`ooat serve`) runs the tasks; this one only records.
+        args.served = lock is not None and not lock.acquire()
+        try:
+            return handler[(args.command, args.action)](args, ledger, runtime, stdin, stdout, ask)
+        finally:
+            if lock is not None and not args.served:
+                lock.release()
     except ValueError as error:  # includes SpecValidationError: the ledger refused the event
         stdout.write(f"Refused: {error}\n")
         return REFUSED
@@ -148,10 +158,17 @@ def _submit(args, ledger, runtime, stdin, stdout, ask) -> int:
     stdout.write(f"Submitted {task}.\n")
     if args.no_run:
         return 0
+    if args.served:
+        stdout.write(SERVED)
+        return 0
     return _report(task, runtime.run(task), ledger, stdout)
 
 
 def _run_task(args, ledger, runtime, stdin, stdout, ask) -> int:
+    if args.served:
+        stdout.write("Another process runs the tasks of this ledger (`ooat serve`): follow them in the web app. "
+                     "Nothing was run.\n")
+        return REFUSED
     if not args.all_tasks:
         return _report(args.task, runtime.run(args.task), ledger, stdout)
     tasks = runtime.runnable()
@@ -255,4 +272,7 @@ def _hil_answer(args, ledger, runtime, stdin, stdout, ask) -> int:
     response = hil.answer(ledger, runtime, args.request, operator=args.operator, choice=args.choice, text=args.text,
                           channel="cli")
     stdout.write(f"Answered {args.request}.\n")
+    if args.served:
+        stdout.write(SERVED)
+        return 0
     return _report(response["task"], runtime.run(response["task"]), ledger, stdout)
