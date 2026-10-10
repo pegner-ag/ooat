@@ -18,6 +18,8 @@ _ENV_NAME = re.compile(r"^[A-Z][A-Z0-9_]*$")
 _CONNECTOR_KEYS = frozenset({"secret_env", "plan_fee_usd_month", "models"})
 _COUNTRY = re.compile(r"^[A-Z]{2}$")
 REGION = re.compile(r"^[a-z]{2}(-[a-z0-9-]+)?$")
+_LABEL = r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?"
+_HOST = re.compile(rf"^{_LABEL}(?:\.{_LABEL})*$|^[0-9a-fA-F:]{{2,39}}$")  # a DNS name, IPv4 or IPv6 address
 _GATE_NUMBERS = ("v_min_usd", "default_budget_usd", "hil_deadline_hours")
 _GATE_TOKENS = ("expected_output_tokens", "critic_output_tokens", "fallback_tokens_per_question")
 _GATE_SHARES = ("retry_prior", "critic_prior")  # estimate priors (plan 04d), a share from 0 to 1
@@ -32,6 +34,7 @@ class Config:
     personal_data_regions: frozenset[str] | None = None  # personal data only processed here; None = no limit
     blobs_dir: str | None = None  # artifact bodies; None = an "ooat-blobs" folder next to the ledger file
     gate: dict = field(default_factory=dict)  # [gate] overrides of GateSettings
+    serve: dict = field(default_factory=dict)  # [serve]: operator, host, port, hosts, tls_cert, tls_key (design 05)
 
 
 def _table(data: dict, key: str, allowed: set[str]) -> dict:
@@ -46,7 +49,7 @@ def _table(data: dict, key: str, allowed: set[str]) -> dict:
 
 
 def parse_config(data: dict) -> Config:
-    unknown = set(data) - {"ledger", "routing", "connectors", "policy", "gate"}
+    unknown = set(data) - {"ledger", "routing", "connectors", "policy", "gate", "serve"}
     if unknown:
         raise ValueError(f"unknown config sections: {sorted(unknown)}")
     ledger = _table(data, "ledger", {"url", "blobs"})
@@ -95,7 +98,27 @@ def parse_config(data: dict) -> Config:
     return Config(ledger_url=ledger_url, pins=dict(pins), connectors={k: dict(v) for k, v in connectors.items()},
                   blocked_countries=frozenset(blocked),
                   personal_data_regions=frozenset(regions) if regions is not None else None,
-                  blobs_dir=blobs_dir, gate=dict(gate))
+                  blobs_dir=blobs_dir, gate=dict(gate), serve=_serve(data))
+
+
+def _serve(data: dict) -> dict:
+    """[serve] of `ooat serve` (design 05 §6). The certificate and key are named by path, never pasted."""
+    serve = _table(data, "serve", {"operator", "host", "port", "hosts", "tls_cert", "tls_key"})
+    if "operator" in serve and (not isinstance(serve["operator"], str) or not serve["operator"].strip()):
+        raise ValueError("serve.operator must be your name")
+    if "host" in serve and (not isinstance(serve["host"], str) or not _HOST.match(serve["host"])):
+        raise ValueError("serve.host must be an address or a host name, e.g. 127.0.0.1")
+    if "port" in serve and not (type(serve["port"]) is int and 1 <= serve["port"] <= 65535):
+        raise ValueError("serve.port must be a port number from 1 to 65535")
+    hosts = serve.get("hosts", [])
+    if not isinstance(hosts, list) or not all(isinstance(h, str) and _HOST.match(h) for h in hosts):
+        raise ValueError("serve.hosts must list host names, e.g. [\"ooat.lan\"]")
+    for key in ("tls_cert", "tls_key"):
+        if key in serve and (not isinstance(serve[key], str) or not serve[key].strip()):
+            raise ValueError(f"serve.{key} must be a file path")
+    if ("tls_cert" in serve) != ("tls_key" in serve):
+        raise ValueError("serve.tls_cert and serve.tls_key go together")
+    return dict(serve)
 
 
 def load_config(path: str | Path) -> Config:
@@ -112,4 +135,8 @@ def load_config(path: str | Path) -> Config:
     blobs = config.blobs_dir
     if blobs is not None and not (PurePosixPath(blobs).is_absolute() or PureWindowsPath(blobs).is_absolute()):
         config = dataclasses.replace(config, blobs_dir=(Path(path).resolve().parent / blobs).as_posix())
+    tls = {key: (Path(path).resolve().parent / config.serve[key]).as_posix()  # an absolute path stays as written
+           for key in ("tls_cert", "tls_key") if key in config.serve}
+    if tls:
+        config = dataclasses.replace(config, serve={**config.serve, **tls})
     return config

@@ -18,7 +18,7 @@ action waiting for a named human.
 
 Early F1 (spec draft v0.1): JSON Schemas, the starter catalog taxonomy, the ledger, the provider gateway with
 three model connectors and one decision connector (Jev), the `ooat connectors` command, the Topology Gate
-for T0–T2 and the task runtime (`ooat task`, `ooat hil`) exist; the REST API and teams (T3+) do not yet.
+for T0–T2, the task runtime (`ooat task`, `ooat hil`) and `ooat serve` (REST API, sessions, operator tokens) exist; the web screens and teams (T3+) do not yet.
 Decision records are in `docs/adr/`.
 
 ## First steps
@@ -58,6 +58,14 @@ ooat hil answer <evt_id> --operator "Your Name" --text "..."
 ooat task show <tsk_id>                        # timeline, costs, the document
 ooat task run --all                            # resume tasks paused by a provider outage or quota
 ooat task rate <tsk_id> --operator "Your Name" --accepted yes --value B
+```
+
+`ooat serve` runs the REST API and the task runner on `127.0.0.1:8765` and prints a one-time sign-in link for
+`[serve] operator` (`ooat login --operator <name>` prints another). A bot gets its own token, shown once:
+
+```sh
+ooat serve
+ooat tokens create --operator "Your Name" --name telegram --scopes submit,read,answer,rate
 ```
 
 `enable` and `disable` need an `ooat.toml`, so state always lands in the same ledger. Settings live in

@@ -5,14 +5,14 @@ Reference runtime of OOAT. Currently: identifiers, OOA Spec validation, the appe
 storage, state projections and the provider gateway core (connector contract, registry, routing, budgets,
 metering, typed decisions with a text-model fallback), the connector contract used by the packages in
 `adapters/`, the `ooat connectors` operator command, the Topology Gate for T0–T2, and the task runtime with
-its `ooat task` / `ooat hil` commands (one worker, acceptance checks, closing, rating). The REST API and teams
-(T3+) are not implemented yet.
+its `ooat task` / `ooat hil` commands (one worker, acceptance checks, closing, rating), and `ooat serve`: the REST
+API with web sessions and operator tokens, and the task runner (design 05a). Teams (T3+) are not implemented yet.
 
 ## Key components
 - `ids.py` — `new_id(prefix)`, ULIDs, `parse_artifact_ref()`
 - `validation.py` — `validate(entity, document)` against `spec/schemas/`
-- `ledger.py` — `Ledger`: the only write path; validates events (schema, finite numbers, 64-bit token counts, known artifact references, HIL options incl. R3 default "do not act", responses to existing requests) and staged artifact records, writes an event and its artifacts atomically
-- `backends/` — `LedgerBackend` protocol and `open_backend(url)`; implemented: SQLite with schema version in `PRAGMA user_version` (ADR 0008)
+- `ledger.py` — `Ledger`: the only write path; validates events (schema, finite numbers, 64-bit token counts, known artifact references, HIL options incl. R3 default "do not act", responses to existing requests, an R3 request answered only by its default on silence) and staged artifact records, and writes an event and its artifacts atomically; its checks and the insert run in one write transaction, which also keeps one task per intake key and channel (`DuplicateIntake`)
+- `backends/` — `LedgerBackend` protocol and `open_backend(url)`; implemented: SQLite with schema version in `PRAGMA user_version` (ADR 0008), WAL, a 5 s busy timeout and `BEGIN IMMEDIATE` write transactions (`LedgerBusyError` when the lock stays taken)
 - `blobs.py` — SHA-256 addressed bodies, fsynced before use, safe under concurrent writes; tampering detected on read, repaired on re-put
 - `artifacts.py` — `ArtifactStore.stage()` / `.read()`; artifacts exist only through their producing event
 - `state.py` — `task_state()`, `contract_state()` computed from events
@@ -63,16 +63,30 @@ its `ooat task` / `ooat hil` commands (one worker, acceptance checks, closing, r
   document, an abstention in the fixed JSON form, or `invalid`
 - `acceptance.py` — `check_output()`: deterministic checks, one decision per criterion (θ for point
   `acceptance`), the critic for unsure answers and for "met" on untrusted input; GATE_PASSED / GATE_FAILED events
-- `runtime.py` — `Runtime.submit()` / `.run()` / `.expire()`: intake with untrusted attachments, the Gate, one
+- `runtime.py` — `Runtime.submit()` / `.run()` / `.expire()` / `.cancel()`: intake with untrusted attachments, the Gate, one
   contract (`cap.general.complete_task`, `role.general.worker`), two attempts, RESULT / ABSTAIN, TASK_CLOSED with
   the four cost parts; applies a declared default when a question's deadline has passed. A provider failure
   (quota, outage, timeout) pauses the task as RUNNING without using up an attempt; the next `run` resumes it from
   the ledger, and `runnable()` lists the tasks that can move without the operator. A used-up contract budget
   (capped by the role) asks the operator to raise it or stop; a usable earlier document is kept as PARTIAL
-- `rating.py` — `task_decisions()`, `checked_verdict()`, `rate()`: TASK_RATED with the operator's verdict per
+- `rating.py` — `task_decisions()`, `checked_verdict()`, `rate()`: TASK_RATED (once per task) with the operator's verdict per
   decision; typing the answer the decision gave counts as confirmed, a choice correction must be one of its options
 - `operator_cli.py` — the `ooat` command: `ooat connectors list | show | enable | disable`
-- `task_cli.py` — `ooat task submit | run [--all] | show | rate` and `ooat hil list | answer`
+- `task_cli.py` — `ooat task submit | run [--all] | show | rate` and `ooat hil list | answer`; while another
+  process holds the runner lock (`ooat serve`), `run` refuses and `submit` / `hil answer` only record
+- `hil.py` — `answer()`: the operator's HIL_RESPONSE from every channel; refuses R3 (ADR 0016), a late or second
+  answer and a closed task's question; `open_requests()`
+- `tokens.py` — `issue()`, `revoke()`, `authenticate()`: operator API tokens as `OPERATOR_TOKEN_*` events, the
+  SHA-256 only, scopes and a data-class cap (ADR 0016)
+- `stats.py` — `usage()`: calls, tokens, metered and shadow cost by role, connector, tier or project; tasks by
+  outcome, cost per accepted task, estimate vs. actual; HIL waiting time (design 05 §8)
+- `views.py` — the API's task, timeline, HIL and rating views with a reader's data-class cap (stubs above it)
+- `runner_lock.py`, `runner.py` — the OS file lock beside the ledger; the runner thread with its FIFO queue rebuilt
+  from the ledger, a 60 s tick (defaults on silence, runnable tasks) and a growing pause for paused tasks
+- `sessions.py` — one-time sign-in codes (hash-named files in `ooat-login/` beside the ledger) and web sessions
+- `api.py` — `create_app()`: the HTTP shell of `ooat serve` (Host, Origin, CSRF, 20 MB limit, sessions and tokens,
+  typed errors, security headers, a log of method, path and status); `endpoints.py` — the REST resources
+- `serve_cli.py` — `ooat serve`, `ooat login --operator`, `ooat tokens create | list | revoke`
 
 Schemas are read from `spec/schemas/` in the repository, so the package works from a checkout or an editable
 install (`pip install -e core`); packaging the schemas into the wheel is release work.
@@ -84,4 +98,4 @@ in a backend; every backend passes `tests/test_ledger.py`.
 ## Public API
 `Ledger.open(url)`, `new_event()`, `ArtifactStore`, `BlobStore`, `task_state()`, `contract_state()`, `validate()`,
 `Gateway`, `Gate`, `Runtime`, `rate()`, `task_facts()`, `threshold()`, `Registry.discover()`, `load_config()`,
-`load_routing()`, `SecretResolver`, `connector_admin`, the `ooat` console script.
+`load_routing()`, `SecretResolver`, `connector_admin`, `hil.answer()`, `tokens`, `stats.usage()`, `create_app()`, the `ooat` console script.

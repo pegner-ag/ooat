@@ -1,5 +1,5 @@
 """`ooat` command line: `ooat connectors list | show | enable | disable`, the task and HIL commands of
-task_cli.py (`ooat task ...`, `ooat hil ...`) and serve_cli.py (`ooat tokens ...`)."""
+task_cli.py (`ooat task ...`, `ooat hil ...`) and serve_cli.py (`ooat serve`, `ooat login`, `ooat tokens ...`)."""
 
 import argparse
 import sqlite3
@@ -88,12 +88,12 @@ def main(argv=None, stdin=None, stdout=None, registry: Registry | None = None, t
                 return REFUSED
             return task_cli.run(args, config, path, stdin, stdout, registry or Registry.discover(), routing, clock,
                                 _ask_or_end)
-        if args.command == "tokens":
+        if args.command in ("serve", "login", "tokens"):
             config, path, refusal = _config(args)
             if refusal is not None:
                 stdout.write(refusal)
                 return REFUSED
-            return serve_cli.run(args, config, path, stdin, stdout, clock, _ask_or_end)
+            return serve_cli.run(args, config, path, stdin, stdout, clock, _ask_or_end, registry, routing)
         return _run(args, stdin, stdout, registry, today or clock().date())
     except KeyboardInterrupt:
         if args.command in ("task", "hil"):  # events may already be in the ledger: say how to go on
