@@ -57,6 +57,16 @@ def test_wrong_verdicts_are_refused(tmp_path, verdicts, message):
         rate(setup.ledger, task, operator="Martin", accepted=True, value_class="B", verdicts=verdicts)
 
 
+def test_a_task_is_rated_once_and_the_rating_records_its_channel(tmp_path):
+    from ooat_core.rating import AlreadyRated
+
+    setup, task = closed_task(tmp_path)
+    event = rate(setup.ledger, task, operator="operator", accepted=True, value_class="B", channel="web")
+    assert event["body"]["channel"] == "web"
+    with pytest.raises(AlreadyRated):  # a second rating would count its verdicts twice in the thresholds
+        rate(setup.ledger, task, operator="operator", accepted=False, value_class="C")
+
+
 def test_only_a_closed_task_can_be_rated(tmp_path):
     setup = Setup(tmp_path)
     task = setup.submit(acceptance=())

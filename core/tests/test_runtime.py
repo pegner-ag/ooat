@@ -396,3 +396,92 @@ def test_personal_data_in_an_attachment_name_raises_the_class_of_the_attachment(
     task = setup.runtime.submit(operator="Martin", goal="x", files=[b"Obsah."], file_names=["jan.novak@example.cz.txt"])
     attachment = setup.last(task, "TASK_SUBMITTED")["refs"][0]
     assert setup.ledger.artifact(attachment)["data_class"] == "personal"
+
+
+# Channel, intake key and the operator's cancel (design 05 §6, §12, §13) -----------------------------------------
+
+def test_a_repeated_intake_key_returns_the_task_it_created(tmp_path):
+    setup = Setup(tmp_path)
+    first = setup.submit(channel="web", intake_key="chat-1:msg-7")
+    assert setup.submit(channel="web", intake_key="chat-1:msg-7") == first
+    assert setup.submit(channel="token:tok_01J9ZQ80B0K3M5N7P9Q1R3S5T7", intake_key="chat-1:msg-7") != first
+    body = setup.last(first, "TASK_SUBMITTED")["body"]
+    assert body["channel"] == "web" and body["intake_key"] == "chat-1:msg-7"
+
+
+def test_a_cancelled_waiting_task_closes_as_cancelled_at_its_next_run(tmp_path):
+    setup = Setup(tmp_path)
+    task = setup.submit(acceptance=())
+    assert setup.runtime.run(task).state == "CLARIFYING"
+    assert setup.runtime.cancel(task, operator="operator", channel="web") is True
+    assert setup.runtime.cancel(task, operator="operator") is False  # asked once is enough
+    assert task in setup.runtime.runnable()  # the runner picks it up although it waits for an answer
+    outcome = setup.runtime.run(task)
+    assert outcome.state == "CANCELLED" and outcome.summary == "Cancelled by operator."
+    decision = setup.last(task, "DECISION")
+    assert decision["actor"] == {"kind": "hil", "id": "operator"}
+    assert decision["body"] == {"decision": "cancel the task", "channel": "web"}
+    assert task not in setup.runtime.runnable()
+
+
+def test_a_cancel_during_the_worker_call_keeps_the_document_and_skips_the_checks(tmp_path):
+    class CancelledWhileWriting(ScriptedModel):
+        def complete(self, request, secrets):
+            response = super().complete(request, secrets)
+            if len(self.worker_prompts) == 1:  # the operator cancels while the worker writes
+                setup.runtime.cancel(task, operator="operator")
+            return response
+
+    setup = Setup(tmp_path, model=CancelledWhileWriting())
+    task = setup.submit()
+    outcome = setup.runtime.run(task)
+    assert outcome.state == "CANCELLED" and outcome.artifact
+    assert setup.types(task)[-3:] == ["DECISION", "RESULT", "TASK_CLOSED"]  # the worker's cost is still recorded
+    assert "GATE_PASSED" not in setup.types(task)[3:]  # no acceptance check was paid for after the cancel
+
+
+def test_a_closed_or_unknown_task_cannot_be_cancelled(tmp_path):
+    from ooat_core.runtime import TaskClosed, UnknownTask
+
+    setup = Setup(tmp_path)
+    task = setup.submit()
+    setup.runtime.run(task)
+    with pytest.raises(TaskClosed):
+        setup.runtime.cancel(task, operator="operator")
+    with pytest.raises(UnknownTask):
+        setup.runtime.cancel("tsk_01J9ZQ7A1BK3M5N7P9Q1R3S5T7", operator="operator")
+
+
+def stale_first_read(ledger, drop: str) -> None:
+    """The next ledger read misses the events of type `drop`, as when another writer appends them just after it."""
+    real, reads = ledger.events, iter([True])
+
+    def events(task=None, types=()):
+        found = real(task=task, types=types)
+        return [e for e in found if e["type"] != drop] if next(reads, False) else found
+
+    ledger.events = events
+
+
+def test_a_cancel_racing_the_close_is_refused_inside_the_write(tmp_path):
+    from ooat_core.runtime import TaskClosed
+
+    setup = Setup(tmp_path)
+    task = setup.submit()
+    setup.runtime.run(task)
+    stale_first_read(setup.ledger, "TASK_CLOSED")  # cancel reads the task open; it closes before the append
+    with pytest.raises(TaskClosed):
+        setup.runtime.cancel(task, operator="operator")
+    assert not [e for e in setup.ledger.events(task=task, types=["DECISION"]) if e["actor"]["kind"] == "hil"]
+
+
+def test_expire_skips_a_request_answered_since_it_read_the_ledger(tmp_path):
+    setup = Setup(tmp_path)
+    task = setup.submit(acceptance=())
+    request = setup.runtime.run(task).request
+    setup.ledger.append(new_event("HIL_RESPONSE", task=task, actor=HIL, body={"request": request,
+                                                                              "choice": "run_as_is"}))
+    setup.now = NOW + timedelta(hours=49)
+    stale_first_read(setup.ledger, "HIL_RESPONSE")  # the operator's answer lands just after expire read
+    assert setup.runtime.expire() == []
+    assert setup.last(task, "HIL_RESPONSE")["actor"] == HIL

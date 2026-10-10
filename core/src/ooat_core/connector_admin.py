@@ -234,7 +234,8 @@ def checked_classes(manifest: dict, data_classes: Iterable[str], responsibility:
 
 
 def acknowledge(ledger: Ledger, connector: ModelConnector, operator: str, data_classes: Iterable[str],
-                automation_confirmed: bool, responsibility: dict | None = None, today: date | None = None) -> dict:
+                automation_confirmed: bool, responsibility: dict | None = None, today: date | None = None,
+                channel: str | None = None) -> dict:
     """Enable a connector: a named operator allows data classes and states whether automation is confirmed.
 
     `responsibility` ({"processing_regions": [...], "no_training": True}, both optional) records that the operator
@@ -258,11 +259,14 @@ def acknowledge(ledger: Ledger, connector: ModelConnector, operator: str, data_c
         if unknown:
             raise ValueError(f"unknown responsibility settings: {sorted(unknown)} (the date is always today)")
         body["responsibility"] = {**responsibility, "confirmed_on": today.isoformat()}
+    if channel is not None:
+        body["channel"] = channel
     return ledger.append(new_event("ADAPTER_ACKNOWLEDGED", task=None, actor={"kind": "hil", "id": operator},
                                    body=body))
 
 
-def approve_hooks(ledger: Ledger, connector: ModelConnector, operator: str, hooks: Iterable[tuple[str, str]]) -> dict:
+def approve_hooks(ledger: Ledger, connector: ModelConnector, operator: str, hooks: Iterable[tuple[str, str]],
+                  channel: str | None = None) -> dict:
     """Record that a named operator reviewed these hook files (path, sha256) and allows them to run (ADR 0015).
 
     A new acknowledgement repeats the one in force and adds the approval, so classes, automation and any
@@ -280,14 +284,17 @@ def approve_hooks(ledger: Ledger, connector: ModelConnector, operator: str, hook
     approved = [{"path": path, "sha256": sha} for path, sha in hooks]
     if not approved:
         raise ValueError("there are no hooks to approve")
-    body = {**current, "operator": operator, "approved_hooks": approved}
+    body = {key: value for key, value in current.items() if key != "channel"}  # the channel is this approval's
+    body |= {"operator": operator, "approved_hooks": approved} | ({"channel": channel} if channel else {})
     return ledger.append(new_event("ADAPTER_ACKNOWLEDGED", task=None, actor={"kind": "hil", "id": operator},
                                    body=body))
 
 
-def disable(ledger: Ledger, connector_id: str, operator: str, reason: str) -> dict:
+def disable(ledger: Ledger, connector_id: str, operator: str, reason: str, channel: str | None = None) -> dict:
     operator, reason = checked_operator(operator), reason.strip()
     if not reason:
         raise ValueError("a reason is required")
-    return ledger.append(new_event("ADAPTER_DISABLED", task=None, actor={"kind": "hil", "id": operator},
-                                   body={"adapter": connector_id, "operator": operator, "reason": reason}))
+    body = {"adapter": connector_id, "operator": operator, "reason": reason}
+    if channel is not None:
+        body["channel"] = channel
+    return ledger.append(new_event("ADAPTER_DISABLED", task=None, actor={"kind": "hil", "id": operator}, body=body))

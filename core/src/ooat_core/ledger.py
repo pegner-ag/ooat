@@ -17,6 +17,7 @@ _SQL_INT_MAX = 2**63 - 1
 _COST_INTEGERS = ("tokens_in", "tokens_cached", "tokens_out")
 _HEX = frozenset("0123456789abcdef")
 DATA_CLASSES = frozenset({"public", "internal", "client_confidential", "personal", "special_category"})
+SILENCE_ACTOR_ID = "default-on-silence"  # the runtime applying a request's declared default (spec §9 rule 5)
 
 # The envelope's cost keys differ from the spec's column names for usd and basis.
 _COST_COLUMNS = {
@@ -142,6 +143,7 @@ class Ledger:
         # answer, an artifact version or an intake key in between the check and the insert (design 05 §7).
         with self.backend.transaction():
             self._check_hil(event)
+            self._check_closed(event)
             self._check_intake(event)
             self._check_staged(artifacts)
             unknown = sorted(ref for ref in _artifact_refs([event["refs"], event["body"]])
@@ -158,6 +160,11 @@ class Ledger:
                 })
             self.backend.insert(_event_row(event), artifact_rows)
         return event
+
+    def _check_closed(self, event: dict) -> None:
+        """The operator decides nothing on a closed task, e.g. a cancel that races the close (design 05 §12)."""
+        if event["type"] == "DECISION" and event["actor"]["kind"] == "hil"                 and self.events(task=event["task"], types=["TASK_CLOSED"]):
+            raise SpecValidationError("event", [f"$.task: task is closed: {event['task']}"])
 
     def _check_intake(self, event: dict) -> None:
         """One task per intake key and channel, also across restarts and racing deliveries (ADR 0016)."""
@@ -189,6 +196,15 @@ class Ledger:
             elif any(e["type"] == "HIL_RESPONSE" and e["body"]["request"] == body["request"] for e in hil):
                 errors.append(f"$.body.request: {body['request']} is already answered")
             else:
+                if event["actor"]["id"] == SILENCE_ACTOR_ID and not (
+                        body.get("default_applied") is True
+                        and body.get("choice") == request["body"]["default_on_silence"]):
+                    errors.append("$.body: default-on-silence only applies the request's default, with "
+                                  "default_applied: true")
+                if request["body"].get("risk_class") == "R3" and event["actor"]["id"] != SILENCE_ACTOR_ID:
+                    # Spec §9 as amended by ADR 0016: no identity bound to something the operator holds exists yet.
+                    errors.append("R3_NEEDS_BOUND_IDENTITY: an R3 request needs a named approver with a bound "
+                                  "identity; until one exists only its default on silence applies")
                 if request["body"].get("risk_class") == "R3" and "choice" not in body:
                     errors.append("$.body.choice: an R3 request needs an explicit choice, not only text")
                 if "choice" in body and body["choice"] not in {o["id"] for o in request["body"]["options"]}:

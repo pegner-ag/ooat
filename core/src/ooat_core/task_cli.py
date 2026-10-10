@@ -1,21 +1,21 @@
 """`ooat task submit | run | show | rate` and `ooat hil list | answer` (design 04 §5).
 
 Local commands are trusted as the operator's own hand: whoever can run them can also edit the ledger file. The
-`--operator` name is self-declared; remote identity (REST, Telegram) is verified in 05. Only these commands, and the
-runtime applying a declared default after a deadline, append `actor.kind = hil` events.
+`--operator` name is self-declared, so it never answers an R3 request (ADR 0016). The operator's events are built by
+runtime.py, rating.py and hil.py, which these commands call with the channel `cli`.
 """
 
 import sqlite3
 from pathlib import Path, PurePosixPath, PureWindowsPath
 
+from . import hil
 from .artifacts import ArtifactStore
 from .blobs import BlobStore
 from .catalog import routing_path
-from .connector_admin import checked_operator
 from .credentials_env import SecretResolver
 from .gate import settings_from_config
 from .gateway import Gateway, GatewayError
-from .ledger import DATA_CLASSES, Ledger, new_event
+from .ledger import DATA_CLASSES, Ledger
 from .rating import checked_verdict, rate, task_decisions
 from .routing import load_routing
 from .runtime import RunOutcome, Runtime
@@ -144,7 +144,7 @@ def _submit(args, ledger, runtime, stdin, stdout, ask) -> int:
     task = runtime.submit(operator=args.operator, goal=args.goal, acceptance=args.acceptance, project=args.project,
                           expected_output=args.expected_output, value=value, budget_usd=args.budget,
                           data_class=args.data_class, risk_class=args.risk_class, files=files,
-                          file_names=[Path(name).name for name in args.file])
+                          file_names=[Path(name).name for name in args.file], channel="cli")
     stdout.write(f"Submitted {task}.\n")
     if args.no_run:
         return 0
@@ -229,7 +229,7 @@ def _rate(args, ledger, runtime, stdin, stdout, ask) -> int:
             except ValueError as error:  # ask again rather than lose every answer typed so far
                 stdout.write(f"{error}\n")
     event = rate(ledger, args.task, operator=args.operator, accepted=args.accepted == "yes", value_class=args.value,
-                 verdicts=verdicts, note=args.note)
+                 verdicts=verdicts, note=args.note, channel="cli")
     stdout.write(f"Rated {args.task}: {len(event['body']['decisions'])} decisions recorded.\n")
     if left:
         stdout.write(f"Left out: {left} decisions the critic contradicted; rate without --confirm-all to judge "
@@ -239,12 +239,10 @@ def _rate(args, ledger, runtime, stdin, stdout, ask) -> int:
 
 def _hil_list(args, ledger, runtime, stdin, stdout, ask) -> int:
     runtime.expire()
-    events = ledger.events(types=["HIL_REQUEST", "HIL_RESPONSE"])
-    answered = {e["body"]["request"] for e in events if e["type"] == "HIL_RESPONSE"}
-    open_requests = [e for e in events if e["type"] == "HIL_REQUEST" and e["id"] not in answered]
-    if not open_requests:
+    requests = hil.open_requests(ledger)
+    if not requests:
         stdout.write("No open questions.\n")
-    for request in open_requests:
+    for request in requests:
         stdout.write(f"Task {request['task']}\n{_question(request)}")
     return 0
 
@@ -252,21 +250,9 @@ def _hil_list(args, ledger, runtime, stdin, stdout, ask) -> int:
 def _hil_answer(args, ledger, runtime, stdin, stdout, ask) -> int:
     if args.choice is None and not (args.text or "").strip():
         raise ValueError("give --choice, --text or both")
-    if args.choice == "narrow_scope" and not (args.text or "").strip():  # it would use up a budget question
+    if args.choice == "narrow_scope" and not (args.text or "").strip():
         raise ValueError("narrow_scope needs the narrowed scope as --text")
-    request = next((e for e in ledger.events(types=["HIL_REQUEST"]) if e["id"] == args.request), None)
-    if request is None:
-        raise ValueError(f"no question {args.request}")
-    runtime.expire(request["task"])  # past its deadline the default has applied; a late answer must not win
-    if any(e["body"]["request"] == args.request for e in ledger.events(task=request["task"], types=["HIL_RESPONSE"])):
-        raise ValueError(f"{args.request} is already answered (after its deadline the default applies)")
-    body = {"request": args.request}
-    if args.choice is not None:
-        body["choice"] = args.choice
-    if args.text and args.text.strip():
-        body["text"] = args.text.strip()
-    ledger.append(new_event("HIL_RESPONSE", task=request["task"], actor={"kind": "hil",
-                                                                         "id": checked_operator(args.operator)},
-                            body=body))
+    response = hil.answer(ledger, runtime, args.request, operator=args.operator, choice=args.choice, text=args.text,
+                          channel="cli")
     stdout.write(f"Answered {args.request}.\n")
-    return _report(request["task"], runtime.run(request["task"]), ledger, stdout)
+    return _report(response["task"], runtime.run(response["task"]), ledger, stdout)

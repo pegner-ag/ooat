@@ -18,6 +18,14 @@ from .thresholds import GATE_EVENTS
 CHOICE_OPTIONS = {"a5": set(BRANCHES), "a10": set(DATA_CLASSES)}  # the Gate's choice questions
 
 
+class NotClosed(ValueError):
+    """Only a closed task is rated."""
+
+
+class AlreadyRated(ValueError):
+    """A task is rated once."""
+
+
 @dataclass(frozen=True)
 class TaskDecision:
     event: str  # the event that holds the decision record
@@ -67,13 +75,15 @@ def checked_verdict(decision: TaskDecision, verdict) -> object:
 
 
 def rate(ledger: Ledger, task: str, *, operator: str, accepted: bool, value_class: str,
-         verdicts: dict[tuple[str, str], object] = None, note: str | None = None) -> dict:
+         verdicts: dict[tuple[str, str], object] = None, note: str | None = None, channel: str | None = None) -> dict:
     """Append TASK_RATED. `verdicts` maps (event id, question) to "confirmed" or to the correct answer: 0 or 1
     for a yes/no decision, the right option for a choice. Decisions left out stay unrated."""
     events = ledger.events(task=task)
     state = task_state(events)
     if state not in CLOSED:
-        raise ValueError(f"task {task} is {state}; rate it once it is closed")
+        raise NotClosed(f"task {task} is {state}; rate it once it is closed")
+    if any(e["type"] == "TASK_RATED" for e in events):  # a second rating would count its verdicts twice in θ
+        raise AlreadyRated(f"task {task} is already rated")
     operator = checked_operator(operator)
     decisions = {(d.event, d.question): d for d in task_decisions(events)}
     rated = []
@@ -89,6 +99,8 @@ def rate(ledger: Ledger, task: str, *, operator: str, accepted: bool, value_clas
     body = {"accepted": accepted, "value_class": value_class, "decisions": rated}
     if note and note.strip():
         body["note"] = note.strip()
+    if channel is not None:
+        body["channel"] = channel
     closed = [e["id"] for e in events if e["type"] == "TASK_CLOSED"]
     return ledger.append(new_event("TASK_RATED", task=task, actor={"kind": "hil", "id": operator}, refs=closed,
                                    body=body))

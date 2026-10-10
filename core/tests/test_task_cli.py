@@ -211,6 +211,33 @@ def test_show_names_a_hand_over_to_the_critic_instead_of_a_failed_gate(env):
     assert code == 0 and "HANDED_TO_CRITIC" in shown and "GATE_FAILED" not in shown
 
 
+def test_cli_events_record_the_cli_channel(env):
+    _, out = ooat(env, "task", "submit", "--operator", "operator", "--goal", "Shrň smlouvu.")
+    task = task_id(out)
+    request = out.split("Question ", 1)[1].split(" ", 1)[0]
+    ooat(env, "hil", "answer", request, "--operator", "operator", "--text", "Shrnutí má nejvýše 300 slov.")
+    ooat(env, "task", "rate", task, "--operator", "operator", "--accepted", "yes", "--value", "B", "--confirm-all")
+    for kind in ("TASK_SUBMITTED", "HIL_RESPONSE", "TASK_RATED"):
+        assert events(env, task, kind)[0]["body"]["channel"] == "cli", kind
+
+
+def test_the_cli_refuses_to_answer_an_r3_request(env):
+    from ooat_core.ledger import new_event
+
+    _, out = ooat(env, "task", "submit", "--operator", "operator", "--goal", "Shrň smlouvu.", "--no-run")
+    task = task_id(out)
+    ledger = Ledger.open(env["ledger"])
+    request = ledger.append(new_event("HIL_REQUEST", task=task, actor={"kind": "system", "id": "ooat-runtime"}, body={
+        "question": "Odeslat nabídku?", "risk_class": "R3", "options": [
+            {"id": "send", "label": "Odeslat", "cost_usd": 0.0}, {"id": "hold", "label": "Ne", "cost_usd": 0.0,
+                                                                 "acts": False}],
+        "recommended": "send", "default_on_silence": "hold", "deadline": "2026-10-03T12:00:00Z", "blocking": True,
+        "evidence": []}))
+    ledger.close()
+    code, answered = ooat(env, "hil", "answer", request["id"], "--operator", "operator", "--choice", "hold")
+    assert code == 1 and "named approver" in answered and events(env, task, "HIL_RESPONSE") == []
+
+
 def test_a_hand_over_after_the_decision_tier_failed_is_labelled_too():
     from ooat_core.task_cli import _label
     event = {"type": "GATE_FAILED", "body": {"gate": "gate.decision.check_criterion", "evidence": ["sent to the critic"],

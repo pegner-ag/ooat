@@ -192,7 +192,8 @@ def _approve_hooks(args, registry, ledger, stdin, stdout) -> int:
         stdout.write("Not confirmed; nothing was changed.\n")
         return REFUSED
     try:
-        connector_admin.approve_hooks(ledger, connector, args.operator, [(path, sha) for path, sha, _ in files])
+        connector_admin.approve_hooks(ledger, connector, args.operator, [(path, sha) for path, sha, _ in files],
+                                      channel="cli")
     except ValueError as error:
         stdout.write(f"Refused: {error}; nothing was changed.\n")
         return REFUSED
@@ -202,7 +203,7 @@ def _approve_hooks(args, registry, ledger, stdin, stdout) -> int:
 
 def _disable(args, ledger, url, stdout) -> int:  # also allowed for a connector that is no longer installed
     try:
-        connector_admin.disable(ledger, args.connector, args.operator, args.reason)
+        connector_admin.disable(ledger, args.connector, args.operator, args.reason, channel="cli")
     except ValueError as error:  # includes SpecValidationError, e.g. a malformed connector id
         stdout.write(f"Refused: {error}\n")
         return REFUSED
@@ -292,7 +293,8 @@ def _enable(args, registry, ledger, url, today, config, stdin, stdout) -> int:
         stdout.write("Confirmation did not match; nothing was changed.\n")
         return REFUSED
     try:
-        connector_admin.acknowledge(ledger, connector, operator, classes, automation, responsibility, today)
+        connector_admin.acknowledge(ledger, connector, operator, classes, automation, responsibility, today,
+                                    channel="cli")
     except ValueError as error:
         stdout.write(f"Refused: {error}\n")
         return REFUSED

@@ -8,6 +8,7 @@ from ooat_core.ledger import DuplicateIntake, Ledger, StagedArtifact, _event_row
 from ooat_core.validation import SpecValidationError
 
 HIL = {"kind": "hil", "id": "operator"}
+SILENCE = {"kind": "hil", "id": "default-on-silence"}
 
 
 # Every ledger backend must pass this module. PostgreSQL and SQL Server URLs join this list (ADR 0008).
@@ -229,8 +230,32 @@ def test_default_applied_response_must_record_the_requests_default(ledger):
                        body={"request": request["id"], "choice": "send", "default_applied": True})
     with pytest.raises(SpecValidationError, match="default"):
         ledger.append(forged)
-    ledger.append(new_event("HIL_RESPONSE", task=task, actor=HIL,
+    ledger.append(new_event("HIL_RESPONSE", task=task, actor=SILENCE,
                             body={"request": request["id"], "choice": "hold", "default_applied": True}))
+
+
+def test_an_r3_request_is_answered_only_by_its_default_on_silence(ledger):
+    task = new_id("tsk")
+    request = ledger.append(hil_request(task, "R3", "hold"))
+    for choice in ("send", "hold"):  # not even the do-not-act option: no human may answer R3 yet (ADR 0016)
+        with pytest.raises(SpecValidationError, match="R3_NEEDS_BOUND_IDENTITY"):
+            ledger.append(new_event("HIL_RESPONSE", task=task, actor=HIL,
+                                    body={"request": request["id"], "choice": choice}))
+    ledger.append(new_event("HIL_RESPONSE", task=task, actor=SILENCE,
+                            body={"request": request["id"], "choice": "hold", "default_applied": True}))
+
+
+@pytest.mark.parametrize("risk", ["R1", "R3"])
+@pytest.mark.parametrize("body", [{"choice": "send", "default_applied": True},  # an acting choice
+                                  {"choice": "hold"},  # default_applied missing
+                                  {"text": "Nikdo neodpověděl.", "default_applied": True}],  # no choice at all
+                         ids=["acting_choice", "without_default_applied", "without_choice"])
+def test_the_silence_actor_only_applies_the_declared_default(ledger, risk, body):
+    task = new_id("tsk")
+    request = ledger.append(hil_request(task, risk, "hold"))
+    with pytest.raises(SpecValidationError, match="default-on-silence only applies"):
+        ledger.append(new_event("HIL_RESPONSE", task=task, actor=SILENCE, body={"request": request["id"], **body}))
+    assert ledger.events(types=["HIL_RESPONSE"]) == []
 
 
 def test_request_is_answered_only_once(ledger):
