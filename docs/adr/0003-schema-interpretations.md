@@ -11,3 +11,8 @@
 | 5 | Objections | `severity` is `blocking` or `non_blocking`; `reason_code` is the closed list `SPEC_VIOLATION`, `FACT_UNSUPPORTED`, `GRAIN_MISMATCH`, `SECURITY_RISK`, `COST_RISK`, `INCONSISTENT_WITH_DECISION`, extended only by a spec version. |
 | 6 | Role id | The middle segment of `role.<x>.<name>` is the capability domain (e.g. `bi`), not the family the role extends. The domain/family split itself is decided with the catalog taxonomy. |
 | 7 | Schema `$id` | Host `ooat.invalid` is a placeholder until the project name and domain are settled (Q10). Superseded by ADR 0013: `https://moonindustries.eu/ooat/spec/v0.1/`. |
+
+## Amendment (ADR 0016)
+
+#3 now reads: `ADAPTER_ACKNOWLEDGED`, `ADAPTER_DISABLED`, `OPERATOR_TOKEN_ISSUED` and `OPERATOR_TOKEN_REVOKED` have
+`task: null`; every other event type requires a task, and the two token events require `null`.

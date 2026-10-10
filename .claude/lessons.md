@@ -29,3 +29,13 @@
   tool first.
 - Antigravity CLI (`agy`) does not run Gemini CLI's hooks in `~/.gemini/settings.json` (process watch during a
   call, 2026-10-06); it reads `~/.gemini/config/hooks.json`. The operator's Orca hooks live in the old file.
+- FastAPI 0.143 includes routers lazily: `app.routes` holds `_IncludedRouter` objects, not the routes. Tests that
+  list every endpoint enumerate each router's own `.routes` (`api.login_routes()`, `session_routes()`,
+  `endpoints.resource_routes()`).
+- The ledger stamps `ts` with the real time while tests fake the runtime's clock. A test that compares event times
+  with the clock (runner backoff, stats periods) starts its fake clock at `datetime.now(timezone.utc)`.
+- Starlette 1.x's `TestClient` wants `httpx2` (Pydantic's fork, github.com/pydantic/httpx2); plain `httpx` still works but warns. The test client buffers a whole streamed body, so a test that acts while a Server-Sent Events stream is open drives the stream's generator itself (`endpoints._stream`).
+- Opening a SQLite connection runs the ledger's DDL, which needs the write lock: a connection opened while another
+  writer holds it fails busy too. `SqliteBackend` maps that, like a busy `BEGIN IMMEDIATE`, to `LedgerBusyError`.
+- FastAPI runs sync endpoints in a thread pool and iterates a sync streaming generator there too: the API keeps one
+  ledger connection per thread (`threading.local`) and reads through `server.runtime()` at every step.

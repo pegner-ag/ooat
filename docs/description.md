@@ -7,7 +7,7 @@ the starter catalog holds role families, capability names and the first cards (`
 `cap.general.check_criterion`, `role.general.worker`) with their schemas in `catalog/schemas/` and first eval
 cases in `evals/`; `ooat-core` has the ledger foundation, the provider gateway
 with model and decision connectors, the Topology Gate for T0–T2 and the task runtime with the `ooat task` and
-`ooat hil` commands (no REST API and no teams yet).
+`ooat hil` commands, and `ooat serve` with the REST API, sessions, operator tokens and the task runner (no web screens and no teams yet).
 
 ## Technology
 In use:
@@ -17,11 +17,12 @@ In use:
   Anthropic Messages API
 - Decision connector `adapters/typesafe-jev`: TypeSafe System One API (Jev), with the economy text tier as
   fallback (ADR 0011)
+- REST API: FastAPI (Pydantic v2) on uvicorn, `ooat serve` (design 05a, ADR 0016)
 
 Chosen by decision (`docs/adr/`), not yet used in code:
-- FastAPI and Pydantic v2 for the API
 - PostgreSQL (Team) and optional SQL Server ledger backends (ADR 0008)
-- Dashboard and TS SDK: TypeScript
+- Dashboard: JavaScript with JSDoc types checked by `tsc --noEmit --checkJs`, no build step (ADR 0016); TS SDK:
+  TypeScript
 
 ## Project structure
 - `spec/ooat-specification.md` — normative design, draft v0.2 (sections 1–14)
@@ -48,7 +49,9 @@ and personal-data regions; secrets only as environment variable names). Connecto
 operator has read the connection consequences card; for client or personal data the operator also takes
 responsibility there (legal basis, processing agreement, region; ADR 0012), renewed every 12 months. Hook files a
 connector's CLI would run are approved with `ooat connectors approve-hooks` (fingerprints on the acknowledgement,
-ADR 0015); a changed file stops the connector until it is approved again.
+ADR 0015); a changed file stops the connector until it is approved again. `[serve]` holds what `ooat serve` needs
+(`operator`, `host`, `port`, `hosts`, `tls_cert`, `tls_key`); bots get operator tokens from `ooat tokens create`,
+kept in the ledger as SHA-256 only (ADR 0016). Tests of the API also need `httpx2` from `requirements-dev.txt`.
 Prices and the data-class policy: `catalog/routing.json`. Dev dependencies: `requirements-dev.txt`, then
 `pip install -e core -e adapters/claude-code -e adapters/codex -e adapters/anthropic-api -e adapters/typesafe-jev -e adapters/antigravity-cli`;
 run `python -m pytest`
@@ -57,7 +60,9 @@ run `python -m pytest`
 ## Security invariants
 - No secrets in the repository.
 - Ledger append-only; only `ooat-core` writes to it.
-- R3 actions only with a named human approver.
+- R3 actions only with a named human approver bound to something they hold; until that exists every R3 request
+  is refused (ADR 0016).
+- Every API endpoint is authenticated except the sign-in; a token's data class caps what it reads and writes.
 - Data classes are enforced in the provider gateway, not in prompts.
 
 ## Related documentation

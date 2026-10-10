@@ -7,7 +7,7 @@ from ooat_core.ids import new_id, parse_artifact_ref, ulid
 ULID = r"[0-7][0-9A-HJKMNP-TV-Z]{25}"
 
 
-@pytest.mark.parametrize("prefix", ["tsk", "ctr", "agt", "evt", "art"])
+@pytest.mark.parametrize("prefix", ["tsk", "ctr", "agt", "evt", "art", "tok"])
 def test_new_id_matches_spec_pattern(prefix):
     assert re.fullmatch(f"{prefix}_{ULID}", new_id(prefix))
 

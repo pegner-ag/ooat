@@ -22,9 +22,10 @@ from .gate import ACTOR as GATE_ACTOR
 from .gate import Gate, GateSettings, gated_data_class, task_facts
 from .gateway import Gateway, GatewayError
 from .ids import new_id
-from .ledger import Ledger, new_event
+from .ledger import DuplicateIntake, Ledger, new_event
 from .pii import higher_class, raised_class
 from .state import task_state
+from .validation import SpecValidationError
 from .worker import ROLE_ID, Attachment, run_worker
 
 ACTOR = {"kind": "system", "id": "ooat-runtime"}
@@ -39,6 +40,15 @@ WAITING = frozenset({"CLARIFYING", "HIL_WAIT"})
 # Gateway refusals become abstentions (design 03 §7); provider failures become a FAILED result.
 # BUDGET is asked about instead (owner, 2026-10-03).
 ABSTAIN_FOR = {"NOT_PERMITTED": "ABSTAIN_NOT_PERMITTED"}
+CANCEL = "cancel the task"  # the operator's DECISION that stops a task (owner, 2026-10-09)
+
+
+class UnknownTask(ValueError):
+    """No TASK_SUBMITTED with this id."""
+
+
+class TaskClosed(ValueError):
+    """The task is already closed; nothing can change it but a rating."""
 
 
 @dataclass(frozen=True)
@@ -73,6 +83,12 @@ def _utc(text: str) -> datetime:
     return datetime.fromisoformat(text.replace("Z", "+00:00"))
 
 
+def _cancel(events: list[dict]) -> dict | None:
+    """The operator's cancel DECISION among the task's events, if any."""
+    return next((e for e in events if e["type"] == "DECISION" and e["actor"]["kind"] == "hil"
+                 and e["body"]["decision"] == CANCEL), None)
+
+
 class Runtime:
     def __init__(self, ledger: Ledger, gateway: Gateway, artifacts: ArtifactStore,
                  settings: GateSettings = GateSettings(),
@@ -88,12 +104,14 @@ class Runtime:
     def submit(self, *, operator: str, goal: str, acceptance: list[str] = (), project: str | None = None,
                expected_output: str | None = None, value: dict | None = None, budget_usd: float | None = None,
                data_class: str | None = None, risk_class: str | None = None,
-               files: list[bytes] = (), file_names: list[str] = ()) -> str:
+               files: list[bytes] = (), file_names: list[str] = (), channel: str | None = None,
+               intake_key: str | None = None) -> str:
         """TASK_SUBMITTED by the named operator; files become untrusted artifacts of the task, stored under the
-        declared class raised by the personal-data pre-scan of their text."""
+        declared class raised by the personal-data pre-scan of their text. A repeated `intake_key` on the same
+        channel returns the task it created instead of a new one (ADR 0016)."""
         body = {"goal": goal.strip()}
         optional = {"project": project, "expected_output": expected_output, "value": value, "budget_usd": budget_usd,
-                    "data_class": data_class, "risk_class": risk_class}
+                    "data_class": data_class, "risk_class": risk_class, "channel": channel, "intake_key": intake_key}
         body |= {key: item for key, item in optional.items() if item is not None}
         if acceptance:
             body["acceptance"] = [criterion.strip() for criterion in acceptance]
@@ -112,9 +130,41 @@ class Runtime:
                   for name, text in zip(names, texts)]
         task = new_id("tsk")
         actor = {"kind": "hil", "id": checked_operator(operator)}
-        self.ledger.append(new_event("TASK_SUBMITTED", task=task, actor=actor, refs=[s.ref for s in staged], body=body),
-                           staged)
+        try:
+            self.ledger.append(new_event("TASK_SUBMITTED", task=task, actor=actor, refs=[s.ref for s in staged],
+                                         body=body), staged)
+        except DuplicateIntake as repeated:  # a retried delivery; the staged blobs stay unreferenced
+            return repeated.task
         return task
+
+    def cancel(self, task: str, *, operator: str, channel: str | None = None) -> bool:
+        """The operator stops a task: a DECISION by them, after which the task closes as CANCELLED at its next run.
+        A task the runner is running closes after the call in flight, so that call's cost is still recorded.
+        Returns False when a cancel was already asked for."""
+        operator = checked_operator(operator)
+        events = self.ledger.events(task=task)
+        state = task_state(events)
+        if state is None:
+            raise UnknownTask(f"unknown task {task}")
+        if state in CLOSED:
+            raise TaskClosed(f"task {task} is {state}")
+        if _cancel(events) is not None:
+            return False
+        body = {"decision": CANCEL} | ({"channel": channel} if channel else {})
+        try:
+            self.ledger.append(new_event("DECISION", task=task, actor={"kind": "hil", "id": operator}, body=body))
+        except SpecValidationError as error:  # it closed after the read above; the ledger checks inside the write
+            if any(message.startswith("$.task: task is closed") for message in error.messages):
+                raise TaskClosed(f"task {task} is closed") from None
+            raise
+        return True
+
+    def _stopped(self, task: str, artifacts: list[str] = ()) -> RunOutcome | None:
+        """Close a task whose cancel the operator asked for; None when nobody did."""
+        cancel = _cancel(self.ledger.events(task=task, types=["DECISION"]))
+        if cancel is None:
+            return None
+        return self._close(task, "CANCELLED", f"Cancelled by {cancel['actor']['id']}.", artifacts=artifacts)
 
     # Running ------------------------------------------------------------------------------------------------------
 
@@ -126,6 +176,9 @@ class Runtime:
             raise ValueError(f"unknown task {task}")
         if state in CLOSED:
             return RunOutcome(state, "The task is closed.")
+        stopped = self._stopped(task)
+        if stopped is not None:
+            return stopped
         facts = task_facts(events, self.settings)
         if state == "SUBMITTED" or (state == "GATED" and facts.narrowed):
             outcome = self.gate.run(task)
@@ -148,27 +201,35 @@ class Runtime:
 
     def expire(self, task: str | None = None) -> list[str]:
         """Apply the declared default to every open request past its deadline; returns the requests answered."""
-        events = self.ledger.events(task=task, types=["HIL_REQUEST", "HIL_RESPONSE"])
+        events = self.ledger.events(task=task, types=["HIL_REQUEST", "HIL_RESPONSE", "TASK_CLOSED"])
         answered = {e["body"]["request"] for e in events if e["type"] == "HIL_RESPONSE"}
+        closed = {e["task"] for e in events if e["type"] == "TASK_CLOSED"}  # e.g. cancelled while it waited
         now, expired = self.clock(), []
         for request in events:
-            if request["type"] == "HIL_REQUEST" and request["id"] not in answered \
+            if request["type"] == "HIL_REQUEST" and request["id"] not in answered and request["task"] not in closed \
                     and _utc(request["body"]["deadline"]) <= now:
-                self.ledger.append(new_event("HIL_RESPONSE", task=request["task"], actor=SILENCE, body={
-                    "request": request["id"], "choice": request["body"]["default_on_silence"],
-                    "default_applied": True}))
+                try:
+                    self.ledger.append(new_event("HIL_RESPONSE", task=request["task"], actor=SILENCE, body={
+                        "request": request["id"], "choice": request["body"]["default_on_silence"],
+                        "default_applied": True}))
+                except SpecValidationError as error:  # answered, or closed, after the read above
+                    if any("is already answered" in message or message.startswith("$.task: task is closed")
+                           for message in error.messages):
+                        continue
+                    raise
                 expired.append(request["id"])
         return expired
 
     def runnable(self) -> list[str]:
-        """Tasks that can move without the operator: submitted, gated, or paused by a provider failure."""
+        """Tasks that can move without the operator: submitted, gated, paused by a provider failure, or waiting
+        with a cancel the operator asked for."""
         self.expire()
         tasks = {}
         for event in self.ledger.events():
             if event["task"] is not None:
                 tasks.setdefault(event["task"], []).append(event)
-        return [task for task, events in tasks.items()
-                if task_state(events) in ("SUBMITTED", "GATED", "RUNNING")]
+        return [task for task, events in tasks.items() if (state := task_state(events)) in
+                ("SUBMITTED", "GATED", "RUNNING") or (state not in CLOSED and _cancel(events) is not None)]
 
     @staticmethod
     def _open_request(events: list[dict]) -> str | None:
@@ -193,6 +254,9 @@ class Runtime:
             data_class = higher_class(data_class, self.ledger.artifact(attachment.ref)["data_class"])
         resumed = True  # only the first pass of a run picks up a document delivered before an interruption
         while True:
+            stopped = self._stopped(task)
+            if stopped is not None:
+                return stopped
             results = [e for e in self.ledger.events(task=task, types=["RESULT"]) if e.get("contract") == contract]
             last = results[-1] if results else None
             if resumed and last is not None and last["body"]["outcome"] == "PARTIAL":  # stopped before closing
@@ -233,6 +297,9 @@ class Runtime:
                 self._event("RESULT", task, contract, worker, {"outcome": "DONE", "artifacts": [artifact]},
                             output.cost, refs=[artifact], staged=[staged])
             resumed = False
+            stopped = self._stopped(task, artifacts=[artifact])  # cancelled during the worker call: keep its document
+            if stopped is not None:
+                return stopped
             try:
                 result = check_output(self.ledger, self.gateway, task=task, contract=contract, artifact=artifact,
                                       output=text, criteria=facts.criteria, data_class=data_class,
@@ -243,7 +310,7 @@ class Runtime:
                     "decision": f"acceptance check paused ({error.code}); the document is checked again later",
                     "rationale": error.message[:500] or error.code}, None, refs=[artifact])
                 return self._ask_budget(task, contract, error) if error.code == "BUDGET" else \
-                    self._paused(task, error)
+                    self._stopped(task, artifacts=[artifact]) or self._paused(task, error)
             if result.usable and not result.unmet:
                 return self._close(task, "CLOSED_DONE", "Delivered; every acceptance criterion is met.",
                                    artifacts=[artifact])
@@ -392,7 +459,7 @@ class Runtime:
             return self._close(task, "CLOSED_ABSTAINED", f"Not done: {error.code}.", error.message[:300] or error.code)
         self._event("RESULT", task, contract, worker, {"outcome": "FAILED", "error": {
             "code": error.code, "message": error.message[:500] or error.code}}, error.cost)
-        return self._paused(task, error)
+        return self._stopped(task) or self._paused(task, error)  # cancelled during the failed call
 
     @staticmethod
     def _paused(task: str, error: GatewayError) -> RunOutcome:

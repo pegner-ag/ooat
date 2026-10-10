@@ -1,5 +1,5 @@
-"""`ooat` command line: `ooat connectors list | show | enable | disable`, and the task and HIL commands of
-task_cli.py (`ooat task ...`, `ooat hil ...`)."""
+"""`ooat` command line: `ooat connectors list | show | enable | disable`, the task and HIL commands of
+task_cli.py (`ooat task ...`, `ooat hil ...`) and serve_cli.py (`ooat serve`, `ooat login`, `ooat tokens ...`)."""
 
 import argparse
 import sqlite3
@@ -8,7 +8,7 @@ import tomllib
 from datetime import datetime, timezone
 from pathlib import Path
 
-from . import connector_admin, task_cli
+from . import connector_admin, serve_cli, task_cli
 from .config import REGION, load_config
 from .connectors.registry import Registry
 from .ledger import Ledger
@@ -54,6 +54,7 @@ def _parser() -> argparse.ArgumentParser:
     disable.add_argument("--operator", required=True)
     disable.add_argument("--reason", required=True)
     task_cli.add_commands(commands)
+    serve_cli.add_commands(commands)
     return parser
 
 
@@ -87,6 +88,12 @@ def main(argv=None, stdin=None, stdout=None, registry: Registry | None = None, t
                 return REFUSED
             return task_cli.run(args, config, path, stdin, stdout, registry or Registry.discover(), routing, clock,
                                 _ask_or_end)
+        if args.command in ("serve", "login", "tokens"):
+            config, path, refusal = _config(args)
+            if refusal is not None:
+                stdout.write(refusal)
+                return REFUSED
+            return serve_cli.run(args, config, path, stdin, stdout, clock, _ask_or_end, registry, routing)
         return _run(args, stdin, stdout, registry, today or clock().date())
     except KeyboardInterrupt:
         if args.command in ("task", "hil"):  # events may already be in the ledger: say how to go on
@@ -192,7 +199,8 @@ def _approve_hooks(args, registry, ledger, stdin, stdout) -> int:
         stdout.write("Not confirmed; nothing was changed.\n")
         return REFUSED
     try:
-        connector_admin.approve_hooks(ledger, connector, args.operator, [(path, sha) for path, sha, _ in files])
+        connector_admin.approve_hooks(ledger, connector, args.operator, [(path, sha) for path, sha, _ in files],
+                                      channel="cli")
     except ValueError as error:
         stdout.write(f"Refused: {error}; nothing was changed.\n")
         return REFUSED
@@ -202,7 +210,7 @@ def _approve_hooks(args, registry, ledger, stdin, stdout) -> int:
 
 def _disable(args, ledger, url, stdout) -> int:  # also allowed for a connector that is no longer installed
     try:
-        connector_admin.disable(ledger, args.connector, args.operator, args.reason)
+        connector_admin.disable(ledger, args.connector, args.operator, args.reason, channel="cli")
     except ValueError as error:  # includes SpecValidationError, e.g. a malformed connector id
         stdout.write(f"Refused: {error}\n")
         return REFUSED
@@ -292,7 +300,8 @@ def _enable(args, registry, ledger, url, today, config, stdin, stdout) -> int:
         stdout.write("Confirmation did not match; nothing was changed.\n")
         return REFUSED
     try:
-        connector_admin.acknowledge(ledger, connector, operator, classes, automation, responsibility, today)
+        connector_admin.acknowledge(ledger, connector, operator, classes, automation, responsibility, today,
+                                    channel="cli")
     except ValueError as error:
         stdout.write(f"Refused: {error}\n")
         return REFUSED

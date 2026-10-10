@@ -1,9 +1,19 @@
-"""SQLite ledger backend (Solo profile)."""
+"""SQLite ledger backend (Solo profile).
+
+One connection per thread (`check_same_thread` stays on). WAL lets readers run while one writer appends; every
+write is one `BEGIN IMMEDIATE` transaction, so the ledger's checks and its insert are serialised across threads and
+processes (design 05 §7). WAL needs a local disk: it does not work on network shares.
+"""
 
 import sqlite3
+from collections.abc import Iterator
+from contextlib import contextmanager, nullcontext
 from pathlib import Path
 
-from . import LedgerIntegrityError
+from . import LedgerBusyError, LedgerIntegrityError
+
+BUSY_TIMEOUT_MS = 5000  # a writer waits this long for the lock, then the write fails as LedgerBusyError
+_BUSY = frozenset({"SQLITE_BUSY", "SQLITE_LOCKED"})
 
 # Bumped with every DDL change; a ledger written by newer code is never opened by older code.
 SCHEMA_VERSION = 2
@@ -77,9 +87,21 @@ CREATE TRIGGER IF NOT EXISTS artifact_no_delete BEFORE DELETE ON artifact
 
 class SqliteBackend:
     def __init__(self, path: str | Path):
-        self._db = sqlite3.connect(str(path))
+        # No implicit transactions: transaction() opens BEGIN IMMEDIATE itself.
+        self._db = sqlite3.connect(str(path), timeout=BUSY_TIMEOUT_MS / 1000, isolation_level=None)
         self._db.row_factory = sqlite3.Row
+        self._in_transaction = False
+        try:
+            self._prepare()
+        except sqlite3.OperationalError as error:  # another writer held the file past the busy timeout
+            self._db.close()
+            if error.sqlite_errorname in _BUSY:
+                raise LedgerBusyError("the ledger is busy; try again") from error
+            raise
+
+    def _prepare(self) -> None:
         self._db.execute("PRAGMA foreign_keys = ON")
+        self._db.execute("PRAGMA journal_mode = WAL")  # persistent in the file; ":memory:" stays "memory"
         (version,) = self._db.execute("PRAGMA user_version").fetchone()
         if version > SCHEMA_VERSION:
             self._db.close()
@@ -92,14 +114,34 @@ class SqliteBackend:
             self._db.execute("ALTER TABLE event ADD COLUMN estimated_usd REAL")
         self._db.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
 
-    def insert(self, event_row: dict, artifact_rows: list[dict]) -> None:
+    @contextmanager
+    def transaction(self) -> Iterator[None]:
+        if self._in_transaction:
+            raise RuntimeError("ledger transactions do not nest")
         try:
-            with self._db:  # commits on success, rolls back on any error
+            self._db.execute("BEGIN IMMEDIATE")  # takes the write lock now, waiting up to the busy timeout
+        except sqlite3.OperationalError as error:
+            if error.sqlite_errorname in _BUSY:
+                raise LedgerBusyError("the ledger is busy; try again") from error
+            raise
+        self._in_transaction = True
+        try:
+            yield
+            self._db.execute("COMMIT")
+        except BaseException:
+            self._db.execute("ROLLBACK")
+            raise
+        finally:
+            self._in_transaction = False
+
+    def insert(self, event_row: dict, artifact_rows: list[dict]) -> None:
+        with nullcontext() if self._in_transaction else self.transaction():
+            try:
                 self._insert("event", event_row)
                 for row in artifact_rows:
                     self._insert("artifact", row)
-        except sqlite3.IntegrityError as error:
-            raise LedgerIntegrityError(str(error)) from error
+            except sqlite3.IntegrityError as error:
+                raise LedgerIntegrityError(str(error)) from error
 
     def _insert(self, table: str, row: dict) -> None:
         columns = ",".join(row)

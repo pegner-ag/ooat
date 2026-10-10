@@ -95,7 +95,7 @@ def test_unknown_connector_is_reported(config):
 def test_disable_records_operator_and_reason(config):
     code, _ = run(config, "connectors", "disable", "prv.fake.api", "--operator", "Martin", "--reason", "trial ended")
     assert code == 0 and state_events(config)[0]["body"] == {
-        "adapter": "prv.fake.api", "operator": "Martin", "reason": "trial ended"}
+        "adapter": "prv.fake.api", "operator": "Martin", "reason": "trial ended", "channel": "cli"}
 
 
 def test_disable_with_a_malformed_id_is_refused(config):

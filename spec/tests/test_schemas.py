@@ -157,6 +157,23 @@ INVALID = [
      _set(["body", "responsibility", "processing_regions"], ["Europe"])),
     ("event_responsibility_training_stated_false", "event", "event.adapter_acknowledged_responsibility.json",
      _set(["body", "responsibility", "no_training"], False)),
+    # ADR 0016
+    ("event_token_issued_by_system", "event", "event.operator_token_issued.json",
+     _set(["actor"], {"kind": "system", "id": "ooat-core"})),
+    ("event_token_issued_on_a_task", "event", "event.operator_token_issued.json",
+     _set(["task"], "tsk_01J9ZQ7A1BK3M5N7P9Q1R3S5T7")),
+    ("event_token_issued_with_the_token_itself", "event", "event.operator_token_issued.json",
+     _set(["body", "secret"], "ooat_abc")),
+    ("event_token_unknown_scope", "event", "event.operator_token_issued.json", _set(["body", "scopes"], ["admin"])),
+    ("event_token_special_category_cap", "event", "event.operator_token_issued.json",
+     _set(["body", "max_data_class"], "special_category")),
+    ("event_token_personal_cap_without_responsibility", "event", "event.operator_token_issued.json",
+     _set(["body", "max_data_class"], "personal")),
+    ("event_token_revoked_without_reason", "event", "event.operator_token_revoked.json", _delete(["body", "reason"])),
+    ("event_channel_not_a_known_kind", "event", "event.task_submitted.json", _set(["body", "channel"], "telegram")),
+    ("event_intake_key_with_spaces", "event", "event.task_submitted.json",
+     lambda doc: doc["body"].update(channel="web", intake_key="chat 42 message 7")),
+    ("event_intake_key_without_channel", "event", "event.task_submitted.json", _set(["body", "intake_key"], "m-7")),
 ]
 
 
@@ -167,3 +184,13 @@ def test_invalid_example(case):
     assert validator(schema).is_valid(doc), "base example must be valid"
     mutate(doc)
     assert not validator(schema).is_valid(doc)
+
+
+def test_human_events_record_their_channel_and_a_submission_its_intake_key():  # ADR 0016
+    doc = load("event.task_submitted.json")
+    doc["body"] |= {"channel": "token:tok_01J9ZQ80B0K3M5N7P9Q1R3S5T7", "intake_key": "chat-42:msg-7"}
+    assert validator("event").is_valid(doc)
+    for source in ("event.task_rated.json", "event.adapter_disabled.json", "event.adapter_acknowledged.json"):
+        doc = load(source)
+        doc["body"]["channel"] = "web"
+        assert validator("event").is_valid(doc), source

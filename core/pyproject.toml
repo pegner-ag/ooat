@@ -9,7 +9,7 @@ description = "OOAT reference runtime: ledger, contracts and Topology Gate."
 readme = "description.md"
 requires-python = ">=3.12"
 license = "Apache-2.0"
-dependencies = ["jsonschema>=4.23", "referencing>=0.30", "rfc3339-validator>=0.1.4"]
+dependencies = ["jsonschema>=4.23", "referencing>=0.30", "rfc3339-validator>=0.1.4", "fastapi>=0.143", "uvicorn>=0.54"]
 
 [project.scripts]
 ooat = "ooat_core.operator_cli:main"

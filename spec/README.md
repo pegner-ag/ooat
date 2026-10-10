@@ -28,9 +28,10 @@ folder, not URLs that must be served.
 - Abstentions require `reason` (≤ 300 chars), `missing` and `confidence`.
 - `HIL_REQUEST`: 2–3 options, recommendation, default on silence, deadline; an R3 request must offer a do-not-act option (`acts: false`).
 - Objections reference an artifact version and use a closed `reason_code` list.
-- Only agents emit `CLAIM`/`RESULT`/`OBJECTION`; only humans emit `HIL_RESPONSE`, `TASK_RATED`, `DEFECT_FOUND`, `ADAPTER_ACKNOWLEDGED`, `ADAPTER_DISABLED`,
+- Only agents emit `CLAIM`/`RESULT`/`OBJECTION`; only humans emit `HIL_RESPONSE`, `TASK_RATED`, `DEFECT_FOUND`, `ADAPTER_ACKNOWLEDGED`, `ADAPTER_DISABLED`, `OPERATOR_TOKEN_ISSUED`, `OPERATOR_TOKEN_REVOKED`,
   except the `HIL_RESPONSE` the runtime writes as `default-on-silence` when a deadline passes (HIL rule 5).
 - Timestamps are UTC (`Z`).
+- Token events have `task: null` and carry the token's SHA-256, never the token; a cap above `internal` carries the responsibility date; an `intake_key` needs a `channel` (ADR 0016).
 
 ## Rules left to the catalog linter or runtime
 
@@ -40,6 +41,7 @@ JSON Schema cannot express these; they are checked in code:
 - Inheritance: roles only narrow family permissions, gates accumulate, depth ≤ 3.
 - `cost_card.observed` changes only through `ooat-core`.
 - Referenced capabilities, roles, adapters and schema paths exist.
+- One `TASK_SUBMITTED` per `intake_key` and `channel`, and a response to an R3 request only from `default-on-silence` (the ledger, ADR 0016).
 
 ## Examples and tests
 

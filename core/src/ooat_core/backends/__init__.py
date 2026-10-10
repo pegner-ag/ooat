@@ -3,6 +3,7 @@
 Every backend implements the same small surface and must pass core/tests/test_ledger.py.
 """
 
+from contextlib import AbstractContextManager
 from typing import Protocol
 
 
@@ -10,9 +11,17 @@ class LedgerIntegrityError(Exception):
     """A write would duplicate or orphan a ledger row. Backends translate their driver's integrity errors."""
 
 
+class LedgerBusyError(Exception):
+    """Another writer held the ledger past the busy timeout; nothing was written (API: 503 LEDGER_BUSY)."""
+
+
 class LedgerBackend(Protocol):
+    def transaction(self) -> AbstractContextManager[None]:
+        """One write transaction holding the write lock from its start, so checks made inside it and the insert are
+        serialised across threads and processes. Raises LedgerBusyError when the lock is not free in time."""
+
     def insert(self, event_row: dict, artifact_rows: list[dict]) -> None:
-        """Insert one event row and its artifact rows in a single transaction.
+        """Insert one event row and its artifact rows in a single transaction (the open one, if any).
 
         Raises LedgerIntegrityError, writing nothing, on a duplicate id or an artifact without its event.
         """

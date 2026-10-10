@@ -13,6 +13,7 @@
     "contract_id": {"type": "string", "pattern": "^ctr_[0-7][0-9A-HJKMNP-TV-Z]{25}$"},
     "agent_id": {"type": "string", "pattern": "^agt_[0-7][0-9A-HJKMNP-TV-Z]{25}$"},
     "event_id": {"type": "string", "pattern": "^evt_[0-7][0-9A-HJKMNP-TV-Z]{25}$"},
+    "token_id": {"description": "An operator API token (ADR 0016); the token itself is never stored.", "type": "string", "pattern": "^tok_[0-7][0-9A-HJKMNP-TV-Z]{25}$"},
     "artifact_ref": {
       "description": "Versioned artifact reference art_<ulid>@v<n>.",
       "type": "string",

@@ -17,6 +17,7 @@ _SQL_INT_MAX = 2**63 - 1
 _COST_INTEGERS = ("tokens_in", "tokens_cached", "tokens_out")
 _HEX = frozenset("0123456789abcdef")
 DATA_CLASSES = frozenset({"public", "internal", "client_confidential", "personal", "special_category"})
+SILENCE_ACTOR_ID = "default-on-silence"  # the runtime applying a request's declared default (spec §9 rule 5)
 
 # The envelope's cost keys differ from the spec's column names for usd and basis.
 _COST_COLUMNS = {
@@ -36,6 +37,14 @@ class StagedArtifact:
     untrusted: bool
     sha256: str
     uri: str
+
+
+class DuplicateIntake(ValueError):
+    """A TASK_SUBMITTED repeats an intake key already used on its channel; `task` is the task that key created."""
+
+    def __init__(self, task: str):
+        super().__init__(f"this intake key already created {task}")
+        self.task = task
 
 
 def utc_now() -> str:
@@ -125,27 +134,52 @@ class Ledger:
         too_large = [key for key in _COST_INTEGERS if event.get("cost", {}).get(key, 0) > _SQL_INT_MAX]
         if too_large:
             raise SpecValidationError("event", [f"$.cost.{key}: exceeds a 64-bit integer" for key in too_large])
-        self._check_hil(event)
         artifacts = list(artifacts)
-        self._check_staged(artifacts)
         staged_refs = {a.ref for a in artifacts}
         unreferenced = sorted(staged_refs - set(event["refs"]))
         if unreferenced:
             raise ValueError(f"staged artifacts must be referenced by their event: {unreferenced}")
-        unknown = sorted(ref for ref in _artifact_refs([event["refs"], event["body"]])
-                         if ref not in staged_refs and self.artifact(ref) is None)
-        if unknown:
-            raise ValueError(f"event references unknown artifacts: {unknown}")
-        artifact_rows = []
-        for artifact in artifacts:
-            artifact_id, version = parse_artifact_ref(artifact.ref)
-            artifact_rows.append({
-                "id": artifact_id, "version": version, "type": artifact.type, "data_class": artifact.data_class,
-                "untrusted": int(artifact.untrusted), "sha256": artifact.sha256, "uri": artifact.uri,
-                "produced_by_event": event["id"],
-            })
-        self.backend.insert(_event_row(event), artifact_rows)
+        # Checks that read the ledger run inside the write transaction, so another thread or process cannot slip an
+        # answer, an artifact version or an intake key in between the check and the insert (design 05 §7).
+        with self.backend.transaction():
+            self._check_hil(event)
+            self._check_closed(event)
+            self._check_intake(event)
+            self._check_staged(artifacts)
+            unknown = sorted(ref for ref in _artifact_refs([event["refs"], event["body"]])
+                             if ref not in staged_refs and self.artifact(ref) is None)
+            if unknown:
+                raise ValueError(f"event references unknown artifacts: {unknown}")
+            artifact_rows = []
+            for artifact in artifacts:
+                artifact_id, version = parse_artifact_ref(artifact.ref)
+                artifact_rows.append({
+                    "id": artifact_id, "version": version, "type": artifact.type, "data_class": artifact.data_class,
+                    "untrusted": int(artifact.untrusted), "sha256": artifact.sha256, "uri": artifact.uri,
+                    "produced_by_event": event["id"],
+                })
+            self.backend.insert(_event_row(event), artifact_rows)
         return event
+
+    def _check_closed(self, event: dict) -> None:
+        """Checked inside the write, so a racing writer cannot slip past: the operator decides nothing and no answer
+        lands on a closed task (design 05 §12), and a task is rated once (a second rating would count twice in θ)."""
+        hil_decision = event["type"] == "DECISION" and event["actor"]["kind"] == "hil"
+        if (hil_decision or event["type"] == "HIL_RESPONSE") \
+                and self.events(task=event["task"], types=["TASK_CLOSED"]):
+            raise SpecValidationError("event", [f"$.task: task is closed: {event['task']}"])
+        if event["type"] == "TASK_RATED" and self.events(task=event["task"], types=["TASK_RATED"]):
+            raise SpecValidationError("event", [f"$.task: task is already rated: {event['task']}"])
+
+    def _check_intake(self, event: dict) -> None:
+        """One task per intake key and channel, also across restarts and racing deliveries (ADR 0016)."""
+        key = event["body"].get("intake_key") if event["type"] == "TASK_SUBMITTED" else None
+        if key is None:
+            return
+        channel = event["body"].get("channel")
+        for earlier in self.events(types=["TASK_SUBMITTED"]):
+            if earlier["body"].get("intake_key") == key and earlier["body"].get("channel") == channel:
+                raise DuplicateIntake(earlier["task"])
 
     def _check_hil(self, event: dict) -> None:
         """Cross-field HIL rules JSON Schema cannot express (spec §9, ADR 0003 #4)."""
@@ -167,6 +201,15 @@ class Ledger:
             elif any(e["type"] == "HIL_RESPONSE" and e["body"]["request"] == body["request"] for e in hil):
                 errors.append(f"$.body.request: {body['request']} is already answered")
             else:
+                if event["actor"]["id"] == SILENCE_ACTOR_ID and not (
+                        body.get("default_applied") is True
+                        and body.get("choice") == request["body"]["default_on_silence"]):
+                    errors.append("$.body: default-on-silence only applies the request's default, with "
+                                  "default_applied: true")
+                if request["body"].get("risk_class") == "R3" and event["actor"]["id"] != SILENCE_ACTOR_ID:
+                    # Spec §9 as amended by ADR 0016: no identity bound to something the operator holds exists yet.
+                    errors.append("R3_NEEDS_BOUND_IDENTITY: an R3 request needs a named approver with a bound "
+                                  "identity; until one exists only its default on silence applies")
                 if request["body"].get("risk_class") == "R3" and "choice" not in body:
                     errors.append("$.body.choice: an R3 request needs an explicit choice, not only text")
                 if "choice" in body and body["choice"] not in {o["id"] for o in request["body"]["options"]}:
