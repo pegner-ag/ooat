@@ -28,7 +28,7 @@
 - No secrets, cookies, tokens, request bodies or query strings in logs, the ledger, error details or the UI; the API logs method, path and status only; uvicorn's access log is off.
 - Headers on every response: `Content-Security-Policy: default-src 'self'` (no inline script), `frame-ancestors 'none'`, `Referrer-Policy: no-referrer`, `X-Content-Type-Options: nosniff`; `Cache-Control: no-store` on `/api/`. Artifacts are served as `text/plain` (never HTML) or as an attachment.
 - Request bodies at most 20 MB (413 `TOO_LARGE`); errors as `{"error": {"code", "message", "details"}}`.
-- New dependencies, nothing else: `fastapi>=0.143` (Task 8) and `uvicorn>=0.54` (Task 10) in `core/pyproject.toml` (the API and its server, named in the CLAUDE.md stack); `httpx2>=2.13` in `requirements-dev.txt` (test-only: FastAPI's `TestClient` imports it; current Starlette asks for it (its import error says `pip install httpx2`) and deprecates plain `httpx`; published by Pydantic, github.com/pydantic/httpx2; verified by the orchestrator 2026-10-10).
+- New dependencies, nothing else: `fastapi>=0.143` (Task 8) and `uvicorn>=0.54` (Task 10) in `core/pyproject.toml` (the API and its server, named in the CLAUDE.md stack); `httpx2==2.13.1` (pinned) in `requirements-dev.txt` (test-only: FastAPI's `TestClient` imports it; current Starlette asks for it (its import error says `pip install httpx2`) and deprecates plain `httpx`; published by Pydantic, github.com/pydantic/httpx2; verified by the orchestrator 2026-10-10).
 - Tests are offline: `TestClient(app, base_url="http://127.0.0.1:8765")` in-process, `uvicorn.run` replaced in CLI tests, fake connectors from `core/tests/runtime_fakes.py`.
 - Code, comments, docs and commits in English; lines at most 120 characters; event types, error and reason codes English.
 
@@ -54,9 +54,11 @@
 10. Projections are not cached by `seq` (design §7 allows it); Solo volumes are fast enough, and a cache is added when measured.
 11. Chunked request bodies are refused (411 `LENGTH_REQUIRED`) so the 20 MB limit holds by `Content-Length`.
 12. `ooat task run` (and `submit` / `hil answer` when they run) take the runner lock too, so two CLI runs on one ledger no longer run side by side either.
-13. Only the operator who issued a token (the operator it acts as) may revoke it; `OPERATOR_TOKEN_REVOKED.body.operator` and its actor are that operator. The other rule offered in review, any operator from a web session, would let one operator cut off another's bot. Revoking is CLI-only in 05a.
+13. Any operator may revoke any token, with a required reason; `OPERATOR_TOKEN_REVOKED.body.operator` (also the actor) is who revoked it, `reason` why. Operator names are self-declared, so an issuer-only rule would protect little and would block an emergency revoke (review of PR #34). Revoking is CLI-only in 05a.
 14. Sign-in hardening (review of PR #34): a `Content-Length` that is not a number is 400 `INVALID`; `ooat-login/` is created with mode 0o700. On Windows the mode is ignored: the folder lies beside the ledger in the operator's profile and inherits its ACL, which OOAT does not change.
-15. Examples and tests use the operator name `operator` (and `second-operator`), as the existing fixtures do, not real first names.
+15. An open Server-Sent Events stream authenticates its reader again on every poll (session open, token not revoked or expired, `read` scope) and applies the cap afresh; when that fails it sends one `UNAUTHENTICATED` event and ends.
+16. Hook approval (ADR 0015) approves code that runs on this machine: `POST /connectors/{id}/approve-hooks` is allowed from a web session only (and the CLI), never with a bearer token (403 `SCOPE`), whatever its scopes.
+17. Examples and tests use the operator name `operator` (and `second-operator`), as the existing fixtures do, not real first names.
 
 ## Review Focus
 
@@ -117,11 +119,15 @@ tokens, so who could act for whom must be in the audit log, and a chat platform 
 1. **Operator tokens are ledger events.** `ooat tokens create --operator NAME --name NAME --scopes ...` appends
    `OPERATOR_TOKEN_ISSUED` (human actor, `task: null`; body: `token` (`tok_<ULID>`), `operator`, `name`, `scopes`,
    `max_data_class`, `sha256`, `expires`, and `responsibility.confirmed_on` for a cap above `internal`).
-   `ooat tokens revoke` appends `OPERATOR_TOKEN_REVOKED` (`token`; `operator`, the operator who revokes it,
-   who must be the operator the token acts as, so one operator cannot cut off another's bot; `reason`). The token is 256 random
+   `ooat tokens revoke` appends `OPERATOR_TOKEN_REVOKED` (`token`; `operator`, who revoked it; the required
+   `reason`). Any operator may revoke any token: names are self-declared, and a leaked token must be stoppable
+   at once by whoever notices. The token is 256 random
    bits with the prefix `ooat_`, printed once; the ledger keeps only its SHA-256, compared in constant time. Scopes:
    `submit` (also cancels), `read`, `answer`, `rate`, `connectors`. A token expires after 1 to 365 days (default 90)
-   and acts as the operator who issued it.
+   and acts as the operator who issued it. An open event stream checks its token or session again on every
+   poll and ends with an `UNAUTHENTICATED` event once it no longer holds. Approving a connector's hooks
+   (ADR 0015) approves code that runs on this machine, so it is done from the CLI or a web session only, never
+   with a token (403 `SCOPE`).
 2. **ADR 0003 §3 is amended:** `task: null` is allowed for `ADAPTER_ACKNOWLEDGED`, `ADAPTER_DISABLED`,
    `OPERATOR_TOKEN_ISSUED` and `OPERATOR_TOKEN_REVOKED`, and required for the two token events. The event schema's
    null-task conditional admits them.
@@ -2018,7 +2024,7 @@ git commit -m "feat(core): shared human actions with channel, operator cancel, R
   `tokens.EVENTS`, `tokens.DEFAULT_DAYS = 90`; `@dataclass Token(id, operator, name, scopes: frozenset[str],
   max_data_class, expires: datetime, sha256, revoked=False)`; `tokens.issue(ledger, *, operator, name, scopes,
   max_data_class="internal", days=90, responsibility=False, now) -> tuple[str, dict]` (the secret, the event);
-  `tokens.tokens(events) -> dict[str, Token]`; `tokens.revoke(ledger, *, operator, token_id, reason) -> dict` (only the operator the token acts as may revoke it);
+  `tokens.tokens(events) -> dict[str, Token]`; `tokens.revoke(ledger, *, operator, token_id, reason) -> dict` (any operator, with a required reason);
   `tokens.authenticate(events, presented: str, now) -> Token | None`; `serve_cli.add_commands(commands)`,
   `serve_cli.run(args, config, path, stdin, stdout, clock, ask) -> int`.
 
@@ -2071,11 +2077,15 @@ def test_a_wrong_expired_or_revoked_token_does_not_authenticate(ledger):
     assert tokens.authenticate(events, secret[:-1] + ("A" if secret[-1] != "A" else "B"), NOW) is None
     assert tokens.authenticate(events, "Bearer " + secret, NOW) is None
     assert tokens.authenticate(events, secret, NOW + timedelta(days=1)) is None
-    with pytest.raises(ValueError, match="only they may revoke it"):  # another operator cannot cut off this bot
-        tokens.revoke(ledger, operator="second-operator", token_id=event["body"]["token"], reason="not mine")
+    for reason in ("", "   "):  # an emergency revoke still says why
+        with pytest.raises(ValueError, match="reason is required"):
+            tokens.revoke(ledger, operator="second-operator", token_id=event["body"]["token"], reason=reason)
     assert tokens.authenticate(ledger.events(types=tokens.EVENTS), secret, NOW).operator == "operator"
-    revoked = tokens.revoke(ledger, operator="operator", token_id=event["body"]["token"], reason="the bot moved")
-    assert revoked["actor"] == {"kind": "hil", "id": "operator"} and revoked["body"]["operator"] == "operator"
+    revoked = tokens.revoke(ledger, operator="second-operator", token_id=event["body"]["token"],
+                            reason=" leaked in a chat log ")  # any operator may revoke any token
+    assert revoked["actor"] == {"kind": "hil", "id": "second-operator"}
+    assert revoked["body"] == {"token": event["body"]["token"], "operator": "second-operator",
+                               "reason": "leaked in a chat log"}
     assert tokens.authenticate(ledger.events(types=tokens.EVENTS), secret, NOW) is None
     with pytest.raises(ValueError, match="already revoked"):
         tokens.revoke(ledger, operator="operator", token_id=event["body"]["token"], reason="again")
@@ -2235,16 +2245,15 @@ def tokens(events: list[dict]) -> dict[str, Token]:
 
 
 def revoke(ledger: Ledger, *, operator: str, token_id: str, reason: str) -> dict:
-    """OPERATOR_TOKEN_REVOKED. Only the operator who issued the token (and whom it acts as) may revoke it, so one
-    operator cannot cut off another's bot; the event's `operator` is that operator, its actor too."""
+    """OPERATOR_TOKEN_REVOKED. Any operator may revoke any token, so a leaked token can be stopped at once by whoever
+    notices; operator names are self-declared, so an issuer-only rule would protect little. The event records who
+    revoked it (`operator`, also the actor) and the required reason."""
     operator, reason = checked_operator(operator), reason.strip()
     if not reason:
         raise ValueError("a reason is required")
     known = tokens(ledger.events(types=EVENTS)).get(token_id)
     if known is None:
         raise ValueError(f"no token {token_id} (see `ooat tokens list`)")
-    if known.operator != operator:
-        raise ValueError(f"{token_id} was issued by {known.operator}; only they may revoke it")
     if known.revoked:
         raise ValueError(f"{token_id} is already revoked")
     return ledger.append(new_event("OPERATOR_TOKEN_REVOKED", task=None, actor={"kind": "hil", "id": operator},
@@ -3450,7 +3459,7 @@ In `core/pyproject.toml` replace
 `dependencies = ["jsonschema>=4.23", "referencing>=0.30", "rfc3339-validator>=0.1.4"]` with
 `dependencies = ["jsonschema>=4.23", "referencing>=0.30", "rfc3339-validator>=0.1.4", "fastapi>=0.143"]`
 (FastAPI with Pydantic v2 is the API stack CLAUDE.md names; it brings Starlette and Pydantic). Append to
-`requirements-dev.txt` the line `httpx2>=2.13` (test-only: FastAPI's `TestClient` imports it; current Starlette asks for it (its import error says `pip install httpx2`) and deprecates plain `httpx`; published by Pydantic, github.com/pydantic/httpx2; verified by the orchestrator 2026-10-10). Then run `python -m pip install -r requirements-dev.txt -e core`.
+`requirements-dev.txt` the line `httpx2==2.13.1` (pinned, the version tested; test-only: FastAPI's `TestClient` imports it; current Starlette asks for it (its import error says `pip install httpx2`) and deprecates plain `httpx`; published by Pydantic, github.com/pydantic/httpx2; verified by the orchestrator 2026-10-10). Then run `python -m pip install -r requirements-dev.txt -e core`.
 
 - [ ] **Step 2: Write the failing tests**
 
@@ -4210,7 +4219,9 @@ git commit -m "feat(core): API shell - sessions, tokens, Host/Origin/CSRF guards
   `GET /ratings/queue`, `POST /tasks/{task}/rating` (201), `GET /connectors`, `GET /connectors/{id}/card`,
   `POST /connectors/{id}/enable|disable` (201), `GET /connectors/{id}/hooks`, `POST /connectors/{id}/approve-hooks`
   (201), `GET /stats?period=&project=&group=`. Helpers `endpoints.task_classes(server, tasks)`,
-  `endpoints.one_task(server, task) -> (events, data_class)`.
+  `endpoints.one_task(server, task) -> (events, data_class)`; `endpoints._stream(server, task, cursor, recheck:
+  Callable[[], Principal])` re-authenticates on every poll and ends with an `UNAUTHENTICATED` event.
+  `approve-hooks` answers 403 `SCOPE` to any bearer token.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -4327,6 +4338,33 @@ def test_the_timeline_follows_a_cursor_and_streams_until_the_task_is_closed(tmp_
     assert lines == [f"event: {e['type']}" for e in events[-2:]]  # then the stream ends: the task is closed
     bad = served.client.get(f"/api/v1/tasks/{task}/events?after=evt_01J9ZQ70A0K3M5N7P9Q1R3S5T7", headers=bot)
     assert bad.status_code == 400
+
+
+def test_a_token_revoked_while_its_stream_is_open_ends_the_stream_at_the_next_poll(tmp_path, monkeypatch):
+    from ooat_core import endpoints, tokens
+
+    from starlette.requests import Request
+
+    from ooat_core.api import principal, scope
+
+    monkeypatch.setattr(endpoints, "SSE_POLL_S", 0.01)
+    served = Served(tmp_path)
+    bot = served.token()
+    task = served.submit(bot, acceptance=[])["task"]
+    served.run()  # waits for a clarification: the stream stays open
+    # The test client buffers a whole streamed body, so the stream's generator is driven here, step by step, with
+    # the same re-check the endpoint gives it.
+    request = Request({"type": "http", "method": "GET", "path": "/", "app": served.app, "query_string": b"",
+                       "headers": [(b"authorization", bot["Authorization"].encode())]})
+    stream = endpoints._stream(served.server, task, None, lambda: scope("read")(principal(request)))
+    seen = []
+    for chunk in stream:
+        seen.append(chunk.split("\n", 2)[1] if chunk.startswith("id: ") else chunk.split("\n", 1)[0])
+        if seen[-1] == "event: HIL_REQUEST":  # the timeline so far has arrived; now the token leaks
+            with served.ledger() as ledger:
+                (token,) = tokens.tokens(ledger.events(types=tokens.EVENTS))
+                tokens.revoke(ledger, operator="operator", token_id=token, reason="leaked")
+    assert seen[0] == "event: TASK_SUBMITTED" and seen[-1] == "event: UNAUTHENTICATED"  # and the stream ended
 
 
 def test_the_documents_of_two_attempts_have_a_diff_and_the_list_filters(tmp_path):
@@ -4484,6 +4522,16 @@ def test_a_ledger_locked_past_the_busy_timeout_answers_503_and_writes_nothing(tm
         assert ledger.events(types=["TASK_SUBMITTED"]) == []
 
 
+def test_hooks_are_approved_from_a_web_session_never_with_a_token(tmp_path):
+    served = Served(tmp_path)
+    web, bot = served.login(), served.token(scopes=("connectors",))
+    body = {"confirm": "prv.fake.api", "hooks": []}
+    by_token = served.client.post("/api/v1/connectors/prv.fake.api/approve-hooks", headers=bot, json=body)
+    assert by_token.status_code == 403 and by_token.json()["error"]["code"] == "SCOPE"
+    by_web = served.client.post("/api/v1/connectors/prv.fake.api/approve-hooks", headers=web, json=body)
+    assert by_web.status_code == 400 and "no hooks" in by_web.json()["error"]["message"]  # past the channel check
+
+
 UNSAFE = {"POST", "PUT", "PATCH", "DELETE"}
 OPEN = {"/login", "/login.js", "/api/v1/login"}
 
@@ -4546,6 +4594,7 @@ import difflib
 import json
 import re
 import time
+from collections.abc import Callable
 from dataclasses import asdict
 from typing import Literal
 
@@ -4554,7 +4603,7 @@ from fastapi.responses import JSONResponse, Response, StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field, StrictInt, StrictStr
 
 from . import connector_admin, hil, stats, views
-from .api import ApiError, Principal, Server, require_within, scope, server_of
+from .api import ApiError, Principal, Server, principal, require_within, scope, server_of
 from .gate import settings_from_config
 from .ids import parse_artifact_ref
 from .rating import rate
@@ -4714,7 +4763,8 @@ def resource_routes() -> APIRouter:
             raise ApiError(400, "INVALID", f"{cursor} is not an event of {task}") from None
         if "text/event-stream" not in request.headers.get("accept", ""):
             return {"events": found, "next": found[-1]["id"] if found else cursor}
-        return StreamingResponse(_stream(server, task, cursor, who), media_type="text/event-stream")
+        return StreamingResponse(_stream(server, task, cursor, lambda: scope("read")(principal(request))),
+                                 media_type="text/event-stream")
 
     @api.post("/tasks/{task}/cancel", status_code=202)
     def cancel(task: str, request: Request, who: Principal = Depends(scope("submit"))) -> dict:
@@ -4866,11 +4916,15 @@ def resource_routes() -> APIRouter:
     @api.post("/connectors/{connector_id}/approve-hooks", status_code=201)
     def approve_hooks(connector_id: str, body: HooksIn, request: Request,
                       who: Principal = Depends(scope("connectors"))) -> dict:
+        # Approving a hook approves code that runs on this machine (ADR 0015): the CLI or a web session, never a token.
+        if who.channel != "web":
+            raise ApiError(403, "SCOPE", "hooks are approved in the web app or with `ooat connectors approve-hooks`, "
+                                         "never with an API token")
         server = server_of(request)
         connector = installed(server, connector_id)
         if body.confirm != connector_id:
             raise ApiError(400, "INVALID", "type the connector id to confirm")
-        current = [(path, sha) for path, sha, _ in (connector.hooks() if hasattr(connector, "hooks") else [])]
+        current =[(path, sha) for path, sha, _ in (connector.hooks() if hasattr(connector, "hooks") else [])]
         if not current or any(not sha for _, sha in current):
             raise ApiError(400, "INVALID", "there are no hooks that can be approved")
         if [(h.path, h.sha256) for h in body.hooks] != current:
@@ -4893,11 +4947,20 @@ def resource_routes() -> APIRouter:
     return api
 
 
-def _stream(server: Server, task: str, cursor: str | None, who: Principal):
+def _stream(server: Server, task: str, cursor: str | None, recheck: Callable[[], Principal]):
     """Server-Sent Events: the timeline after the cursor, then each new event, until the task is closed. Each step
-    reads the ledger through the thread it runs on (Starlette iterates a sync generator in its thread pool)."""
+    reads the ledger through the thread it runs on (Starlette iterates a sync generator in its thread pool).
+
+    Every poll authenticates the reader again (session still open, token not revoked or expired, `read` scope) and
+    applies its cap afresh, so a revoked token's stream ends at the next poll with an UNAUTHENTICATED event."""
     started = time.monotonic()
     while True:
+        try:
+            who = recheck()
+        except ApiError as error:
+            body = {"error": {"code": "UNAUTHENTICATED", "message": error.message, "details": None}}
+            yield f"event: UNAUTHENTICATED\ndata: {json.dumps(body)}\n\n"
+            return
         events, data_class = one_task(server, task)
         for event in views.timeline(events, data_class, who.max_data_class, cursor):
             yield f"id: {event['id']}\nevent: {event['type']}\ndata: {json.dumps(event, ensure_ascii=False)}\n\n"
@@ -5529,7 +5592,7 @@ Append to `.claude/lessons.md`:
   `endpoints.resource_routes()`).
 - The ledger stamps `ts` with the real time while tests fake the runtime's clock. A test that compares event times
   with the clock (runner backoff, stats periods) starts its fake clock at `datetime.now(timezone.utc)`.
-- Starlette 1.x's `TestClient` wants `httpx2` (Pydantic's fork, github.com/pydantic/httpx2); plain `httpx` still works but warns.
+- Starlette 1.x's `TestClient` wants `httpx2` (Pydantic's fork, github.com/pydantic/httpx2); plain `httpx` still works but warns. The test client buffers a whole streamed body, so a test that acts while a Server-Sent Events stream is open drives the stream's generator itself (`endpoints._stream`).
 - Opening a SQLite connection runs the ledger's DDL, which needs the write lock: a connection opened while another
   writer holds it fails busy too. `SqliteBackend` maps that, like a busy `BEGIN IMMEDIATE`, to `LedgerBusyError`.
 - FastAPI runs sync endpoints in a thread pool and iterates a sync streaming generator there too: the API keeps one
@@ -5539,7 +5602,7 @@ Append to `.claude/lessons.md`:
 - [ ] **Step 9: Run the whole suite and check line lengths**
 
 Run: `python -m pytest -q`
-Expected: PASS (about 125 more tests than before Task 2)
+Expected: PASS (about 127 more tests than before Task 2)
 
 Run: `python -c "import pathlib,sys; bad=[f'{p}:{n}' for p in pathlib.Path('core').rglob('*.py') for n,l in enumerate(p.read_text(encoding='utf-8').splitlines(),1) if len(l)>120 and p.name in {'api.py','endpoints.py','hil.py','tokens.py','runner.py','runner_lock.py','stats.py','views.py','sessions.py','serve_cli.py','test_api.py','test_api_security.py','test_hil.py','test_tokens.py','test_runner.py','test_stats.py','test_views.py','test_serve_cli.py','api_fakes.py'}]; print(bad or 'ok')"`
 Expected: `ok`
