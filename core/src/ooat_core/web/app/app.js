@@ -6,6 +6,7 @@ import { money } from "./format.js";
 import { currentLanguage, setLanguage, t } from "./i18n.js";
 import { inbox } from "./views/inbox.js";
 import { taskPage } from "./views/task.js";
+import { usage } from "./views/usage.js";
 
 const LANGUAGE_STORAGE = "ooat.language";
 const HEADER_REFRESH_MS = 30_000;
@@ -17,10 +18,12 @@ const top = /** @type {HTMLElement} */ (document.getElementById("top"));
 const ROUTES = [
   [/^\/$/, (root, ctx) => inbox(root, ctx)],
   [/^\/tasks\/([A-Za-z0-9_]+)$/, (root, ctx, match) => taskPage(root, ctx, match[1])],
+  [/^\/usage$/, (root, ctx) => usage(root, ctx)],
 ];
 /** @type {[string, () => string][]} */
 const NAV = [
   ["/", () => t("nav.inbox")],
+  ["/usage", () => t("nav.usage")],
 ];
 
 const api = createApi({fetch: window.fetch.bind(window), storage: localStorage, onSignedOut: signedOut});

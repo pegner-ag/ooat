@@ -36,3 +36,9 @@ test("a goal becomes a one-line title, and a redaction stub its notice", () => {
   assert.equal(text(stub), "Above this session's data class: not shown.");
   assert.equal(text("plain"), "plain");
 });
+
+import { percent } from "../src/ooat_core/web/app/format.js";
+
+test("a fraction reads as a signed percentage", () => {
+  assert.deepEqual([percent(0.08), percent(-0.125), percent(0), percent(null)], ["+8 %", "-13 %", "0 %", "—"]);
+});

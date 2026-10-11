@@ -55,3 +55,11 @@ export function text(value) {
   if (typeof value === "string") return value;
   return value ? t("common.redacted") : "";
 }
+
+/** Estimate vs actual and the like: 0.08 → "+8 %". @param {number | null | undefined} fraction */
+export function percent(fraction) {
+  if (fraction === null || fraction === undefined) return "—";
+  // Halves round away from zero (Math.round(-12.5) is -12); `|| 0` turns -0 into 0.
+  const rounded = Math.sign(fraction) * Math.round(Math.abs(fraction) * 100) || 0;
+  return `${rounded > 0 ? "+" : ""}${rounded} %`;
+}
