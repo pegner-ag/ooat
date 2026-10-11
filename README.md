@@ -18,7 +18,7 @@ action waiting for a named human.
 
 Early F1 (spec draft v0.1): JSON Schemas, the starter catalog taxonomy, the ledger, the provider gateway with
 three model connectors and one decision connector (Jev), the `ooat connectors` command, the Topology Gate
-for T0–T2, the task runtime (`ooat task`, `ooat hil`) and `ooat serve` (REST API, sessions, operator tokens) exist; the web screens and teams (T3+) do not yet.
+for T0–T2, the task runtime (`ooat task`, `ooat hil`) and `ooat serve` (REST API, sessions, operator tokens, the web app) exist; teams (T3+) do not yet.
 Decision records are in `docs/adr/`.
 
 ## First steps
@@ -61,7 +61,8 @@ ooat task rate <tsk_id> --operator "Your Name" --accepted yes --value B
 ```
 
 `ooat serve` runs the REST API and the task runner on `127.0.0.1:8765` and prints a one-time sign-in link for
-`[serve] operator` (`ooat login --operator <name>` prints another). A bot gets its own token, shown once:
+`[serve] operator` (`ooat login --operator <name>` prints another); it opens the web app in your browser. A bot
+gets its own token, shown once:
 
 ```sh
 ooat serve
