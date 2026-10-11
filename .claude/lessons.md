@@ -52,3 +52,9 @@
 - On Windows a blob store under a long folder (e.g. a session scratchpad) passes the 260-character path limit:
   `BlobStore.put` fails with `FileNotFoundError` on the `.partial` file. Run manual `ooat serve` checks from a short
   folder.
+- `urllib` carries an `Authorization` header across a redirect, also to another host, and takes proxies from
+  `HTTP_PROXY`/`HTTPS_PROXY`: `ooat_client` builds its opener with `ProxyHandler({})` and a redirect handler that
+  refuses, and allows plain `http` only to loopback.
+- Tests that need a real HTTP stream (the Python client's `follow`) run the app on uvicorn with a pre-bound socket
+  on `127.0.0.1` port 0 (`api_fakes.listening`): `uvicorn.Server.run(sockets=[sock])` in a thread, stopped with
+  `should_exit`. `Served(runner=True)` lets the app's lifespan start the runner thread.

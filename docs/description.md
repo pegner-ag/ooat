@@ -15,6 +15,10 @@ attachments, cancel, the rating card), Usage (spend, calls and tokens by role an
 consequences card, enable with a typed confirmation, disable, hooks). English or Czech. The app is plain
 JavaScript served from the `ooat-core` wheel; the operator needs no Node.
 
+Bots use the Python client `ooat-client` (`sdk/python`, standard library only) and its reference chat bridge: a
+chat message becomes a task, questions come with buttons, the result with a rating, and `/stats` shows usage. The
+contract is in `docs/chat-bridge.md`.
+
 ## Technology
 In use:
 - Core runtime: Python 3.12+ (`core/`), JSON Schema 2020-12 validation (`jsonschema`)
@@ -26,6 +30,7 @@ In use:
 - REST API: FastAPI (Pydantic v2) on uvicorn, `ooat serve` (design 05a, ADR 0016)
 - Web app: plain JavaScript ES modules with JSDoc types, checked by TypeScript 6.0.3 (`checkJs`) and tested with
   `node --test` (Node 22, developers and CI only); markdown-it 15.0.2 vendored (plan 05b, ADR 0016)
+- Python client and reference chat bridge: `ooat-client` in `sdk/python`, standard library only (plan 05c)
 
 Chosen by decision (`docs/adr/`), not yet used in code:
 - PostgreSQL (Team) and optional SQL Server ledger backends (ADR 0008)
@@ -44,7 +49,8 @@ Chosen by decision (`docs/adr/`), not yet used in code:
   `ooat-adapter-typesafe-jev`, `ooat-adapter-antigravity-cli`
   (each with `description.md`), `integration_tests/` (gateway with the real connectors, no network)
 - `catalog/routing.json` — reference routing policy: Anthropic, OpenAI (Codex models), Google (Antigravity models) and TypeSafe (Jev) list prices with source and date, data-class policy
-- `sdk/`, `dashboard/`, `evals/` — empty
+- `sdk/python/` — `ooat-client`: the REST API client and the reference chat bridge (`docs/chat-bridge.md`)
+- `dashboard/`, `evals/` — empty
 - `docs/adr/` — decision records; `docs/assets/` — images (social preview)
 - `.github/` — CI (`tests.yml`: pytest on 3.12 and 3.13), Claude review workflows (`claude-review.yml` automatic on same-repo PRs, `claude.yml` on `@claude` mentions; Opus 5.5, comment-only, advisory per ADR 0007; auth via `CLAUDE_CODE_OAUTH_TOKEN`), issue and PR templates
 - `CONTRIBUTING.md`, `CODE_OF_CONDUCT.md`, `SECURITY.md` — contribution rules, Contributor Covenant 2.1, private vulnerability reporting
@@ -61,7 +67,7 @@ ADR 0015); a changed file stops the connector until it is approved again. `[serv
 (`operator`, `host`, `port`, `hosts`, `tls_cert`, `tls_key`); bots get operator tokens from `ooat tokens create`,
 kept in the ledger as SHA-256 only (ADR 0016). Tests of the API also need `httpx2` from `requirements-dev.txt`.
 Prices and the data-class policy: `catalog/routing.json`. Dev dependencies: `requirements-dev.txt`, then
-`pip install -e core -e adapters/claude-code -e adapters/codex -e adapters/anthropic-api -e adapters/typesafe-jev -e adapters/antigravity-cli`;
+`pip install -e core -e adapters/claude-code -e adapters/codex -e adapters/anthropic-api -e adapters/typesafe-jev -e adapters/antigravity-cli -e sdk/python`;
 run `python -m pytest`
 (paths in `pytest.ini`). Tests that spend quota or credit run only with `OOAT_LIVE=1`.
 
@@ -75,4 +81,5 @@ run `python -m pytest`
 
 ## Related documentation
 - `.claude/lessons.md` — gotchas
+- `docs/chat-bridge.md` — the chat bridge contract
 - `docs/adr/` — decisions
