@@ -5,6 +5,7 @@ import { h, report } from "./dom.js";
 import { money } from "./format.js";
 import { currentLanguage, setLanguage, t } from "./i18n.js";
 import { inbox } from "./views/inbox.js";
+import { taskPage } from "./views/task.js";
 
 const LANGUAGE_STORAGE = "ooat.language";
 const HEADER_REFRESH_MS = 30_000;
@@ -15,6 +16,7 @@ const top = /** @type {HTMLElement} */ (document.getElementById("top"));
 /** @type {[RegExp, Screen][]} */
 const ROUTES = [
   [/^\/$/, (root, ctx) => inbox(root, ctx)],
+  [/^\/tasks\/([A-Za-z0-9_]+)$/, (root, ctx, match) => taskPage(root, ctx, match[1])],
 ];
 /** @type {[string, () => string][]} */
 const NAV = [
