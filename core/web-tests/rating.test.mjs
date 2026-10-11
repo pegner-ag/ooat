@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { setLanguage } from "../src/ooat_core/web/app/i18n.js";
-import { decisionText, ratingBody } from "../src/ooat_core/web/app/rating.js";
+import { corrections, decisionText, ratingBody } from "../src/ooat_core/web/app/rating.js";
 
 const gate = {event: "evt_g", question: "a1.1", kind: "gate", answer: 0.93, confidence: 0.9, disputed: false,
   options: null};
@@ -18,6 +18,11 @@ test("marked decisions become verdicts; a wrong yes/no is corrected to the other
       {event: "evt_g", question: "a1.1", verdict: "confirmed"},
       {event: "evt_c", question: "c1", verdict: "corrected", value: 1},
       {event: "evt_g", question: "a5", verdict: "corrected", value: "two"}]});
+});
+
+test("a wrong choice can only be corrected to another option", () => {
+  assert.deepEqual(corrections(branch), ["two"]);
+  assert.deepEqual(corrections(gate), []);
 });
 
 test("no marks and no note: a one-click rating", () => {

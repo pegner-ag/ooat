@@ -27,6 +27,14 @@ export function ratingBody(input) {
   };
 }
 
+/**
+ * The options a wrong choice can be corrected to: every option but the one it gave, since a "correction" to the
+ * same answer is counted as a confirmation (rating.checked_verdict). @param {Decision} decision
+ */
+export function corrections(decision) {
+  return (decision.options ?? []).filter((option) => option !== decision.answer);
+}
+
 /** "Gate A1.1: yes (0.93)". @param {Decision} decision */
 export function decisionText(decision) {
   const who = decision.kind === "gate" ? t("rating.gate") : t("rating.acceptance");

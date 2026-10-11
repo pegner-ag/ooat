@@ -3,7 +3,7 @@
 import { h, radios } from "./dom.js";
 import { money, text, title, until } from "./format.js";
 import { t } from "./i18n.js";
-import { decisionText, ratingBody } from "./rating.js";
+import { corrections, decisionText, ratingBody } from "./rating.js";
 
 /**
  * @param {any} request an entry of GET /hil
@@ -82,7 +82,7 @@ export function ratingCard(entry, ctx, {compact, onDone}) {
   const marks = decisions.map((decision, i) => {
     const mark = radios(`decision-${entry.task}-${i}`, [["right", t("rating.right")], ["wrong", t("rating.wrong")]]);
     const option = decision.options ? h("select", {"aria-label": t("rating.correct")},
-      ...decision.options.map((o) => h("option", {value: o}, o))) : null;
+      ...corrections(decision).map((o) => h("option", {value: o}, o))) : null;
     return {decision, mark, option, element: h("li", {}, decisionText(decision), " ", mark.element, " ", option)};
   });
   return h("form", {class: "card rating", onsubmit: (event) => {
