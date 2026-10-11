@@ -73,5 +73,4 @@ tokens, so who could act for whom must be in the audit log, and a chat platform 
   `ORIGIN_NOT_ALLOWED`, `DATA_CLASS_ABOVE_TOKEN`, `R3_NEEDS_BOUND_IDENTITY` (403); `NOT_FOUND` (404);
   `ALREADY_ANSWERED`, `NOT_CLOSED`, `ALREADY_RATED`, `NOT_OPEN`, `HOOKS_CHANGED` (409); `LENGTH_REQUIRED` (411);
   `TOO_LARGE` (413); `SPEC_VALIDATION` (422); `LEDGER_BUSY` (503).
-- Decided by the owner on 2026-10-09 (design 05 §13); this record is proposed on 2026-10-10 and takes effect when
-  the owner accepts it.
+- Decided by the owner on 2026-10-09 (design 05 §13); this record was accepted on 2026-10-10.
