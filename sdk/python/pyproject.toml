@@ -1,0 +1,15 @@
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+[project]
+name = "ooat-client"
+version = "0.1.0.dev0"
+description = "A client for the REST API of ooat serve and a reference chat bridge, standard library only."
+readme = "README.md"
+requires-python = ">=3.12"
+license = "Apache-2.0"
+dependencies = []
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/ooat_client"]
