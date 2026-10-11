@@ -116,3 +116,91 @@ def test_a_message_becomes_a_goal_and_its_criteria():
     assert parse_message("Shrň smlouvu.\nHOTOVO KDYŽ: nejvýše 300 slov") == ("Shrň smlouvu.",
                                                                         ["nejvýše 300 slov"])
     assert parse_message("Done when: x") == ("", ["x"])
+
+
+def event(id, kind="RESULT"):
+    return {"id": id, "ts": "2026-10-11T10:00:00Z", "type": kind, "actor": {"kind": "runtime", "id": "ooat"},
+            "refs": [], "cost": None, "body": {}}
+
+
+def stream(*events, cut=False, unauthenticated=False):
+    """A Server-Sent Events reply that ends when the server closes the connection."""
+    def reply(handler):
+        handler.send_response(200)
+        handler.send_header("Content-Type", "text/event-stream")
+        handler.send_header("Connection", "close")
+        handler.end_headers()
+        for item in events:
+            handler.wfile.write(f"id: {item['id']}\nevent: {item['type']}\ndata: {json.dumps(item)}\n\n".encode())
+        if unauthenticated:
+            body = {"error": {"code": "UNAUTHENTICATED", "message": "unknown, expired or revoked token",
+                              "details": None}}
+            handler.wfile.write(f"event: UNAUTHENTICATED\ndata: {json.dumps(body)}\n\n".encode())
+        if cut:  # the connection drops in the middle of a message, inside a two-byte character ("ř")
+            handler.wfile.write(b'id: evt_9\nevent: RESULT\ndata: {"id": "evt_9", "goal": "\xc5')
+        handler.close_connection = True
+    return reply
+
+
+def follower(stub):
+    waits = []
+    return OoatClient(stub.url, "secret", sleep=waits.append), waits
+
+
+def test_follow_reconnects_after_a_drop_from_the_last_event():
+    with Stub(stream(event("evt_1"), cut=True), (200, {"state": "RUNNING"}),
+              stream(event("evt_2", "TASK_CLOSED"))) as stub:
+        client, waits = follower(stub)
+        seen = [e["id"] for e in client.follow("tsk_1")]
+    assert seen == ["evt_1", "evt_2"]  # the cut-off evt_9 never arrived, so it is not yielded
+    assert [r["path"] for r in stub.requests] == ["/api/v1/tasks/tsk_1/events", "/api/v1/tasks/tsk_1",
+                                                  "/api/v1/tasks/tsk_1/events"]
+    assert stub.requests[0]["headers"]["Accept"] == "text/event-stream"
+    assert stub.requests[0]["headers"]["Last-Event-ID"] is None
+    assert stub.requests[2]["headers"]["Last-Event-ID"] == "evt_1"
+    assert waits == [1.0]
+
+
+def test_follow_waits_out_a_busy_server_and_stops_on_a_refusal():
+    with Stub((503, BUSY), (503, BUSY), stream(event("evt_1", "TASK_CLOSED"))) as stub:
+        client, waits = follower(stub)
+        assert [e["id"] for e in client.follow("tsk_1", after="evt_0")] == ["evt_1"]
+    assert waits == [1.0, 2.0] and stub.requests[0]["headers"]["Last-Event-ID"] == "evt_0"
+    missing = {"error": {"code": "NOT_FOUND", "message": "no task tsk_1", "details": None}}
+    with Stub((404, missing)) as stub:
+        client, waits = follower(stub)
+        with pytest.raises(OoatError) as refused:
+            list(client.follow("tsk_1"))
+    assert refused.value.code == "NOT_FOUND" and waits == []
+
+
+def test_follow_ends_for_a_closed_task_and_on_a_revoked_token():
+    with Stub(stream(), (200, {"state": "CLOSED_DONE"})) as stub:  # the cursor was the task's last event
+        client, waits = follower(stub)
+        assert list(client.follow("tsk_1", after="evt_7")) == []
+    assert waits == []
+    with Stub(stream(event("evt_1"), unauthenticated=True)) as stub:
+        client, waits = follower(stub)
+        timeline = client.follow("tsk_1")
+        assert next(timeline)["id"] == "evt_1"
+        with pytest.raises(OoatError) as refused:
+            next(timeline)
+    assert (refused.value.status, refused.value.code) == (401, "UNAUTHENTICATED") and waits == []
+
+
+def test_follow_retries_a_server_it_cannot_reach():
+    class Stop(Exception):
+        pass
+
+    waits = []
+
+    def sleep(seconds):
+        waits.append(seconds)
+        if len(waits) == 2:  # Windows takes about 2 s to refuse a connection: two attempts are enough
+            raise Stop
+
+    with Stub() as stub:
+        url = stub.url  # the port is free again once the stub is closed
+    with pytest.raises(Stop):
+        list(OoatClient(url, "secret", sleep=sleep).follow("tsk_1"))
+    assert waits == [1.0, 2.0]

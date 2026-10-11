@@ -1,8 +1,13 @@
 """`ooat serve` in tests: the app on a file ledger with fake connectors, a bot token and a web session (no network;
 the test client talks to the app in-process as http://127.0.0.1:8765)."""
 
+import socket
+import threading
+import time
+from contextlib import contextmanager
 from datetime import datetime, timezone
 
+import uvicorn
 from fastapi.testclient import TestClient
 from runtime_fakes import ScriptedModel, acknowledge, decisions, routing_document
 
@@ -24,7 +29,7 @@ def now() -> datetime:
 
 
 class Served:
-    def __init__(self, tmp_path, model=None, jev=None, classes=("public", "internal"), **settings):
+    def __init__(self, tmp_path, model=None, jev=None, classes=("public", "internal"), runner=False, **settings):
         self.url = f"sqlite:///{(tmp_path / 'ledger.sqlite').as_posix()}"
         self.model, self.jev = model or ScriptedModel(), jev or decisions()
         with self.ledger() as ledger:
@@ -33,7 +38,7 @@ class Served:
         self.settings = ServeSettings(ledger_url=self.url, blobs_dir=tmp_path / "blobs", operator="operator",
                                       **settings)
         self.app = create_app(self.settings, config=parse_config({}), registry=Registry([self.model, self.jev]),
-                              routing=RoutingPolicy(routing_document()), clock=now, start_runner=False)
+                              routing=RoutingPolicy(routing_document()), clock=now, start_runner=runner)
         self.server = self.app.state.server
         scheme = "https" if self.settings.tls else "http"
         host = self.settings.hosts[0] if self.settings.hosts else "127.0.0.1"
@@ -80,3 +85,36 @@ class _Opened:
 
     def __exit__(self, *exc):
         self.ledger.close()
+
+
+def secret(headers: dict) -> str:
+    """The token in `Served.token()`'s headers, as a bot keeps it."""
+    return headers["Authorization"].removeprefix("Bearer ")
+
+
+def wait_for(found, timeout: float = 20.0):
+    """The first truthy value of `found()`, polled while other threads (the runner, a stream) work."""
+    deadline = time.monotonic() + timeout
+    while not (value := found()):
+        assert time.monotonic() < deadline, "timed out"
+        time.sleep(0.02)
+    return value
+
+
+@contextmanager
+def listening(served: Served):
+    """The app on uvicorn on a free loopback port, as `ooat serve` runs it (with `Served(runner=True)` its runner
+    thread too), for clients that speak HTTP. Yields the base URL."""
+    sock = socket.socket()
+    sock.bind(("127.0.0.1", 0))
+    # A stream still open when a test fails must not hold the shutdown for its 15 minutes.
+    server = uvicorn.Server(uvicorn.Config(served.app, log_level="warning", lifespan="on", timeout_graceful_shutdown=5))
+    thread = threading.Thread(target=server.run, kwargs={"sockets": [sock]}, daemon=True)
+    thread.start()
+    try:
+        wait_for(lambda: server.started, timeout=10.0)
+        yield f"http://127.0.0.1:{sock.getsockname()[1]}"
+    finally:
+        server.should_exit = True
+        thread.join(30)
+        sock.close()

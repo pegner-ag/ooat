@@ -5,17 +5,20 @@ goes to the OOAT server only: plain HTTP to this machine alone, no redirects fol
 """
 
 import base64
+import http.client
 import ipaddress
 import json
 import time
 import urllib.error
 import urllib.request
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass
 from urllib.parse import quote, urlencode, urlsplit
 
 API = "/api/v1"
 DONE_WHEN = ("done when:", "hotovo když:")  # the line after which a chat message lists its acceptance criteria
+CLOSED = frozenset({"CLOSED_DONE", "CLOSED_PARTIAL", "CLOSED_ABSTAINED", "CANCELLED"})
+RECONNECT_S, MAX_RECONNECT_S = 1.0, 30.0  # the first wait after a dropped stream; waits double up to the cap
 
 
 class OoatError(Exception):
@@ -131,6 +134,37 @@ class OoatClient:
         query = f"?{urlencode({'after': after})}" if after else ""
         return self._json("GET", f"/tasks/{quote(task)}/events{query}")["events"]
 
+    def follow(self, task: str, after: str | None = None) -> Iterator[dict]:
+        """The task's timeline events after `after`, as they happen, until TASK_CLOSED (yielded too).
+
+        After a dropped connection or a busy server (5xx) it reconnects from the last event it yielded, waiting
+        1 s, doubling to 30 s; a refusal (4xx) and a token revoked while it reads raise OoatError. A stream the
+        server ends (after 15 minutes) is opened again; for a task that is already closed the iteration ends."""
+        cursor, wait = after, RECONNECT_S
+        while True:
+            try:
+                headers = {"Accept": "text/event-stream", **({"Last-Event-ID": cursor} if cursor else {})}
+                with self._open("GET", f"/tasks/{quote(task)}/events", headers=headers) as response:
+                    for message in _sse(response):
+                        if message.get("event") == "UNAUTHENTICATED":
+                            raise _error(401, message["data"].encode("utf-8"))
+                        event = json.loads(message["data"])
+                        cursor, wait = event["id"], RECONNECT_S
+                        yield event
+                        if event["type"] == "TASK_CLOSED":
+                            return
+                if self.task(task)["state"] in CLOSED:
+                    return  # closed at or before the cursor: nothing more will come
+                self._sleep(RECONNECT_S)
+                continue
+            except OoatError as error:
+                if error.status < 500:
+                    raise
+            except (OSError, http.client.HTTPException):  # refused, timed out, dropped
+                pass
+            self._sleep(wait)
+            wait = min(wait * 2, MAX_RECONNECT_S)
+
     def questions(self) -> list[dict]:
         return self._json("GET", "/hil")["requests"]
 
@@ -156,3 +190,20 @@ class OoatClient:
     def stats(self, *, period: str = "7d", project: str | None = None, group: str = "role") -> dict:
         query = urlencode({"period": period, "group": group, **({"project": project} if project else {})})
         return self._json("GET", f"/stats?{query}")
+
+
+def _sse(lines) -> Iterator[dict[str, str]]:
+    """Server-Sent Events messages from a response's lines; a message cut off by a dropped connection is never
+    returned, so the cursor only moves past events that arrived whole."""
+    fields: dict[str, str] = {}
+    for raw in lines:
+        # A whole line holds whole characters; only the last, cut-off line may end inside one, and it is dropped.
+        line = raw.decode("utf-8", errors="replace").rstrip("\r\n")
+        if not line:
+            if "data" in fields:
+                yield fields
+            fields = {}
+        elif not line.startswith(":"):  # ":" starts the server's keepalive comment
+            name, _, value = line.partition(":")
+            value = value.removeprefix(" ")
+            fields[name] = f"{fields[name]}\n{value}" if name == "data" and name in fields else value
