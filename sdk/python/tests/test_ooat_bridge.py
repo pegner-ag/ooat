@@ -1,4 +1,7 @@
-"""The bridge's parts that need no server: texts, splitting, numbers, and buttons that call nothing."""
+"""The bridge's parts that need no server, and its watch against a stub server."""
+
+import json
+import threading
 
 import pytest
 from stub_http import Stub
@@ -69,3 +72,55 @@ def test_a_refusal_while_watching_is_told_in_the_chat():
 def test_a_message_needs_a_goal_before_its_criteria():
     with pytest.raises(ValueError):
         offline_bridge().on_message("Done when: at most 300 words", "1")
+
+
+QUESTION = {"request": "evt_q", "task": "tsk_1", "asked": "2026-10-11T10:00:00Z", "deadline": "2026-10-13T10:00:00Z",
+            "risk_class": None, "blocking": True, "recommended": "run_as_is", "default_on_silence": "do_not_run",
+            "question": "Run it?", "options": [{"id": "run_as_is", "cost_usd": 0.0, "acts": True, "label": "Run"},
+                                               {"id": "do_not_run", "cost_usd": 0.0, "acts": False, "label": "Stop"}]}
+
+
+def asked():
+    """A stream with the question's HIL_REQUEST, then the server closes it."""
+    def reply(handler):
+        item = {"id": "evt_q", "ts": "2026-10-11T10:00:00Z", "type": "HIL_REQUEST",
+                "actor": {"kind": "runtime", "id": "ooat"}, "refs": [], "cost": None, "body": {}}
+        handler.send_response(200)
+        handler.send_header("Content-Type", "text/event-stream")
+        handler.send_header("Connection", "close")
+        handler.end_headers()
+        handler.wfile.write(f"id: evt_q\nevent: HIL_REQUEST\ndata: {json.dumps(item)}\n\n".encode())
+        handler.close_connection = True
+    return reply
+
+
+def reset(handler):
+    handler.close_connection = True  # no reply at all: the client sees the connection reset
+
+
+class Kept:
+    def __init__(self):
+        self.id, self.sent = "chat-1", []
+
+    def send(self, text, buttons=()):
+        self.sent.append((text, buttons))
+        return f"m{len(self.sent)}"
+
+
+def test_watch_waits_out_a_busy_or_vanished_server_and_still_posts_the_question():
+    busy = {"error": {"code": "LEDGER_BUSY", "message": "the ledger is busy", "details": None}}
+    waits, chat = [], Kept()
+    with Stub(asked(), reset, asked(), (503, busy), asked(), (200, {"requests": [QUESTION]}),
+              (200, {"state": "CANCELLED"})) as stub:
+        Bridge(OoatClient(stub.url, "secret", sleep=waits.append), chat, "docs").watch("tsk_1")
+    assert waits == [1.0, 2.0]
+    ((text, buttons),) = chat.sent  # the question once, no "the ledger is busy"
+    assert text.startswith("? Run it?") and [b.label for (b,) in buttons] == ["Run ★", "Stop"]
+
+
+def test_watch_returns_at_once_when_it_is_stopped():
+    stop = threading.Event()
+    stop.set()
+    with Stub() as stub:  # no replies: any request would fail the test
+        Bridge(OoatClient(stub.url, "secret"), Silent(), "docs").watch("tsk_1", stop=stop)
+    assert stub.requests == []

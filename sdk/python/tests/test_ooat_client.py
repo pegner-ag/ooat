@@ -2,6 +2,10 @@
 
 import base64
 import json
+import ssl
+import threading
+import time
+import urllib.error
 
 import pytest
 from stub_http import Stub
@@ -204,3 +208,43 @@ def test_follow_retries_a_server_it_cannot_reach():
     with pytest.raises(Stop):
         list(OoatClient(url, "secret", sleep=sleep).follow("tsk_1"))
     assert waits == [1.0, 2.0]
+
+
+def endless(handler):
+    """A stream that sends one event, then only keepalives for five seconds."""
+    handler.send_response(200)
+    handler.send_header("Content-Type", "text/event-stream")
+    handler.send_header("Connection", "close")
+    handler.end_headers()
+    try:
+        handler.wfile.write(f"id: evt_1\nevent: RESULT\ndata: {json.dumps(event('evt_1'))}\n\n".encode())
+        for _ in range(100):
+            handler.wfile.write(b": keepalive\n\n")
+            handler.wfile.flush()
+            time.sleep(0.05)
+    except OSError:  # the client went away
+        pass
+    handler.close_connection = True
+
+
+def test_follow_stops_when_asked_also_while_the_stream_is_idle():
+    stop = threading.Event()
+    with Stub(endless) as stub:
+        client, waits = follower(stub)
+        timeline = client.follow("tsk_1", stop=stop)
+        assert next(timeline)["id"] == "evt_1"
+        stop.set()
+        started = time.monotonic()
+        assert list(timeline) == []
+    assert time.monotonic() - started < 2 and waits == []
+
+
+def test_a_certificate_that_fails_verification_is_raised_not_retried():
+    client = OoatClient("https://ooat.example", "secret", sleep=lambda seconds: pytest.fail("retried"))
+
+    def refuse(request, timeout):
+        raise urllib.error.URLError(ssl.SSLCertVerificationError("certificate verify failed"))
+
+    client._opener.open = refuse
+    with pytest.raises(urllib.error.URLError):
+        list(client.follow("tsk_1"))

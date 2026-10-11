@@ -6,12 +6,14 @@ the person). It gives the bridge a Chat that sends a text with rows of buttons, 
 message's id. Methods called on a person's action return the text to show them; `watch` posts on its own.
 """
 
+import http.client
+import threading
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Protocol
 
-from .client import OoatClient, OoatError, parse_message
+from .client import MAX_RECONNECT_S, RECONNECT_S, OoatClient, OoatError, parse_message, retryable
 from .texts import TEXTS
 
 TEXT_OPTIONS = frozenset({"clarify", "narrow_scope"})  # answered with text: their button asks for a reply
@@ -157,19 +159,26 @@ class Bridge:
 
     # What OOAT does -----------------------------------------------------------------------------------------------
 
-    def watch(self, task: str, after: str | None = None) -> None:
+    def watch(self, task: str, after: str | None = None, stop: threading.Event | None = None) -> None:
         """Post the task's progress until it is closed: a line per state change, each question with its buttons, then
         the result with its footer and the rating buttons. It blocks: a bot runs it in a thread (`asyncio.to_thread`).
         After a restart, pass the task's `last_event` as `after`. A refusal (a revoked token, say) is told in the
-        chat and ends the watch."""
-        attempts = 0
-        try:
-            for event in self.client.follow(task, after):
-                attempts += event["type"] == "CONTRACT_ISSUED"
-                self._post(task, event, attempts)
-                self.last_event[task] = event["id"]
-        except OoatError as error:
-            self.chat.send(error.message)
+        chat and ends the watch; a busy or vanished server is waited out. Set `stop` to end it on shutdown."""
+        attempts, wait = 0, RECONNECT_S
+        while not (stop and stop.is_set()):
+            try:
+                for event in self.client.follow(task, self.last_event.get(task, after), stop):
+                    counted = attempts + (event["type"] == "CONTRACT_ISSUED")
+                    self._post(task, event, counted)
+                    attempts, wait, self.last_event[task] = counted, RECONNECT_S, event["id"]
+                return
+            except (OoatError, OSError, http.client.HTTPException) as error:
+                if not retryable(error):
+                    self.chat.send(error.message if isinstance(error, OoatError) else str(error))
+                    return
+            # The server went busy or away while an event was posted: post it again once it is back.
+            self.client.pause(wait, stop)
+            wait = min(wait * 2, MAX_RECONNECT_S)
 
     def _post(self, task: str, event: dict, attempts: int) -> None:
         kind, body = event["type"], event["body"]

@@ -8,6 +8,8 @@ import base64
 import http.client
 import ipaddress
 import json
+import ssl
+import threading
 import time
 import urllib.error
 import urllib.request
@@ -134,18 +136,19 @@ class OoatClient:
         query = f"?{urlencode({'after': after})}" if after else ""
         return self._json("GET", f"/tasks/{quote(task)}/events{query}")["events"]
 
-    def follow(self, task: str, after: str | None = None) -> Iterator[dict]:
+    def follow(self, task: str, after: str | None = None, stop: threading.Event | None = None) -> Iterator[dict]:
         """The task's timeline events after `after`, as they happen, until TASK_CLOSED (yielded too).
 
         After a dropped connection or a busy server (5xx) it reconnects from the last event it yielded, waiting
-        1 s, doubling to 30 s; a refusal (4xx) and a token revoked while it reads raise OoatError. A stream the
-        server ends (after 15 minutes) is opened again; for a task that is already closed the iteration ends."""
+        1 s, doubling to 30 s; a refusal (4xx), a token revoked while it reads and a certificate that fails
+        verification raise. A stream the server ends (after 15 minutes) is opened again; for a task that is
+        already closed the iteration ends. Setting `stop` ends it too, within a second, also while it waits."""
         cursor, wait = after, RECONNECT_S
-        while True:
+        while not (stop and stop.is_set()):
             try:
                 headers = {"Accept": "text/event-stream", **({"Last-Event-ID": cursor} if cursor else {})}
                 with self._open("GET", f"/tasks/{quote(task)}/events", headers=headers) as response:
-                    for message in _sse(response):
+                    for message in _sse(response, stop):
                         if message.get("event") == "UNAUTHENTICATED":
                             raise _error(401, message["data"].encode("utf-8"))
                         event = json.loads(message["data"])
@@ -153,17 +156,22 @@ class OoatClient:
                         yield event
                         if event["type"] == "TASK_CLOSED":
                             return
-                if self.task(task)["state"] in CLOSED:
-                    return  # closed at or before the cursor: nothing more will come
-                self._sleep(RECONNECT_S)
+                if (stop and stop.is_set()) or self.task(task)["state"] in CLOSED:
+                    return  # stopped, or closed at or before the cursor: nothing more will come
+                self.pause(RECONNECT_S, stop)
                 continue
-            except OoatError as error:
-                if error.status < 500:
+            except (OoatError, OSError, http.client.HTTPException) as error:
+                if not retryable(error):
                     raise
-            except (OSError, http.client.HTTPException):  # refused, timed out, dropped
-                pass
-            self._sleep(wait)
+            self.pause(wait, stop)
             wait = min(wait * 2, MAX_RECONNECT_S)
+
+    def pause(self, seconds: float, stop: threading.Event | None = None) -> None:
+        """Wait before trying again: until `stop` is set when there is one, else with the client's `sleep`."""
+        if stop is None:
+            self._sleep(seconds)
+        else:
+            stop.wait(seconds)
 
     def questions(self) -> list[dict]:
         return self._json("GET", "/hil")["requests"]
@@ -192,11 +200,23 @@ class OoatClient:
         return self._json("GET", f"/stats?{query}")
 
 
-def _sse(lines) -> Iterator[dict[str, str]]:
-    """Server-Sent Events messages from a response's lines; a message cut off by a dropped connection is never
-    returned, so the cursor only moves past events that arrived whole."""
+def retryable(error: Exception) -> bool:
+    """Worth trying again: a busy server (5xx), a dropped or refused connection; never a refusal (4xx) or a
+    certificate that fails verification."""
+    if isinstance(error, OoatError):
+        return error.status >= 500
+    reason = getattr(error, "reason", error)  # urllib wraps TLS errors in URLError
+    return not isinstance(reason, ssl.SSLCertVerificationError)
+
+
+def _sse(lines, stop: threading.Event | None = None) -> Iterator[dict[str, str]]:
+    """Server-Sent Events messages from a response's lines, until `stop` is set (the server's keepalive comes
+    every second); a message cut off by a dropped connection is never returned, so the cursor only moves past
+    events that arrived whole."""
     fields: dict[str, str] = {}
     for raw in lines:
+        if stop and stop.is_set():
+            return
         # A whole line holds whole characters; only the last, cut-off line may end inside one, and it is dropped.
         line = raw.decode("utf-8", errors="replace").rstrip("\r\n")
         if not line:

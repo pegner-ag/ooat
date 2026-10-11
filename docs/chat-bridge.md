@@ -22,15 +22,19 @@ token at once, also for a timeline the bot is following.
 | A message (with files) in a project's chat | `on_message(text, message_id, files)` → task id | `POST /tasks` with the chat's project; the text before a `Done when:` (or `Hotovo když:`) line is the `goal`, each line after it a criterion; files as attachments; `Idempotency-Key: <chat id>:<message id>`, so a repeated delivery returns the first task |
 | Progress | `watch(task)` | follows `GET /tasks/{id}/events` (Server-Sent Events) and posts one line for the Gate's topology, each attempt and each answer |
 | A question | posted by `watch`; `on_button(data)`, `on_reply(message_id, text)` | `GET /hil`: one button per option (★ the recommended one, its cost when it has one), the default on silence and the deadline (UTC) in the text; a button calls `POST /hil/{evt}/answer`; the options answered with text (clarify, narrow the scope) ask for a reply, and a reply to the question answers with its text; an R3 question has no buttons |
-| Result | posted by `watch` | the final document as text in up to 3 messages (`limit`, default 4096 characters), else as a file `<task>.md`; a footer: state, topology, cost, tokens in/out, time |
+| Result | posted by `watch` | the final document as text in up to 3 messages (`limit`, default 4096 characters), else as a file `<task>.md` (`<task>` when it is not text); a footer: state, topology, cost, tokens in/out, time |
 | Rate | the footer's buttons, `on_button(data)` | `POST /tasks/{id}/rating`: `Accepted A/B/C` or `Not accepted A/B/C`; the decisions stay for the web app's rating card |
 | `/cancel` | `cancel(task)` | `POST /tasks/{id}/cancel` |
 | `/stats` | `stats(period="7d")` | `GET /stats?period=…&project=…`, by role and by connector |
 
-Methods called on a person's action return the text to show them; `watch` posts on its own and returns when the
-task is closed, or after posting the reason when the server refuses (a revoked token, say). Button data is at most 64 bytes (Telegram's callback-data limit): `a:<request>:<option>` and
-`r:<task>:<A|B|C>:<y|n>`. The bridge writes English or Czech (`language="cs"`); option labels, states and the
-server's error messages come as the API gives them.
+Methods called on a person's action return the text to show them, the server's reason included when it refuses;
+only `on_message` raises (`OoatError` when the server refuses the task, `ValueError` when the message has no goal),
+so the bot replies with the error's text. `watch` posts on its own and returns when the task is closed, after
+posting the reason when the server refuses (a revoked token, say), or when its `stop` event is set; a busy or
+vanished server is waited out, and the event it was posting is posted once the server is back. Button data is at
+most 64 bytes (Telegram's callback-data limit): `a:<request>:<option>` and `r:<task>:<A|B|C>:<y|n>`.
+The bridge writes English or Czech (`language="cs"`); option labels, states and the server's error messages come as
+the API gives them.
 
 ## Minimal use
 
@@ -40,8 +44,10 @@ from ooat_client import Bridge, OoatClient
 client = OoatClient("http://127.0.0.1:8765", token)           # token from the bot's secret store
 bridge = Bridge(client, chat, project="docs", language="cs")  # chat: id, send(text, buttons), send_file(...)
 
+stop = threading.Event()                                      # set it when the bot shuts down
+
 task = bridge.on_message(text, message_id, files)             # a message from the allowed chat or user
-await asyncio.to_thread(bridge.watch, task)                   # progress, questions, the result (it blocks)
+await asyncio.to_thread(bridge.watch, task, stop=stop)        # progress, questions, the result (it blocks)
 await show(bridge.on_button(data))                            # a button press
 ```
 
@@ -54,7 +60,8 @@ bridge, `OoatClient` alone has `submit`, `follow` (the timeline until `TASK_CLOS
 Plain HTTP only to this machine (`127.0.0.1`, `::1`, `localhost`); beyond it HTTPS (`ooat serve --host` needs TLS).
 The client follows no redirects and uses no proxy from the environment, so the token goes to the OOAT server only.
 `follow` reconnects after a dropped connection or a busy server (1 s, doubling to 30 s) from the last event it
-yielded, and opens the stream again when the server ends it after 15 minutes.
+yielded, and opens the stream again when the server ends it after 15 minutes; a certificate that fails
+verification is raised, not retried. `follow(task, stop=event)` ends within a second once the event is set.
 
 ## Restarts
 
