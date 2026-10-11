@@ -55,10 +55,12 @@ class Served:
         return {"Authorization": f"Bearer {secret}"}
 
     def login(self, operator="operator") -> dict:
-        """A web session: the client keeps the cookie; unsafe requests need these headers."""
+        """A web session: the client keeps the cookie and sends the session key on every request, as the page does;
+        unsafe requests also need these headers."""
         code = issue_login_code(login_folder(self.url), operator, now())
         response = self.client.post("/api/v1/login", json={"code": code}, headers={"Origin": self.origin})
         assert response.status_code == 200, response.text
+        self.client.headers["X-CSRF-Token"] = response.json()["csrf"]
         return {"Origin": self.origin, "X-CSRF-Token": response.json()["csrf"]}
 
     def submit(self, headers, **body) -> dict:

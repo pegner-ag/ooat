@@ -31,6 +31,13 @@ python -m pytest
 
 All tests must pass. Schema changes need a valid example and at least one invalid case in `spec/tests/`.
 
+## The web app
+
+The web app in `core/src/ooat_core/web/` is plain JavaScript with JSDoc types; there is no build step. To check it,
+install Node 22 and run from `core/`: `npm ci`, `npm run check` (tsc) and `npm test` (node --test). UI strings go
+in `app/i18n/en.js` and `app/i18n/cs.js`, which must have the same keys. Build the page with `h()` from `dom.js`;
+`innerHTML` is allowed only in `markdown.js` (a test enforces it).
+
 ## Rules
 
 - English for code, schemas, docs and commit messages; event types, reason codes and keys are always English.

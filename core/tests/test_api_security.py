@@ -24,9 +24,9 @@ def test_a_sign_in_code_works_once_and_its_session_acts_as_its_operator(tmp_path
     assert "secure" not in cookie  # plain http on loopback
     again = served.client.post("/api/v1/login", json={"code": code}, headers={"Origin": ORIGIN})
     assert again.status_code == 401 and again.json()["error"]["code"] == "UNAUTHENTICATED"
-    me = served.client.get("/api/v1/me").json()
+    me = served.client.get("/api/v1/me", headers={"X-CSRF-Token": first.json()["csrf"]}).json()
     assert me["operator"] == "operator" and me["channel"] == "web" and me["max_data_class"] is None
-    assert me["csrf"] == first.json()["csrf"]
+    assert "csrf" not in me  # the key is what the cookie alone lacks; the page keeps it from the sign-in
 
 
 def test_an_expired_sign_in_code_is_refused(tmp_path):
@@ -157,10 +157,24 @@ def test_served_beyond_loopback_a_web_session_is_capped_like_a_token(tmp_path):
     code = issue_login_code(login_folder(served.url), "operator", now())
     signed_in = served.client.post("/api/v1/login", json={"code": code}, headers={"Origin": served.origin})
     assert "secure" in signed_in.headers["set-cookie"].lower()
-    assert served.client.get("/api/v1/me").json()["max_data_class"] == "internal"
+    key = {"X-CSRF-Token": signed_in.json()["csrf"]}
+    assert served.client.get("/api/v1/me", headers=key).json()["max_data_class"] == "internal"
 
 
 @pytest.mark.parametrize("host, loopback", [("127.0.0.1", True), ("::1", True), ("localhost", True),
                                             ("0.0.0.0", False), ("192.168.1.10", False)])
 def test_what_counts_as_loopback(tmp_path, host, loopback):
     assert ServeSettings(ledger_url="sqlite:///x", blobs_dir=tmp_path, host=host).loopback is loopback
+
+
+def test_a_session_cookie_without_its_key_reads_and_writes_nothing(tmp_path):
+    # A cookie is not bound to a port: another service on 127.0.0.1 the browser visits receives it (05a review).
+    served = Served(tmp_path)
+    headers = served.login()
+    task = served.submit(headers)["task"]
+    for method, path in (("GET", "/api/v1/tasks"), ("GET", f"/api/v1/tasks/{task}"), ("GET", "/api/v1/me"),
+                         ("GET", "/api/v1/hil"), ("GET", "/api/v1/stats"), ("POST", f"/api/v1/tasks/{task}/cancel")):
+        response = served.client.request(method, path, headers={"Origin": ORIGIN, "X-CSRF-Token": ""})
+        assert response.status_code == 403 and response.json()["error"]["code"] == "CSRF", (method, path)
+    with served.ledger() as ledger:  # the refused cancel recorded nothing
+        assert not [e for e in ledger.events(task=task, types=["DECISION"]) if e["actor"]["kind"] == "hil"]

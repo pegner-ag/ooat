@@ -1,0 +1,14 @@
+{
+  "name": "ooat-web-checks",
+  "private": true,
+  "type": "module",
+  "description": "Type checks and tests of the web app ooat-core serves. Not needed to install or run OOAT.",
+  "scripts": {
+    "check": "tsc -p tsconfig.json",
+    "test": "node --test \"web-tests/*.test.mjs\""
+  },
+  "devDependencies": {
+    "markdown-it": "15.0.2",
+    "typescript": "6.0.3"
+  }
+}

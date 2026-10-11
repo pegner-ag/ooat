@@ -7,7 +7,13 @@ the starter catalog holds role families, capability names and the first cards (`
 `cap.general.check_criterion`, `role.general.worker`) with their schemas in `catalog/schemas/` and first eval
 cases in `evals/`; `ooat-core` has the ledger foundation, the provider gateway
 with model and decision connectors, the Topology Gate for T0–T2 and the task runtime with the `ooat task` and
-`ooat hil` commands, and `ooat serve` with the REST API, sessions, operator tokens and the task runner (no web screens and no teams yet).
+`ooat hil` commands, and `ooat serve` with the REST API, sessions, operator tokens, the task runner and the web app (no teams yet).
+
+`ooat serve` opens the web app: the inbox (new task, questions and ratings waiting, tasks paused by a provider
+failure, all tasks), a task page (live timeline, the document of every attempt rendered, as source or as a diff,
+attachments, cancel, the rating card), Usage (spend, calls and tokens by role and by connector) and Connectors (the
+consequences card, enable with a typed confirmation, disable, hooks). English or Czech. The app is plain
+JavaScript served from the `ooat-core` wheel; the operator needs no Node.
 
 ## Technology
 In use:
@@ -18,6 +24,8 @@ In use:
 - Decision connector `adapters/typesafe-jev`: TypeSafe System One API (Jev), with the economy text tier as
   fallback (ADR 0011)
 - REST API: FastAPI (Pydantic v2) on uvicorn, `ooat serve` (design 05a, ADR 0016)
+- Web app: plain JavaScript ES modules with JSDoc types, checked by TypeScript 6.0.3 (`checkJs`) and tested with
+  `node --test` (Node 22, developers and CI only); markdown-it 15.0.2 vendored (plan 05b, ADR 0016)
 
 Chosen by decision (`docs/adr/`), not yet used in code:
 - PostgreSQL (Team) and optional SQL Server ledger backends (ADR 0008)

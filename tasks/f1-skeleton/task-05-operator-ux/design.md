@@ -143,11 +143,13 @@ calls (`Runtime.submit`, `rate`, `connector_admin.*`); the API adds no second ru
 - **Bind:** `127.0.0.1` by default. A non-loopback `--host` refuses to start without `[serve] tls_cert` and
   `tls_key`. Every request's `Host` must be an allowed name (`localhost`, `127.0.0.1`, configured names), which
   stops DNS-rebinding pages from reaching the local API. No CORS; unsafe methods must carry a matching `Origin`.
-- **Every endpoint is authenticated**, including the static page's data calls; only `/login` is open.
+- **Every endpoint is authenticated**, including the static page's data calls; only `/login` and the app's code
+  (`/`, the screens' paths and `/app/…`, which hold no data) are open (plan 05b, Decision 2).
 - **Web session:** `ooat serve` prints a one-time login link (code in the URL fragment, posted by the page, valid
   5 minutes, single use) for the operator named in `[serve] operator`; `ooat login --operator NAME` prints one for
   another operator. Whoever holds the terminal is the operator, the same trust as the 04 CLI. The code becomes an
-  HttpOnly, SameSite=Strict cookie (Secure under TLS, 12 h) plus a CSRF token for unsafe methods.
+  HttpOnly, SameSite=Strict cookie (Secure under TLS, 12 h) plus a session key sent as `X-CSRF-Token` on every
+  request, reads too: a cookie is not bound to a port, the page's storage is (plan 05b, Decision 1).
 - **API tokens** for bots and scripts: `ooat tokens create --operator NAME --name telegram --scopes
   submit,read,answer,rate [--max-data-class internal] [--expires 90d]` prints a 256-bit token once; the ledger keeps
   only its SHA-256, compared in constant time. `ooat tokens revoke`. Sent as `Authorization: Bearer`.

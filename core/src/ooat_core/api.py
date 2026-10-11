@@ -47,6 +47,8 @@ MAX_BODY = 20 * 1024 * 1024  # design 05 §5: 413 TOO_LARGE above it
 SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
 LOOPBACK_NAMES = frozenset({"localhost", "127.0.0.1", "::1"})
 SESSION_COOKIE = "ooat_session"
+APP_TYPES = {".js": "text/javascript; charset=utf-8", ".mjs": "text/javascript; charset=utf-8",
+             ".css": "text/css; charset=utf-8"}
 SECURITY_HEADERS = {
     "Content-Security-Policy": "default-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
     "Referrer-Policy": "no-referrer", "X-Content-Type-Options": "nosniff", "X-Frame-Options": "DENY",
@@ -144,8 +146,10 @@ def principal(request: Request) -> Principal:
     session = server.sessions.get(cookie, now) if cookie else None
     if session is None:
         raise ApiError(401, "UNAUTHENTICATED", "sign in with the link `ooat login --operator <name>` prints")
-    if request.method not in SAFE_METHODS and not hmac.compare_digest(
-            request.headers.get("x-csrf-token", "").encode("utf-8"), session.csrf.encode("utf-8")):
+    # Every request of a cookie session carries its key, reads too: a cookie is not bound to a port, so another
+    # service on this host may receive it; the page keeps the key in storage bound to this origin, port included.
+    if not hmac.compare_digest(request.headers.get("x-csrf-token", "").encode("utf-8"),
+                               session.csrf.encode("utf-8")):
         raise ApiError(403, "CSRF", "missing or wrong X-CSRF-Token header")
     return Principal(session.operator, "web", frozenset(tokens.SCOPES), server.settings.session_cap)
 
@@ -183,6 +187,7 @@ def create_app(settings: ServeSettings, *, config: Config, registry: Registry, r
     _guards(app, settings)
     _errors(app)
     app.include_router(login_routes())
+    app.include_router(app_routes())
     app.include_router(session_routes(), prefix="/api/v1")
     from .endpoints import resource_routes  # endpoints.py builds on this module
 
@@ -270,7 +275,8 @@ class LoginIn(BaseModel):
 
 
 def login_routes() -> APIRouter:
-    """The sign-in page and the code exchange: the only routes without authentication."""
+    """The sign-in page and the code exchange: with the app's code (app_routes), the only routes without
+    authentication."""
     router = APIRouter()
     web = files("ooat_core") / "web"
 
@@ -298,6 +304,46 @@ def login_routes() -> APIRouter:
     return router
 
 
+def _app_files(folder, prefix: str = "") -> dict[str, tuple[bytes, str]]:
+    """Every script and style of web/app by its path, read once at start-up."""
+    found = {}
+    for entry in folder.iterdir():
+        if entry.is_dir():
+            found |= _app_files(entry, f"{prefix}{entry.name}/")
+        elif Path(entry.name).suffix in APP_TYPES:
+            found[prefix + entry.name] = (entry.read_bytes(), APP_TYPES[Path(entry.name).suffix])
+    return found
+
+
+def app_routes() -> APIRouter:
+    """The web app (05b): its shell for each screen and its files. Code only, no data, so no session is needed;
+    every data call the page makes is authenticated like any other client's. /app/ serves only the files found
+    at start-up: no path from the URL reaches the file system."""
+    router = APIRouter()
+    web = files("ooat_core") / "web"
+    shell = (web / "index.html").read_bytes()
+    app_files = _app_files(web / "app")
+
+    def page() -> Response:
+        return Response(shell, media_type="text/html; charset=utf-8")
+
+    for path in ("/", "/usage", "/connectors"):
+        router.add_api_route(path, page, methods=["GET"])
+
+    @router.get("/tasks/{task}")
+    def task_page(task: str) -> Response:  # the page reads the id from its address
+        return page()
+
+    @router.get("/app/{path:path}")
+    def app_file(path: str) -> Response:
+        found = app_files.get(path)
+        if found is None:
+            raise ApiError(404, "NOT_FOUND", "no such file")
+        return Response(found[0], media_type=found[1])
+
+    return router
+
+
 def session_routes() -> APIRouter:
     router = APIRouter()
 
@@ -309,13 +355,10 @@ def session_routes() -> APIRouter:
         return response
 
     @router.get("/me")
-    def me(request: Request, who: Principal = Depends(principal)) -> dict:
-        found = {"operator": who.operator, "channel": who.channel, "scopes": sorted(who.scopes),
-                 "max_data_class": who.max_data_class}
-        if who.channel == "web":  # the page needs it after a reload; no other origin can read this response
-            server = server_of(request)
-            found["csrf"] = server.sessions.get(request.cookies[SESSION_COOKIE], server.clock()).csrf
-        return found
+    def me(who: Principal = Depends(principal)) -> dict:
+        # Never the session key: it is the half of a web session the cookie alone lacks.
+        return {"operator": who.operator, "channel": who.channel, "scopes": sorted(who.scopes),
+                "max_data_class": who.max_data_class}
 
     @router.get("/status")
     def status(request: Request, who: Principal = Depends(scope("read"))) -> dict:

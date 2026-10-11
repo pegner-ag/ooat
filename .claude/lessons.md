@@ -39,3 +39,16 @@
   writer holds it fails busy too. `SqliteBackend` maps that, like a busy `BEGIN IMMEDIATE`, to `LedgerBusyError`.
 - FastAPI runs sync endpoints in a thread pool and iterates a sync streaming generator there too: the API keeps one
   ledger connection per thread (`threading.local`) and reads through `server.runtime()` at every step.
+- Web app (05b): a cookie is not bound to a port, so a web session needs its key (`X-CSRF-Token`, from
+  `localStorage["ooat.session"]`) on every request, GETs too; `/me` never returns it. `EventSource` cannot send
+  that header: the task page reads SSE through `fetch` (`api.js` `follow`). Downloads go through `fetch` and an
+  object URL for the same reason.
+- Web app checks run from `core/`: `npm run check` (tsc 6.0.3, `checkJs`, strict) and `npm test`
+  (`node --test "web-tests/*.test.mjs"`). `core/package.json` has `"type": "module"`, so Node loads the app's
+  `.js` files as ES modules. markdown-it is vendored (`app/vendor/`, SHA-256 pinned in `core/tests/test_web.py`)
+  and typed through `markdown-it.esm.min.d.mts`, which re-exports the npm package's types.
+- Vendored files are `-text` in `.gitattributes`: with `core.autocrlf=true` a Windows checkout would turn LF into
+  CRLF and break the pinned SHA-256 of `app/vendor/markdown-it.esm.min.mjs`.
+- On Windows a blob store under a long folder (e.g. a session scratchpad) passes the 260-character path limit:
+  `BlobStore.put` fails with `FileNotFoundError` on the `.partial` file. Run manual `ooat serve` checks from a short
+  folder.

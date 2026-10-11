@@ -86,6 +86,14 @@ API with web sessions and operator tokens, and the task runner (design 05a). Tea
 - `sessions.py` — one-time sign-in codes (hash-named files in `ooat-login/` beside the ledger) and web sessions
 - `api.py` — `create_app()`: the HTTP shell of `ooat serve` (Host, Origin, CSRF, 20 MB limit, sessions and tokens,
   typed errors, security headers, a log of method, path and status); `endpoints.py` — the REST resources
+- `web/` — the web app (plan 05b): `index.html` and `app/` (ES modules with JSDoc types, checked by
+  `tsc --noEmit --checkJs`, no build step; ADR 0016). `api.js` is the only door to the API: a web session is the
+  HttpOnly cookie plus the session key in `localStorage["ooat.session"]`, sent as `X-CSRF-Token` on every
+  request. The pure modules (`api`, `sse`, `format`, `i18n`, `markdown`, `rating`, `timeline`) are tested with
+  `node --test` in `core/web-tests/`. The screens (`views/`) and the cards build elements with `dom.js` `h()`:
+  never HTML from data, except Markdown rendered by the vendored markdown-it 15.0.2 with raw HTML off.
+  `api.py` `app_routes()` serves the shell for `/`, `/tasks/{id}`, `/usage` and `/connectors`, and the app's
+  files under `/app/`, without a session (code, no data).
 - `serve_cli.py` — `ooat serve`, `ooat login --operator`, `ooat tokens create | list | revoke`
 
 Schemas are read from `spec/schemas/` in the repository, so the package works from a checkout or an editable
