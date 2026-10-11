@@ -106,6 +106,21 @@ test("follow survives a dropped connection and goes on after the last event it s
   assert.deepEqual(waits, [1000, 2000]);
 });
 
+test("follow waits out a busy ledger", async () => {
+  /** @type {number[]} */
+  const waits = [];
+  /** @type {(() => Response)[]} */
+  const replies = [() => reply({error: {code: "LEDGER_BUSY", message: "busy"}}, 503),
+    () => stream([sse("evt_1", "TASK_CLOSED")])];
+  const api = createApi({storage, onSignedOut: () => assert.fail("signed out"),
+    sleep: async (ms) => { waits.push(ms); }, fetch: async () => /** @type {() => Response} */ (replies.shift())()});
+  /** @type {string[]} */
+  const seen = [];
+  await api.follow("tsk_1", null, (event) => seen.push(event.id), new AbortController().signal);
+  assert.deepEqual(seen, ["evt_1"]);
+  assert.deepEqual(waits, [1000]);
+});
+
 test("follow stops on the server's refusal instead of trying again", async () => {
   const api = createApi({storage, onSignedOut: () => {}, sleep: async () => assert.fail("no retry"),
     fetch: async () => reply({error: {code: "NOT_FOUND", message: "no such task"}}, 404)});

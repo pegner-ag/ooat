@@ -120,8 +120,8 @@ export function createApi(env) {
           }
         }
       } catch (error) {
-        // The server's refusal and leaving the screen end the timeline; a network drop does not.
-        if (error instanceof ApiError || signal.aborted) throw error;
+        // The server's refusal and leaving the screen end the timeline; a network drop or a busy server does not.
+        if ((error instanceof ApiError && error.status < 500) || signal.aborted) throw error;
         await sleep(wait);
         wait = Math.min(wait * 2, MAX_RECONNECT_MS);
         continue;
