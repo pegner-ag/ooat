@@ -13,5 +13,11 @@ if (!code) {
     body: JSON.stringify({code}),
   });
   const body = await response.json();
-  status.textContent = response.ok ? `Signed in as ${body.operator}.` : body.error.message;
+  if (response.ok) {
+    // The session's second half: storage is bound to this origin, port included; the cookie is not (design 05 §6).
+    localStorage.setItem("ooat.session", body.csrf);
+    location.replace("/");
+  } else {
+    status.textContent = body.error.message;
+  }
 }

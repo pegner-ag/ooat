@@ -144,8 +144,10 @@ def principal(request: Request) -> Principal:
     session = server.sessions.get(cookie, now) if cookie else None
     if session is None:
         raise ApiError(401, "UNAUTHENTICATED", "sign in with the link `ooat login --operator <name>` prints")
-    if request.method not in SAFE_METHODS and not hmac.compare_digest(
-            request.headers.get("x-csrf-token", "").encode("utf-8"), session.csrf.encode("utf-8")):
+    # Every request of a cookie session carries its key, reads too: a cookie is not bound to a port, so another
+    # service on this host may receive it; the page keeps the key in storage bound to this origin, port included.
+    if not hmac.compare_digest(request.headers.get("x-csrf-token", "").encode("utf-8"),
+                               session.csrf.encode("utf-8")):
         raise ApiError(403, "CSRF", "missing or wrong X-CSRF-Token header")
     return Principal(session.operator, "web", frozenset(tokens.SCOPES), server.settings.session_cap)
 
@@ -309,13 +311,10 @@ def session_routes() -> APIRouter:
         return response
 
     @router.get("/me")
-    def me(request: Request, who: Principal = Depends(principal)) -> dict:
-        found = {"operator": who.operator, "channel": who.channel, "scopes": sorted(who.scopes),
-                 "max_data_class": who.max_data_class}
-        if who.channel == "web":  # the page needs it after a reload; no other origin can read this response
-            server = server_of(request)
-            found["csrf"] = server.sessions.get(request.cookies[SESSION_COOKIE], server.clock()).csrf
-        return found
+    def me(who: Principal = Depends(principal)) -> dict:
+        # Never the session key: it is the half of a web session the cookie alone lacks.
+        return {"operator": who.operator, "channel": who.channel, "scopes": sorted(who.scopes),
+                "max_data_class": who.max_data_class}
 
     @router.get("/status")
     def status(request: Request, who: Principal = Depends(scope("read"))) -> dict:

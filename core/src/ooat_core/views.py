@@ -11,7 +11,8 @@ from collections.abc import Callable
 
 from .gate import GateSettings, gated_data_class
 from .pii import ORDER, higher_class
-from .rating import task_decisions
+from .rating import CHOICE_OPTIONS, task_decisions
+from .runner import resume_after
 from .runtime import CLOSED
 from .state import task_state
 
@@ -54,6 +55,7 @@ def task_summary(task: str, events: list[dict], data_class: str, cap: str | None
     decided, closed = _latest(events, "TOPOLOGY_DECIDED"), _latest(events, "TASK_CLOSED")
     visible = within(data_class, cap)
     estimates = [c["model_usd"] for c in decided["body"]["candidates"] if "model_usd" in c] if decided else []
+    paused = resume_after(events) if task_state(events) not in CLOSED else None  # the inbox's "stuck" list
     return {
         "task": task, "state": task_state(events), "data_class": data_class,
         "project": submitted["body"].get("project") if visible else None,
@@ -64,6 +66,7 @@ def task_summary(task: str, events: list[dict], data_class: str, cap: str | None
         "estimate_usd": estimates[0] if estimates else None,
         "submitted": submitted["ts"], "updated": events[-1]["ts"],
         "closed": closed["body"]["state"] if closed else None,
+        "resume_after": paused.isoformat().replace("+00:00", "Z") if paused else None,
     }
 
 
@@ -72,11 +75,13 @@ def task_detail(task: str, events: list[dict], data_class: str, cap: str | None,
     visible = within(data_class, cap)
     submitted, closed = next(e for e in events if e["type"] == "TASK_SUBMITTED"), _latest(events, "TASK_CLOSED")
     refs = list(dict.fromkeys(ref for e in events for ref in e["refs"] if ref.startswith("art_")))
+    names = dict(zip(submitted["refs"], submitted["body"].get("attachment_names", []))) if visible else {}
     artifacts = []
     for ref in refs:
         record = artifact_record(ref)
         artifacts.append({"ref": ref, "type": record["type"], "data_class": record["data_class"],
-                          "untrusted": record["untrusted"], "readable": within(record["data_class"], cap)})
+                          "untrusted": record["untrusted"], "readable": within(record["data_class"], cap),
+                          "name": names.get(ref)})
     detail = task_summary(task, events, data_class, cap)
     detail |= {
         "expected_output": submitted["body"].get("expected_output") if visible else None,
@@ -124,6 +129,9 @@ def rating_queue(tasks: dict[str, list[dict]], classes: dict[str, str], cap: str
             continue
         entry = task_summary(task, events, classes[task], cap)
         entry["decisions"] = [{"event": d.event, "question": d.question, "kind": d.kind, "answer": d.answer,
-                               "confidence": d.confidence, "disputed": d.disputed} for d in task_decisions(events)]
+                               "confidence": d.confidence, "disputed": d.disputed,
+                               "options": sorted(CHOICE_OPTIONS[d.question])
+                               if isinstance(d.answer, str) and d.question in CHOICE_OPTIONS else None}
+                              for d in task_decisions(events)]
         queue.append(entry)
     return queue

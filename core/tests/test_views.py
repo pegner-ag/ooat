@@ -2,9 +2,12 @@
 
 import json
 
+from runtime_fakes import ScriptedModel
 from test_runtime import Setup
 
+from ooat_core.connectors import ConnectorError
 from ooat_core.hil import open_requests
+from ooat_core.rating import CHOICE_OPTIONS
 from ooat_core.views import STUB_TEXT, by_task, hil_view, rating_queue, task_class, task_detail, task_summary, \
     timeline, within
 
@@ -81,3 +84,37 @@ def test_the_rating_queue_holds_closed_unrated_tasks_with_their_decisions(tmp_pa
         "options": [{"id": "a", "label": "A", "cost_usd": 0.0}, {"id": "b", "label": "B", "cost_usd": 0.0,
                                                                 "acts": False}]}}, "internal", "internal")
     assert request["question"] == "Q?" and request["options"][1]["acts"] is False
+
+
+def test_a_task_paused_by_a_provider_failure_says_when_it_is_tried_again(tmp_path):
+    setup = Setup(tmp_path, model=ScriptedModel(outages={("worker", 1): ConnectorError("UNAVAILABLE", "HTTP 529")}))
+    task = setup.submit()
+    setup.runtime.run(task)
+    tasks, found = classes(setup)
+    summary = task_summary(task, tasks[task], found[task], None)
+    assert summary["state"] == "RUNNING" and summary["resume_after"].endswith("Z")
+    setup.runtime.run(task)  # the provider is back
+    tasks, found = classes(setup)
+    assert task_summary(task, tasks[task], found[task], None)["resume_after"] is None
+
+
+def test_an_attachment_is_listed_with_its_file_name_within_the_cap(tmp_path):
+    setup = Setup(tmp_path)
+    task = setup.submit(files=[b"Draft of the release notes."], file_names=["notes.txt"])
+    setup.runtime.run(task)
+    tasks, found = classes(setup)
+    detail = task_detail(task, tasks[task], found[task], None, setup.ledger.artifact, [])
+    attachment = next(a for a in detail["artifacts"] if a["type"] == "attachment")
+    assert attachment["name"] == "notes.txt"
+    assert all(a["name"] is None for a in detail["artifacts"] if a["type"] != "attachment")
+
+
+def test_a_choice_decision_in_the_rating_queue_lists_what_it_may_be_corrected_to(tmp_path):
+    setup = Setup(tmp_path)
+    task = setup.submit()
+    setup.runtime.run(task)
+    tasks, found = classes(setup)
+    decisions = {d["question"]: d for d in rating_queue(tasks, found, None)[0]["decisions"]}
+    assert decisions["a5"]["options"] == sorted(CHOICE_OPTIONS["a5"])
+    assert decisions["a10"]["options"] == sorted(CHOICE_OPTIONS["a10"])
+    assert decisions["a1.1"]["options"] is None  # yes/no: corrected to the other answer
