@@ -33,7 +33,7 @@ export async function connectors(root, ctx) {
     const found = await ctx.api.json(`${base(id)}/card`, {signal: ctx.signal});
     const boxes = CLASSES.map((name) => h("input", {type: "checkbox", value: name}));
     const automation = h("input", {type: "checkbox"});
-    const regions = h("input", {type: "text", "aria-label": t("connectors.regions")});
+    const regions = h("input", {type: "text", placeholder: "eu, us-east", "aria-label": t("connectors.regions")});
     const noTraining = h("input", {type: "checkbox"});
     const responsibility = h("fieldset", {hidden: true}, h("legend", {}, t("connectors.responsibility")),
       h("label", {}, t("connectors.regions"), " ", regions), h("br"), h("label", {}, noTraining,
@@ -44,7 +44,7 @@ export async function connectors(root, ctx) {
     const status = h("p", {class: "status", role: "status"});
     panel.replaceChildren(h("h2", {}, id), h("pre", {class: "card"}, found.card), h("form", {onsubmit: async (event) => {
       event.preventDefault();
-      const listed = regions.value.split(",").map((region) => region.trim()).filter(Boolean);
+      const listed = regions.value.split(",").map((region) => region.trim().toLowerCase()).filter(Boolean);
       const body = {classes: boxes.filter((box) => box.checked).map((box) => box.value),
         automation: automation.checked, confirm: confirm.value.trim(),
         ...(responsible() ? {responsibility: {...(listed.length ? {processing_regions: listed} : {}),

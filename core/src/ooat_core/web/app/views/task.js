@@ -36,8 +36,19 @@ export async function taskPage(root, ctx, id) {
     drawResult(result, ctx, detail, viewing);
   }
 
+  /** @type {string | null} */
+  let cursor = null;
+  let following = false;
+
+  /** After the operator's own action: redraw, and once the stream has ended show what the action recorded. */
   function again() {
-    draw(true).catch((error) => report(actions, error));
+    draw(true).then(async () => {
+      if (following) return;
+      const more = await ctx.api.json(`${path}/events${cursor ? `?after=${encodeURIComponent(cursor)}` : ""}`,
+        {signal: ctx.signal});
+      timeline.append(...more.events.map(line));
+      cursor = more.next;
+    }).catch((error) => report(actions, error));
   }
 
   actions.addEventListener("focusout", (event) => {
@@ -49,12 +60,15 @@ export async function taskPage(root, ctx, id) {
   // The timeline is read before the task's state: a task that closes in between still sends its TASK_CLOSED.
   const first = await ctx.api.json(`${path}/events`, {signal: ctx.signal});
   timeline.replaceChildren(...first.events.map(line));
+  cursor = first.next;
   await draw();
   if (!first.events.some((/** @type {any} */ event) => event.type === "TASK_CLOSED")) {
-    ctx.api.follow(id, first.next, (event) => {
+    following = true;
+    ctx.api.follow(id, cursor, (event) => {
+      cursor = event.id;
       timeline.append(line(event));
       if (REDRAW_ON.includes(event.type)) draw().catch((error) => report(actions, error));
-    }, ctx.signal).catch((error) => report(actions, error));
+    }, ctx.signal).catch((error) => report(actions, error)).finally(() => { following = false; });
   }
 }
 
