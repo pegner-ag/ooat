@@ -86,7 +86,8 @@ function newTask(ctx) {
         project: project.value.trim(), goal: goal.value, data_class: dataClass.value,
         acceptance: acceptance.value.split("\n").map((line) => line.trim()).filter(Boolean),
         ...(budget.value ? {budget_usd: Number(budget.value)} : {}),
-        attachments: await Promise.all(chosen.map(async (file) => ({name: file.name, content_base64: await base64(file)}))),
+        attachments: await Promise.all(chosen.map(async (file) =>
+          ({name: file.name, content_base64: await base64(file)}))),
       };
       const created = await ctx.api.json("/tasks", {method: "POST", body, headers: {"Idempotency-Key": key}});
       key = crypto.randomUUID();

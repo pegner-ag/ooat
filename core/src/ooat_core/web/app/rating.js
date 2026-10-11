@@ -33,5 +33,6 @@ export function decisionText(decision) {
   const answer = typeof decision.answer === "number"
     ? `${decision.answer >= 0.5 ? t("common.yes") : t("common.no")} (${decision.answer.toFixed(2)})`
     : decision.answer;
-  return `${who} ${decision.question.toUpperCase()}: ${answer}${decision.disputed ? ` · ${t("rating.disputed")}` : ""}`;
+  const disputed = decision.disputed ? ` · ${t("rating.disputed")}` : "";
+  return `${who} ${decision.question.toUpperCase()}: ${answer}${disputed}`;
 }

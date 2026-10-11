@@ -33,7 +33,8 @@ export async function usage(root, ctx) {
       h("p", {}, t("usage.tasks", {closed: closed.closed, accepted: closed.accepted, rated: closed.rated,
         per: money(closed.cost_per_accepted_usd), delta: percent(closed.estimate_vs_actual)})),
       h("p", {}, t("usage.hil", {questions: hil.questions, answered: hil.answered, defaults: hil.defaults_applied,
-        wait: hil.median_wait_minutes === null ? "—" : t("time.minutes", {n: Math.round(hil.median_wait_minutes)})})));
+        wait: hil.median_wait_minutes === null ? "—"
+          : t("time.minutes", {n: Math.round(hil.median_wait_minutes)})})));
   }
 
   const again = () => { draw().catch((error) => report(body, error)); };

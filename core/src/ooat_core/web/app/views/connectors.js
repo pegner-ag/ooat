@@ -40,9 +40,11 @@ export async function connectors(root, ctx) {
         t("connectors.noTraining")));
     const responsible = () => boxes.some((box) => box.checked && RESPONSIBLE.includes(box.value));
     for (const box of boxes) box.addEventListener("change", () => { responsibility.hidden = !responsible(); });
-    const confirm = h("input", {type: "text", autocomplete: "off", placeholder: id, "aria-label": t("connectors.confirm")});
+    const confirm = h("input", {type: "text", autocomplete: "off", placeholder: id,
+      "aria-label": t("connectors.confirm")});
     const status = h("p", {class: "status", role: "status"});
-    panel.replaceChildren(h("h2", {}, id), h("pre", {class: "card"}, found.card), h("form", {onsubmit: async (event) => {
+    panel.replaceChildren(h("h2", {}, id), h("pre", {class: "card"}, found.card),
+      h("form", {onsubmit: async (event) => {
       event.preventDefault();
       const listed = regions.value.split(",").map((region) => region.trim().toLowerCase()).filter(Boolean);
       const body = {classes: boxes.filter((box) => box.checked).map((box) => box.value),
@@ -78,7 +80,8 @@ export async function connectors(root, ctx) {
       panel.replaceChildren(h("p", {class: "muted"}, t("connectors.noHooks")));
       return;
     }
-    const confirm = h("input", {type: "text", autocomplete: "off", placeholder: id, "aria-label": t("connectors.confirm")});
+    const confirm = h("input", {type: "text", autocomplete: "off", placeholder: id,
+      "aria-label": t("connectors.confirm")});
     const status = h("p", {class: "status", role: "status"});
     panel.replaceChildren(h("h2", {}, t("connectors.hooksOf", {id})),
       ...found.hooks.map((/** @type {any} */ hook) => h("details", {},

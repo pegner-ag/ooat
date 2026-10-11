@@ -76,7 +76,8 @@ export function ratingCard(entry, ctx, {compact, onDone}) {
 
   const accepted = radios(`accepted-${entry.task}`, [["yes", t("common.yes")], ["no", t("common.no")]]);
   const value = radios(`value-${entry.task}`, [["A", "A"], ["B", "B"], ["C", "C"]]);
-  const note = h("input", {type: "text", maxlength: "5000", placeholder: t("rating.note"), "aria-label": t("rating.note")});
+  const note = h("input", {type: "text", maxlength: "5000", placeholder: t("rating.note"),
+    "aria-label": t("rating.note")});
   const decisions = /** @type {import("./rating.js").Decision[]} */ (entry.decisions);
   const marks = decisions.map((decision, i) => {
     const mark = radios(`decision-${entry.task}-${i}`, [["right", t("rating.right")], ["wrong", t("rating.wrong")]]);
