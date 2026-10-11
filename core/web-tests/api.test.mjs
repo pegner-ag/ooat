@@ -103,7 +103,7 @@ test("follow survives a dropped connection and goes on after the last event it s
   await api.follow("tsk_1", null, (event) => seen.push(event.id), new AbortController().signal);
   assert.deepEqual(seen, ["evt_1", "evt_2"]);
   assert.deepEqual(cursors, [null, "evt_1", "evt_1"]);
-  assert.deepEqual(waits, [2000, 4000]);
+  assert.deepEqual(waits, [1000, 2000]);
 });
 
 test("follow stops on the server's refusal instead of trying again", async () => {

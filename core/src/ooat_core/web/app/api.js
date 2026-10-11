@@ -122,9 +122,11 @@ export function createApi(env) {
       } catch (error) {
         // The server's refusal and leaving the screen end the timeline; a network drop does not.
         if (error instanceof ApiError || signal.aborted) throw error;
+        await sleep(wait);
         wait = Math.min(wait * 2, MAX_RECONNECT_MS);
+        continue;
       }
-      await sleep(wait);
+      await sleep(RECONNECT_MS);  // the server ended the stream (after 15 minutes): go on
     }
   }
 
