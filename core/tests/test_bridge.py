@@ -1,0 +1,127 @@
+"""The reference chat bridge (sdk/python, design 05 §9) on `ooat serve` with its runner, as a chat sees it."""
+
+import threading
+
+import pytest
+from api_fakes import CRITERIA, PERSONAL_GOAL, Served, listening, secret, wait_for
+
+from ooat_client import Bridge, OoatClient
+from ooat_core import endpoints
+
+GOAL = "Shrň smlouvu pro jednatele."
+PERSONAL_ROUTE = ("public", "internal", "personal")  # the operator enabled the fake model for personal data
+
+
+class FakeChat:
+    """A chat that keeps what the bridge sent; the watch thread writes while the test reads."""
+
+    def __init__(self, id="chat-1"):
+        self.id, self.sent, self._lock = id, [], threading.Lock()
+
+    def send(self, text, buttons=()):
+        return self._keep({"text": text, "buttons": [list(row) for row in buttons]})
+
+    def send_file(self, name, content, caption):
+        return self._keep({"text": caption, "file": name, "content": content, "buttons": []})
+
+    def _keep(self, message):
+        with self._lock:
+            message["id"] = f"m{len(self.sent) + 1}"
+            self.sent.append(message)
+            return message["id"]
+
+    def find(self, prefix):
+        """The first message with a button whose data starts with `prefix`: "a:" a question, "r:" a result."""
+        with self._lock:
+            return next((m for m in self.sent if any(b.data.startswith(prefix) for row in m["buttons"]
+                                                     for b in row)), None)
+
+
+def button(message, label):
+    return next(b for row in message["buttons"] for b in row if b.label.startswith(label))
+
+
+def watching(bridge, task):
+    watcher = threading.Thread(target=bridge.watch, args=(task,), daemon=True)
+    watcher.start()
+    return watcher
+
+
+def finished(watcher):
+    watcher.join(30)
+    return not watcher.is_alive()
+
+
+@pytest.fixture(autouse=True)
+def fast_stream(monkeypatch):
+    monkeypatch.setattr(endpoints, "SSE_POLL_S", 0.05)
+
+
+def test_a_chat_message_becomes_a_task_with_a_question_a_result_a_rating_and_stats(tmp_path):
+    served, chat = Served(tmp_path, runner=True), FakeChat()
+    with listening(served) as url:
+        bridge = Bridge(OoatClient(url, secret(served.token())), chat, "docs")
+        task = bridge.on_message(GOAL, "7")  # no "Done when:" line: the Gate asks (rule A1)
+        assert bridge.on_message(GOAL, "7") == task  # the platform delivered the message twice
+        watcher = watching(bridge, task)
+        question = wait_for(lambda: chat.find("a:"))
+        assert question["text"].startswith("? The task has no acceptance criteria")
+        assert "UTC: Do not run." in question["text"]  # the deadline and the default on silence
+        assert button(question, "Clarify").label.endswith("★")  # the recommended option
+        assert bridge.on_button(button(question, "Clarify").data) == "Reply to the question with your text."
+        # The watch thread records the question just after the chat returned its id.
+        assert wait_for(lambda: bridge.on_reply(question["id"], CRITERIA[0])) == "Answer recorded."
+        assert "already answered" in bridge.on_button(button(question, "Run as it is").data)
+        assert finished(watcher)
+        texts = [m["text"] for m in chat.sent]
+        assert "Gate: T0" in texts and f"Answered: {CRITERIA[0]}" in texts and "Working on it (attempt 1)." in texts
+        assert served.model.documents[0] in texts
+        footer = chat.find("r:")
+        assert footer["text"].startswith("CLOSED_DONE · T") and " tokens · " in footer["text"]
+        assert bridge.on_button(button(footer, "Accepted B").data) == "Rating saved."
+        usage = bridge.stats()
+        assert "1 accepted" in usage and "gate" in usage and "prv.fake.api" in usage
+        # A restarted bot goes on from the last event the bridge handled: nothing is posted twice.
+        posted, last = len(chat.sent), bridge.last_event[task]
+        Bridge(OoatClient(url, secret(served.token())), chat, "docs").watch(task, after=last)
+        assert len(chat.sent) == posted
+    assert all(len(b.data.encode("utf-8")) <= 64 for m in chat.sent for row in m["buttons"] for b in row)
+    with served.ledger() as ledger:
+        assert len(ledger.events(types=["TASK_SUBMITTED"])) == 1
+        (rated,) = ledger.events(types=["TASK_RATED"])
+    assert rated["body"]["accepted"] is True and rated["body"]["value_class"] == "B"
+    assert rated["body"]["channel"].startswith("token:")
+
+
+def test_content_above_the_tokens_data_class_never_reaches_the_chat(tmp_path):
+    served, chat = Served(tmp_path, classes=PERSONAL_ROUTE, runner=True), FakeChat()
+    with listening(served) as url:
+        bridge = Bridge(OoatClient(url, secret(served.token(cap="internal"))), chat, "docs")
+        task = bridge.on_message(f"{PERSONAL_GOAL}\nDone when:\n- {CRITERIA[0]}", "8")  # the pre-scan finds personal
+        watcher = watching(bridge, task)
+        question = wait_for(lambda: chat.find("a:"))
+        assert question["text"].startswith("? Above this token's data class: open it in the web app.")
+        assert [b.label for row in question["buttons"] for b in row] == ["clarify ★", "run_as_is", "do_not_run"]
+        assert "above internal" in bridge.on_button(button(question, "run_as_is").data)
+        assert "above internal" in bridge.cancel(task)
+        web = served.login()
+        assert served.client.post(f"/api/v1/tasks/{task}/cancel", headers=web).status_code == 202
+        assert finished(watcher)
+        assert chat.find("r:")["text"].startswith("CANCELLED")
+    shown = " ".join(m["text"] + m.get("content", b"").decode("utf-8", "replace") for m in chat.sent).lower()
+    assert "novak" not in shown and "novák" not in shown
+
+
+def test_cancel_from_the_chat_closes_a_waiting_task_in_czech(tmp_path):
+    served, chat = Served(tmp_path, runner=True), FakeChat()
+    with listening(served) as url:
+        bridge = Bridge(OoatClient(url, secret(served.token())), chat, "docs", language="cs")
+        task = bridge.on_message(GOAL, "9")
+        watcher = watching(bridge, task)
+        question = wait_for(lambda: chat.find("a:"))
+        assert "UTC: Do not run." in question["text"] and question["text"].count("Když nikdo neodpoví do ") == 1
+        assert bridge.cancel(task) == "Zrušení vyžádáno."
+        assert finished(watcher)
+        assert chat.find("r:")["text"].startswith("CANCELLED")
+        assert button(chat.find("r:"), "Přijato A").data == f"r:{task}:A:y"
+        assert bridge.cancel(task) not in ("Zrušení vyžádáno.", "Zrušení už bylo vyžádáno.")  # closed now
