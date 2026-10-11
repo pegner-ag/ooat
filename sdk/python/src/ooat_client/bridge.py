@@ -26,6 +26,10 @@ class Button:
     data: str  # at most 64 bytes (Telegram's callback data); the platform hands it back: pass it to on_button
 
 
+class ChatFailed(Exception):
+    """The chat platform failed to send: the bot's own error, which `watch` raises instead of retrying it."""
+
+
 class Chat(Protocol):
     id: str  # unique per chat on the platform: with a message id it makes the task's idempotency key
 
@@ -81,6 +85,18 @@ class Bridge:
 
     def _t(self, name: str, **values) -> str:
         return self.texts[name].format(**values)
+
+    def _send(self, text: str, buttons: Sequence[Sequence[Button]] = ()) -> str:
+        try:
+            return self.chat.send(text, buttons)
+        except Exception as error:  # an OSError here is the platform's, not the OOAT server's: never retried
+            raise ChatFailed(str(error)) from error
+
+    def _send_file(self, name: str, content: bytes, caption: str) -> str:
+        try:
+            return self.chat.send_file(name, content, caption)
+        except Exception as error:
+            raise ChatFailed(str(error)) from error
 
     def _shown(self, value) -> str:
         """A text, or the notice in place of the server's stub for content above the token's data class."""
@@ -174,7 +190,7 @@ class Bridge:
                 return
             except (OoatError, OSError, http.client.HTTPException) as error:
                 if not retryable(error):
-                    self.chat.send(error.message if isinstance(error, OoatError) else str(error))
+                    self._send(error.message if isinstance(error, OoatError) else str(error))
                     return
             # The server went busy or away while an event was posted: post it again once it is back.
             self.client.pause(wait, stop)
@@ -185,14 +201,14 @@ class Bridge:
         if "redacted" in body and kind not in ("HIL_REQUEST", "TASK_CLOSED"):
             return  # above the token's data class: only the question and the result are posted
         if kind == "TOPOLOGY_DECIDED":
-            self.chat.send(self._t("gate", topology=body["topology"]))
+            self._send(self._t("gate", topology=body["topology"]))
         elif kind == "CONTRACT_ISSUED":
-            self.chat.send(self._t("working", n=attempts))
+            self._send(self._t("working", n=attempts))
         elif kind == "HIL_REQUEST":
             self._question(event["id"])
         elif kind == "HIL_RESPONSE":
             answer = body.get("choice") or body.get("text", "")
-            self.chat.send(self._t("defaulted" if body.get("default_applied") else "answered", answer=answer))
+            self._send(self._t("defaulted" if body.get("default_applied") else "answered", answer=answer))
         elif kind == "TASK_CLOSED":
             self._result(task, event)
 
@@ -205,12 +221,12 @@ class Bridge:
         deadline = _utc(request["deadline"]).strftime("%Y-%m-%d %H:%M UTC")
         asked, footer = f"? {self._shown(request['question'])}", self._t("default", deadline=deadline, option=default)
         if request["risk_class"] == "R3":  # never answered by a token (ADR 0016): no buttons
-            self.chat.send("\n".join([asked, self._t("r3"), footer]))
+            self._send("\n".join([asked, self._t("r3"), footer]))
             return
         buttons = [[Button(labels[o["id"]] + (" ★" if o["id"] == request["recommended"] else "")
                            + (f" · {money(o['cost_usd'])}" if o["cost_usd"] else ""), f"a:{request_id}:{o['id']}")]
                    for o in request["options"]]
-        self._questions[self.chat.send(f"{asked}\n{footer}", buttons)] = request_id
+        self._questions[self._send(f"{asked}\n{footer}", buttons)] = request_id
 
     def _result(self, task: str, closed: dict) -> None:
         detail, events = self.client.task(task), self.client.events(task)
@@ -223,12 +239,12 @@ class Bridge:
                          time=self._t("minutes", n=round(minutes)) if minutes >= 1 else self._t("under_a_minute"))
         document = self.client.artifact(result["artifacts"][0]) if result["artifacts"] else None
         if document is None:
-            self.chat.send(self._shown(result["summary"]))
+            self._send(self._shown(result["summary"]))
         elif document.content is None:
-            self.chat.send(self._t("redacted"))
+            self._send(self._t("redacted"))
         else:
             self._document(task, document.content)
-        self.chat.send(footer, [[Button(self._t("accepted", value=v), f"r:{task}:{v}:y") for v in VALUES],
+        self._send(footer, [[Button(self._t("accepted", value=v), f"r:{task}:{v}:y") for v in VALUES],
                                 [Button(self._t("rejected", value=v), f"r:{task}:{v}:n") for v in VALUES]])
 
     def _document(self, task: str, content: bytes) -> None:
@@ -237,7 +253,7 @@ class Bridge:
         except UnicodeDecodeError:
             parts = None
         if parts is None or len(parts) > self.max_parts:
-            self.chat.send_file(f"{task}.md" if parts is not None else task, content, self._t("attached"))
+            self._send_file(f"{task}.md" if parts is not None else task, content, self._t("attached"))
             return
         for part in parts:
-            self.chat.send(part)
+            self._send(part)

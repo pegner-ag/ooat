@@ -179,7 +179,8 @@ def test_follow_waits_out_a_busy_server_and_stops_on_a_refusal():
 
 
 def test_follow_ends_for_a_closed_task_and_on_a_revoked_token():
-    with Stub(stream(), (200, {"state": "CLOSED_DONE"})) as stub:  # the cursor was the task's last event
+    with Stub(stream(), (200, {"state": "CLOSED_DONE"}), (200, {"events": [], "next": "evt_7"})) as stub:
+        # the cursor was the task's last event
         client, waits = follower(stub)
         assert list(client.follow("tsk_1", after="evt_7")) == []
     assert waits == []
@@ -248,3 +249,12 @@ def test_a_certificate_that_fails_verification_is_raised_not_retried():
     client._opener.open = refuse
     with pytest.raises(urllib.error.URLError):
         list(client.follow("tsk_1"))
+
+
+def test_follow_still_yields_the_close_when_the_task_closed_as_the_stream_ended():
+    closed = event("evt_2", "TASK_CLOSED")
+    with Stub(stream(event("evt_1")), (200, {"state": "CLOSED_DONE"}), (200, {"events": [closed], "next": "evt_2"})) \
+            as stub:
+        client, waits = follower(stub)
+        assert [e["id"] for e in client.follow("tsk_1")] == ["evt_1", "evt_2"]
+    assert stub.requests[2]["path"] == "/api/v1/tasks/tsk_1/events?after=evt_1" and waits == []

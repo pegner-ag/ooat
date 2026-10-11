@@ -156,8 +156,12 @@ class OoatClient:
                         yield event
                         if event["type"] == "TASK_CLOSED":
                             return
-                if (stop and stop.is_set()) or self.task(task)["state"] in CLOSED:
-                    return  # stopped, or closed at or before the cursor: nothing more will come
+                if stop and stop.is_set():
+                    return
+                if self.task(task)["state"] in CLOSED:
+                    # It may have closed as the stream ended: what came after the cursor (its close) is still due.
+                    yield from self.events(task, cursor)
+                    return
                 self.pause(RECONNECT_S, stop)
                 continue
             except (OoatError, OSError, http.client.HTTPException) as error:

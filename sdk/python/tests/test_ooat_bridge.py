@@ -6,7 +6,7 @@ import threading
 import pytest
 from stub_http import Stub
 
-from ooat_client import Bridge, OoatClient
+from ooat_client import Bridge, ChatFailed, OoatClient
 from ooat_client.bridge import count, money, split_text
 from ooat_client.texts import TEXTS
 
@@ -111,7 +111,7 @@ def test_watch_waits_out_a_busy_or_vanished_server_and_still_posts_the_question(
     busy = {"error": {"code": "LEDGER_BUSY", "message": "the ledger is busy", "details": None}}
     waits, chat = [], Kept()
     with Stub(asked(), reset, asked(), (503, busy), asked(), (200, {"requests": [QUESTION]}),
-              (200, {"state": "CANCELLED"})) as stub:
+              (200, {"state": "CANCELLED"}), (200, {"events": [], "next": "evt_q"})) as stub:
         Bridge(OoatClient(stub.url, "secret", sleep=waits.append), chat, "docs").watch("tsk_1")
     assert waits == [1.0, 2.0]
     ((text, buttons),) = chat.sent  # the question once, no "the ledger is busy"
@@ -124,3 +124,15 @@ def test_watch_returns_at_once_when_it_is_stopped():
     with Stub() as stub:  # no replies: any request would fail the test
         Bridge(OoatClient(stub.url, "secret"), Silent(), "docs").watch("tsk_1", stop=stop)
     assert stub.requests == []
+
+
+def test_a_chat_that_fails_to_send_is_the_bots_error_not_retried():
+    class Broken(Kept):
+        def send(self, text, buttons=()):
+            raise OSError("the chat platform is down")
+
+    waits = []
+    with Stub(asked(), (200, {"requests": [QUESTION]})) as stub:
+        with pytest.raises(ChatFailed):
+            Bridge(OoatClient(stub.url, "secret", sleep=waits.append), Broken(), "docs").watch("tsk_1")
+    assert waits == []

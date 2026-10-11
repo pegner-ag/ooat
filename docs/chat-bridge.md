@@ -31,7 +31,8 @@ Methods called on a person's action return the text to show them, the server's r
 only `on_message` raises (`OoatError` when the server refuses the task, `ValueError` when the message has no goal),
 so the bot replies with the error's text. `watch` posts on its own and returns when the task is closed, after
 posting the reason when the server refuses (a revoked token, say), or when its `stop` event is set; a busy or
-vanished server is waited out, and the event it was posting is posted once the server is back. Button data is at
+vanished server is waited out, and the event it was posting is posted once the server is back; when the
+chat itself fails to send, `watch` raises `ChatFailed` (the bot's error, never retried). Button data is at
 most 64 bytes (Telegram's callback-data limit): `a:<request>:<option>` and `r:<task>:<A|B|C>:<y|n>`.
 The bridge writes English or Czech (`language="cs"`); option labels, states and the server's error messages come as
 the API gives them.
