@@ -1,0 +1,2 @@
+# Vendored files stay byte-identical to their pinned release (core/tests/test_web.py checks the hash).
+core/src/ooat_core/web/app/vendor/** -text
