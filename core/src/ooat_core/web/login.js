@@ -3,6 +3,7 @@
 const status = /** @type {HTMLElement} */ (document.getElementById("status"));
 const code = new URLSearchParams(location.hash.slice(1)).get("code");
 history.replaceState(null, "", location.pathname);
+export {};  // a module script (top-level await); tsc checks it as one
 
 if (!code) {
   status.textContent = "Open the link that `ooat login --operator <name>` printed in your terminal.";
