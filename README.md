@@ -80,7 +80,7 @@ variable names); prices and the data-class policy in `catalog/routing.json`.
 | `spec/` | Specification, manifesto; JSON Schemas of the OOA Spec |
 | `catalog/` | Capability, role, family, routing and provider cards (JSON) |
 | `core/` | `ooat-core` reference runtime (Python) |
-| `sdk/` | Python and TypeScript SDKs |
+| `sdk/` | Python client and reference chat bridge (`sdk/python`); TypeScript SDK later |
 | `adapters/` | Provider, store and notifier adapters |
 | `dashboard/` | Web dashboard (TypeScript) |
 | `evals/` | Capability eval sets and calibration tasks |

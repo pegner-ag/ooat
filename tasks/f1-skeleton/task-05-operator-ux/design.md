@@ -232,9 +232,9 @@ Minimal use in a bot that today calls an AI CLI:
 
 ```python
 ooat = OoatClient(base_url, token)              # token from the bot's own secret store, never in code
-task = ooat.submit(project=chat_project, goal=text, attachments=files, key=message_id)
-async for update in ooat.follow(task):           # state lines, questions, the result
-    await reply(render(update))                  # the bot keeps its own message format
+task = ooat.submit(project=chat_project, goal=text, attachments=files, key=f"{chat_id}:{message_id}")
+for update in ooat.follow(task):                 # synchronous (plan 05c): an async bot runs it in a thread
+    reply(render(update))                        # the bot keeps its own message format, or uses ooat_client.Bridge
 ```
 
 The bot itself must still check that the message comes from its allowed chat or user before calling OOAT: OOAT
