@@ -23,7 +23,14 @@ Decision records are in `docs/adr/`.
 
 ## First steps
 
-Create `ooat.toml` in your working folder (a relative ledger path resolves next to this file):
+`ooat serve` sets OOAT up on its first start: it writes `ooat.toml` and the ledger to your user data folder
+(`%APPDATA%\ooat`, `~/Library/Application Support/ooat` or `~/.local/share/ooat`; `OOAT_HOME` overrides it),
+signs you in as your OS account and opens Setup in the browser: your data, the connectors found, an optional token
+for a chat bot, and the inbox with a sample task. `ooat init` walks the same steps in the terminal. A command uses
+`--config` when given, else `./ooat.toml` when the folder has one, else the one in the data folder.
+
+To set the file up by hand, create `ooat.toml` in your working folder (a relative ledger path resolves next to
+this file):
 
 ```toml
 [ledger]

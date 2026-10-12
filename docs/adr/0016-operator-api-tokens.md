@@ -74,3 +74,11 @@ tokens, so who could act for whom must be in the audit log, and a chat platform 
   `ALREADY_ANSWERED`, `NOT_CLOSED`, `ALREADY_RATED`, `NOT_OPEN`, `HOOKS_CHANGED` (409); `LENGTH_REQUIRED` (411);
   `TOO_LARGE` (413); `SPEC_VALIDATION` (422); `LEDGER_BUSY` (503).
 - Decided by the owner on 2026-10-09 (design 05 §13); this record was accepted on 2026-10-10.
+
+## Amendment (plan 01c, approved by the owner 2026-10-12)
+
+A second way to issue a token: the Setup page of a web session (`POST /api/v1/setup/token`) and `ooat init`
+issue a chat bridge's token, always with the scopes `submit, read, answer, rate`, the cap `internal` and 90 days.
+An API token can never call it (403 `SCOPE`), so no token creates another. The event is the same
+`OPERATOR_TOKEN_ISSUED`, by the signed-in operator; the ledger does not record whether the CLI, `ooat init` or the
+Setup page issued it.

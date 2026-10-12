@@ -94,7 +94,12 @@ API with web sessions and operator tokens, and the task runner (design 05a). Tea
   never HTML from data, except Markdown rendered by the vendored markdown-it 15.0.2 with raw HTML off.
   `api.py` `app_routes()` serves the shell for `/`, `/tasks/{id}`, `/usage` and `/connectors`, and the app's
   files under `/app/`, without a session (code, no data).
-- `serve_cli.py` — `ooat serve`, `ooat login --operator`, `ooat tokens create | list | revoke`
+- `serve_cli.py` — `ooat serve`, `ooat login --operator`, `ooat tokens create | list | revoke`; the first
+  `ooat serve` without a config writes one with the defaults and signs in to Setup (plan 01c)
+- `setup.py` — first-run setup shared by `ooat init` and the browser: the data folder (`OOAT_HOME`, else the OS
+  user data folder), the config lookup and writer (never overwrites), connectors and API key variable names found,
+  the chat bridge's token
+- `init_cli.py` — `ooat init [--data] [--operator] [--yes]`: the setup steps in the terminal
 
 Schemas are read from `spec/schemas/` in the repository, so the package works from a checkout or an editable
 install (`pip install -e core`); packaging the schemas into the wheel is release work.

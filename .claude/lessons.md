@@ -58,3 +58,5 @@
 - Tests that need a real HTTP stream (the Python client's `follow`) run the app on uvicorn with a pre-bound socket
   on `127.0.0.1` port 0 (`api_fakes.listening`): `uvicorn.Server.run(sockets=[sock])` in a thread, stopped with
   `should_exit`. `Served(runner=True)` lets the app's lifespan start the runner thread.
+- `core/tests/conftest.py` sets `OOAT_HOME` to a temporary folder for every test: commands without `--config` fall
+  back to the user data folder's `ooat.toml` (plan 01c), and a test must never read or write the real one.

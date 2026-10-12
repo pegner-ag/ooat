@@ -8,6 +8,7 @@ import { inbox } from "./views/inbox.js";
 import { taskPage } from "./views/task.js";
 import { connectors } from "./views/connectors.js";
 import { usage } from "./views/usage.js";
+import { setup } from "./views/setup.js";
 
 const LANGUAGE_STORAGE = "ooat.language";
 const HEADER_REFRESH_MS = 30_000;
@@ -21,12 +22,14 @@ const ROUTES = [
   [/^\/tasks\/([A-Za-z0-9_]+)$/, (root, ctx, match) => taskPage(root, ctx, match[1])],
   [/^\/usage$/, (root, ctx) => usage(root, ctx)],
   [/^\/connectors$/, (root, ctx) => connectors(root, ctx)],
+  [/^\/setup$/, (root, ctx) => setup(root, ctx)],
 ];
 /** @type {[string, () => string][]} */
 const NAV = [
   ["/", () => t("nav.inbox")],
   ["/usage", () => t("nav.usage")],
   ["/connectors", () => t("nav.connectors")],
+  ["/setup", () => t("nav.setup")],
 ];
 
 const api = createApi({fetch: window.fetch.bind(window), storage: localStorage, onSignedOut: signedOut});

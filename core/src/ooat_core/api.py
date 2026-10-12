@@ -25,7 +25,7 @@ from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, ConfigDict, Field
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from . import hil, tokens, views
+from . import connector_admin, hil, setup, tokens, views
 from .artifacts import ArtifactStore
 from .backends import LedgerBusyError
 from .blobs import BlobStore
@@ -64,6 +64,7 @@ class ServeSettings:
     port: int = 8765
     hosts: tuple[str, ...] = ()  # further names the Host header may carry, e.g. the machine's DNS name
     tls: bool = False
+    config_path: str | None = None  # the ooat.toml it was started with, shown on the Setup page
 
     @property
     def loopback(self) -> bool:
@@ -269,6 +270,17 @@ def _errors(app: FastAPI) -> None:
         app.add_exception_handler(kind, handler(status, code))
 
 
+class TokenIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    name: str = "chat"
+
+
+def _web_only(who: Principal) -> None:
+    """Setup is the operator's own: a token never sees it, and never creates another token (ADR 0016)."""
+    if who.channel != "web":
+        raise ApiError(403, "SCOPE", "setup is done in the web app or with `ooat init`, never with an API token")
+
+
 class LoginIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
     code: str = Field(min_length=1, max_length=128)
@@ -327,7 +339,7 @@ def app_routes() -> APIRouter:
     def page() -> Response:
         return Response(shell, media_type="text/html; charset=utf-8")
 
-    for path in ("/", "/usage", "/connectors"):
+    for path in ("/", "/usage", "/connectors", "/setup"):
         router.add_api_route(path, page, methods=["GET"])
 
     @router.get("/tasks/{task}")
@@ -363,5 +375,29 @@ def session_routes() -> APIRouter:
     @router.get("/status")
     def status(request: Request, who: Principal = Depends(scope("read"))) -> dict:
         return {"runner": server_of(request).runner.status()}
+
+    @router.get("/setup")
+    def setup_state(request: Request, who: Principal = Depends(principal)) -> dict:
+        """What Setup shows (plan 01c): the data, who is signed in, the connectors found; variable names only."""
+        _web_only(who)
+        server = server_of(request)
+        states = {s.id: s.state for s in connector_admin.connector_statuses(
+            server.registry, server.runtime().ledger, server.clock().date(), server.config)}
+        return {"operator": who.operator, "config": server.settings.config_path,
+                "ledger": setup.shown_url(server.settings.ledger_url),
+                "connectors": [{"id": f.id, "access": f.access, "available": f.available, "detail": f.detail,
+                                "state": states.get(f.id, "not acknowledged"), "key_variables": list(f.key_variables),
+                                "secret_env": server.config.connectors.get(f.id, {}).get("secret_env")}
+                               for f in setup.found_connectors(server.registry)]}
+
+    @router.post("/setup/token", status_code=201)
+    def setup_token(body: TokenIn, request: Request, who: Principal = Depends(principal)) -> dict:
+        """A chat bridge's token (design 05 §10 step 4): in this reply only; the ledger keeps its SHA-256."""
+        _web_only(who)
+        server = server_of(request)
+        secret, event = setup.bridge_token(server.runtime().ledger, who.operator, server.clock(), body.name)
+        issued = event["body"]
+        return {"token": secret, "id": issued["token"], "name": issued["name"], "scopes": issued["scopes"],
+                "max_data_class": issued["max_data_class"], "expires": issued["expires"]}
 
     return router

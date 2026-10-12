@@ -8,7 +8,7 @@ runtime.py, rating.py and hil.py, which these commands call with the channel `cl
 import sqlite3
 from pathlib import Path, PurePosixPath, PureWindowsPath
 
-from . import hil, runner_lock
+from . import hil, runner_lock, setup
 from .artifacts import ArtifactStore
 from .blobs import BlobStore
 from .catalog import routing_path
@@ -84,7 +84,7 @@ def _blobs_dir(config) -> Path | None:
 
 def run(args, config, path, stdin, stdout, registry, routing, clock, ask) -> int:
     if config is None:
-        stdout.write(f"No {path} found: create one with a [ledger] url, or pass --config. Nothing was changed.\n")
+        stdout.write(setup.missing_config(path))
         return REFUSED
     blobs = _blobs_dir(config)
     if blobs is None:

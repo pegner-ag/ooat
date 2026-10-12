@@ -6,9 +6,8 @@ import sqlite3
 import sys
 import tomllib
 from datetime import datetime, timezone
-from pathlib import Path
 
-from . import connector_admin, serve_cli, task_cli
+from . import connector_admin, init_cli, serve_cli, setup, task_cli
 from .config import REGION, load_config
 from .connectors.registry import Registry
 from .ledger import Ledger
@@ -25,7 +24,7 @@ change. OOAT does not check it: you answer for it.
 
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="ooat", description="OOAT operator commands.")
-    parser.add_argument("--config", help="operator config (default: ./ooat.toml)")
+    parser.add_argument("--config", help="operator config (default: ./ooat.toml, else the one in OOAT's data folder)")
     commands = parser.add_subparsers(dest="command", required=True)
     connectors = commands.add_parser("connectors", help="list, inspect, enable or disable model connectors")
     actions = connectors.add_subparsers(dest="action", required=True)
@@ -55,6 +54,7 @@ def _parser() -> argparse.ArgumentParser:
     disable.add_argument("--reason", required=True)
     task_cli.add_commands(commands)
     serve_cli.add_commands(commands)
+    init_cli.add_commands(commands)
     return parser
 
 
@@ -88,6 +88,9 @@ def main(argv=None, stdin=None, stdout=None, registry: Registry | None = None, t
                 return REFUSED
             return task_cli.run(args, config, path, stdin, stdout, registry or Registry.discover(), routing, clock,
                                 _ask_or_end)
+        if args.command == "init":
+            return init_cli.run(args, setup.find_config(args.config), stdin, stdout, registry or Registry.discover(),
+                                today or clock().date(), clock, _ask_or_end, _enable)
         if args.command in ("serve", "login", "tokens"):
             config, path, refusal = _config(args)
             if refusal is not None:
@@ -106,7 +109,7 @@ def main(argv=None, stdin=None, stdout=None, registry: Registry | None = None, t
 
 def _config(args):
     """(config or None, path, refusal message or None)."""
-    path = Path(args.config or "ooat.toml")
+    path = setup.find_config(args.config)
     if args.config is not None and not path.exists():
         # An explicit config that is missing must not fall back to anything: a disable would land elsewhere.
         return None, path, f"Config file not found: {args.config}\n"
@@ -131,10 +134,10 @@ def _run(args, stdin, stdout, registry, today) -> int:
         return 0
     if config is None and args.action in ("enable", "disable", "approve-hooks"):
         # Without a config the ledger would be wherever the shell happens to be; state changes need the real one.
-        stdout.write(f"No {path} found: create one with a [ledger] url, or pass --config. Nothing was changed.\n")
+        stdout.write(setup.missing_config(path))
         return REFUSED
     if config is None:
-        stdout.write(f"No {path} found: connectors are shown without ledger state.\n")
+        stdout.write(f"No ooat.toml found ({path}): connectors are shown without ledger state.\n")
     url = config.ledger_url if config else "sqlite:///:memory:"
     try:
         ledger = Ledger.open(url)

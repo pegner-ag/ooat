@@ -1,7 +1,8 @@
 // Posts the one-time code from the link `ooat serve` or `ooat login` printed (design 05 §6). The code is in the URL
 // fragment, which the browser never sends to a server, and is removed from the address bar before anything else.
 const status = /** @type {HTMLElement} */ (document.getElementById("status"));
-const code = new URLSearchParams(location.hash.slice(1)).get("code");
+const params = new URLSearchParams(location.hash.slice(1));
+const code = params.get("code");
 history.replaceState(null, "", location.pathname);
 export {};  // a module script (top-level await); tsc checks it as one
 
@@ -17,7 +18,7 @@ if (!code) {
   if (response.ok) {
     // The session's second half: storage is bound to this origin, port included; the cookie is not (design 05 §6).
     localStorage.setItem("ooat.session", body.csrf);
-    location.replace("/");
+    location.replace(params.get("setup") === "1" ? "/setup" : "/");  // the first `ooat serve` opens Setup
   } else {
     status.textContent = body.error.message;
   }
