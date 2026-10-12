@@ -1,6 +1,6 @@
 # Project workspace: agents read and write the files of a project's folders — design
 
-**Epic:** f1-skeleton · **Sub-project:** 07 · **Status:** design for owner review
+**Epic:** f1-skeleton · **Sub-project:** 07 · **Status:** approved by the owner 2026-10-12
 **Spec:** `spec/ooat-specification.md` §2 (connectors), §7 (ledger), §8 (lifecycle, abstentions), §9 (risk classes,
 least privilege, untrusted content, sandbox); ADR 0010, ADR 0011, ADR 0012, ADR 0016, ADR 0017 (new);
 task runtime design (`../task-04-task-runtime/design.md`), operator UX design (`../task-05-operator-ux/design.md`)
@@ -256,5 +256,5 @@ changes nothing on disk; the operator can still revert later.
 - Direct writes in the project folders; commands only in a container (part 2, later).
 - Option A: OOAT's tools over MCP, confined to the folders; no built-in CLI tools.
 - Sections 3–7 approved in conversation; §8 (the limit question with four options) asked for by the owner.
-- Open for the owner on review: the default on silence for the limit question (`keep`, 48 h) and whether revert
-  needs a second confirmation tap.
+- On review (2026-10-12) the owner approved the design: the limit question defaults to `keep` after 48 h, and
+  revert asks for a second confirmation (web: a confirm step; chat: a second tap on "Yes, revert").

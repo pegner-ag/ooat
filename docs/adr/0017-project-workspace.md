@@ -1,6 +1,6 @@
 # ADR 0017 — Agents work on a project's folders through OOAT's own file tools
 
-**Status:** proposed · **Date:** 2026-10-12 · **Context:** a task worker turns text into a document: the
+**Status:** accepted · **Date:** 2026-10-12 · **Context:** a task worker turns text into a document: the
 subscription CLI connectors run in an empty temporary folder with their built-in tools switched off (`--tools ""`),
 so an agent never sees a file on disk (design 04). The owner wants tasks sent from Telegram or the web to work on
 the files of the chat's current project, read and write, directly in its folders (owner, 2026-10-12). Spec §9 names
@@ -42,4 +42,5 @@ code execution in a container (§9 point 3). Design: `tasks/f1-skeleton/task-07-
 - An agent writes the operator's real files without a copy or branch. The safety net is the journal, the stored
   originals and revert, not isolation; content in the files can still steer the agent within the granted folders.
 - The agent cannot run tests, so a change it makes is unverified by execution until containers exist.
-- Proposed with the design on 2026-10-12; accepted when the owner approves the design.
+- Decided by the owner on 2026-10-12 with design 07: `keep` is the default after 48 h, and revert asks for a
+  second confirmation.
