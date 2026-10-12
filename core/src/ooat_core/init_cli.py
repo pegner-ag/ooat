@@ -45,6 +45,7 @@ def run(args, path: Path, stdin, stdout, registry, today, clock, ask, enable) ->
     found = setup.found_connectors(registry)
     try:
         folder = Path(args.data or answer("Data folder for the ledger (SQLite) and files", str(setup.data_folder())))
+        folder = folder.expanduser().resolve()  # the ledger URL must not depend on the folder a command runs from
         operator = args.operator or answer("Your name, recorded on what you do", setup.operator_name())
         stdout.write("\nConnectors found:\n" + "".join(f"  {'●' if f.available else '○'} {f.id}: {f.detail}\n"
                                                          for f in found))

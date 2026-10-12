@@ -88,3 +88,11 @@ def test_init_cancelled_before_the_config_is_written_writes_nothing(ooat_home):
 def test_a_bad_name_is_refused_and_nothing_is_written(tmp_path, ooat_home):
     code, out = init("--data", str(tmp_path / "data"), "--operator", "default-on-silence", "--yes")
     assert code == 1 and "reserved" in out and not (ooat_home / "ooat.toml").exists()
+
+
+def test_a_relative_data_folder_is_the_one_under_the_current_folder(tmp_path, ooat_home):
+    code, out = init("--data", "mydata", "--operator", "Jana", answers="\nno\nno\n")  # no key, enable nothing, no token
+    assert code == 0, out
+    config = load_config(ooat_home / "ooat.toml")
+    assert config.ledger_url == f"sqlite:///{(tmp_path / 'mydata' / 'ooat-ledger.sqlite').as_posix()}"
+    assert events(ooat_home / "ooat.toml", "OPERATOR_TOKEN_ISSUED") == []
