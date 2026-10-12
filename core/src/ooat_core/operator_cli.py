@@ -7,7 +7,7 @@ import sys
 import tomllib
 from datetime import datetime, timezone
 
-from . import connector_admin, serve_cli, setup, task_cli
+from . import connector_admin, init_cli, serve_cli, setup, task_cli
 from .config import REGION, load_config
 from .connectors.registry import Registry
 from .ledger import Ledger
@@ -54,6 +54,7 @@ def _parser() -> argparse.ArgumentParser:
     disable.add_argument("--reason", required=True)
     task_cli.add_commands(commands)
     serve_cli.add_commands(commands)
+    init_cli.add_commands(commands)
     return parser
 
 
@@ -87,6 +88,9 @@ def main(argv=None, stdin=None, stdout=None, registry: Registry | None = None, t
                 return REFUSED
             return task_cli.run(args, config, path, stdin, stdout, registry or Registry.discover(), routing, clock,
                                 _ask_or_end)
+        if args.command == "init":
+            return init_cli.run(args, setup.find_config(args.config), stdin, stdout, registry or Registry.discover(),
+                                today or clock().date(), clock, _ask_or_end, _enable)
         if args.command in ("serve", "login", "tokens"):
             config, path, refusal = _config(args)
             if refusal is not None:
