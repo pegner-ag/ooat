@@ -15,6 +15,9 @@ attachments, cancel, the rating card), Usage (spend, calls and tokens by role an
 consequences card, enable with a typed confirmation, disable, hooks). English or Czech. The app is plain
 JavaScript served from the `ooat-core` wheel; the operator needs no Node.
 
+The first `ooat serve` sets OOAT up in the user data folder and opens Setup in the browser (data, the operator,
+the connectors found, a chat bridge token, a sample task); `ooat init` walks the same steps in the terminal.
+
 Bots use the Python client `ooat-client` (`sdk/python`, standard library only) and its reference chat bridge: a
 chat message becomes a task, questions come with buttons, the result with a rating, and `/stats` shows usage. The
 contract is in `docs/chat-bridge.md`.
@@ -57,7 +60,9 @@ Chosen by decision (`docs/adr/`), not yet used in code:
 - `tasks/` — open work (To-be), one folder per task
 
 ## Configuration
-`ooat.toml` (operator preferences: ledger URL, per-tier pins, connector settings, `[policy]` limits on countries
+`ooat.toml` is `--config`, else `./ooat.toml`, else the one in OOAT's data folder (`OOAT_HOME`, else the OS user
+data folder); setup writes it there and never overwrites one (plan 01c). `ooat.toml` holds
+(operator preferences: ledger URL, per-tier pins, connector settings, `[policy]` limits on countries
 and personal-data regions; secrets only as environment variable names). Connector enablement is ledger state
 (`ADAPTER_ACKNOWLEDGED`, `ADAPTER_DISABLED`, ADR 0010), written by `ooat connectors enable | disable` after the
 operator has read the connection consequences card; for client or personal data the operator also takes
