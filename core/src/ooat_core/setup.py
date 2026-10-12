@@ -31,7 +31,7 @@ ENV_NAME = re.compile(r"^[A-Z][A-Z0-9_]*$")  # the names ooat.toml accepts for s
 def data_folder(environ=os.environ, platform: str = sys.platform, home: Path | None = None) -> Path:
     """OOAT's folder: OOAT_HOME when set, else the OS user data directory (design 05 §10)."""
     if environ.get("OOAT_HOME"):
-        return Path(environ["OOAT_HOME"])
+        return Path(environ["OOAT_HOME"]).expanduser().resolve()  # the config's relative paths resolve next to it
     home = home or Path.home()
     if platform == "win32":
         return Path(environ.get("APPDATA") or home / "AppData" / "Roaming") / "ooat"

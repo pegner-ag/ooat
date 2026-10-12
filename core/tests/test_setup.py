@@ -114,3 +114,8 @@ def test_a_bridge_token_may_submit_read_answer_and_rate_up_to_internal(tmp_path)
 def test_a_ledger_url_is_shown_without_its_credentials():
     assert setup.shown_url("postgresql://jana:s3cret@db.local:5432/ooat") == "postgresql://***@db.local:5432/ooat"
     assert setup.shown_url("sqlite:///C:/Users/jana/ooat-ledger.sqlite") == "sqlite:///C:/Users/jana/ooat-ledger.sqlite"
+
+
+def test_a_relative_ooat_home_is_the_folder_under_the_current_one(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    assert setup.data_folder({"OOAT_HOME": "rel"}, "win32", tmp_path) == tmp_path / "rel"
