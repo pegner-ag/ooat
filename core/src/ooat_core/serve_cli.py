@@ -8,7 +8,7 @@ import re
 import sqlite3
 import webbrowser
 
-from . import runner_lock, tokens
+from . import runner_lock, setup, tokens
 from .catalog import routing_path
 from .connectors.registry import Registry
 from .ledger import Ledger
@@ -52,7 +52,7 @@ def add_commands(commands) -> None:
 
 def run(args, config, path, stdin, stdout, clock, ask, registry=None, routing=None) -> int:
     if config is None:
-        stdout.write(f"No {path} found: create one with a [ledger] url, or pass --config. Nothing was changed.\n")
+        stdout.write(setup.missing_config(path))
         return REFUSED
     if args.command == "serve":
         return _serve(args, config, stdout, clock, registry, routing)
