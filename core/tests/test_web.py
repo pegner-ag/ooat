@@ -36,7 +36,7 @@ def test_html_files_have_no_inline_script_handler_or_style():
 
 def test_the_app_shell_is_served_for_each_screen_without_a_session(tmp_path):
     served = Served(tmp_path)
-    for path in ("/", "/tasks/tsk_01ABC", "/usage", "/connectors"):
+    for path in ("/", "/tasks/tsk_01ABC", "/usage", "/connectors", "/setup"):
         response = served.client.get(path)
         assert response.status_code == 200 and response.headers["content-type"].startswith("text/html"), path
         assert '<script type="module" src="/app/app.js">' in response.text

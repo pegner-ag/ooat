@@ -70,6 +70,12 @@ function newTask(ctx) {
   const submit = h("button", {type: "submit"}, t("new.submit"));
   const status = h("p", {class: "status", role: "status"});
   let key = crypto.randomUUID();  // one Idempotency-Key per task typed in: a double click or a retry makes one task
+  if (new URLSearchParams(location.search).has("sample")) {  // Setup's last step: filled in, sent only on Submit
+    goal.value = t("sample.goal");
+    acceptance.value = t("sample.acceptance");
+    project.value = "sample";
+    history.replaceState(null, "", "/");
+  }
 
   /** @param {Event} event */
   async function send(event) {
