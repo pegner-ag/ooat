@@ -10,6 +10,7 @@ import webbrowser
 
 from . import runner_lock, setup, tokens
 from .catalog import routing_path
+from .config import load_config
 from .connectors.registry import Registry
 from .ledger import Ledger
 from .routing import load_routing
@@ -51,11 +52,15 @@ def add_commands(commands) -> None:
 
 
 def run(args, config, path, stdin, stdout, clock, ask, registry=None, routing=None) -> int:
+    first = config is None and args.command == "serve" and args.config is None
+    if first:
+        registry = registry or Registry.discover()
+        config = first_run(path, registry, stdout)
     if config is None:
         stdout.write(setup.missing_config(path))
         return REFUSED
     if args.command == "serve":
-        return _serve(args, config, stdout, clock, registry, routing)
+        return _serve(args, config, path, stdout, clock, registry, routing, first)
     if args.command == "login":
         return _login(args, config, stdout, clock)
     try:
@@ -75,7 +80,22 @@ def run(args, config, path, stdin, stdout, clock, ask, registry=None, routing=No
 
 # `ooat serve` and `ooat login` ------------------------------------------------------------------------------------
 
-def serve_settings(config, host: str | None = None, port: int | None = None):
+def first_run(path, registry, stdout):
+    """The first `ooat serve` without a config (design 05 §1, §10): write one with the defaults and go on, so the
+    browser can take over: the user data folder, the OS account as the operator, API keys found by name."""
+    folder = setup.data_folder()
+    text = setup.config_text(folder, setup.operator_name(),
+                             setup.default_secret_envs(setup.found_connectors(registry)))
+    folder.mkdir(parents=True, exist_ok=True)
+    try:
+        setup.write_config(path, text)
+    except FileExistsError:  # another first start wrote it meanwhile: use that one
+        return load_config(path)
+    stdout.write(f"First run: OOAT keeps its data in {folder} and its settings in {path}.\n")
+    return load_config(path)
+
+
+def serve_settings(config, host: str | None = None, port: int | None = None, config_path=None):
     """(ServeSettings, None) from [serve] and the command line, or (None, why it cannot serve)."""
     from .api import ServeSettings
 
@@ -84,27 +104,29 @@ def serve_settings(config, host: str | None = None, port: int | None = None):
         return None, "`ooat serve` needs a ledger file on a local disk ([ledger] url = \"sqlite:///...\").\n"
     settings = ServeSettings(ledger_url=config.ledger_url, blobs_dir=blobs, operator=serve.get("operator"),
                              host=host or serve.get("host", "127.0.0.1"), port=port or serve.get("port", DEFAULT_PORT),
-                             hosts=tuple(serve.get("hosts", [])), tls="tls_cert" in serve)
+                             hosts=tuple(serve.get("hosts", [])), tls="tls_cert" in serve,
+                             config_path=str(config_path) if config_path is not None else None)
     if not settings.loopback and not settings.tls:  # design 05 §6: beyond loopback only with TLS
         return None, (f"Serving on {settings.host} lets other machines reach OOAT: set [serve] tls_cert and tls_key "
                       "first. Nothing was started.\n")
     return settings, None
 
 
-def sign_in_link(settings, code: str) -> str:
-    """The code goes in the fragment, which the browser never sends to a server."""
+def sign_in_link(settings, code: str, setup: bool = False) -> str:
+    """The code goes in the fragment, which the browser never sends to a server; `setup` opens Setup after it."""
     host = settings.hosts[0] if settings.hosts else "127.0.0.1" if settings.loopback else settings.host
     host = f"[{host}]" if ":" in host else host
-    return f"{'https' if settings.tls else 'http'}://{host}:{settings.port}/login#code={code}"
+    return f"{'https' if settings.tls else 'http'}://{host}:{settings.port}/login#code={code}" \
+        + ("&setup=1" if setup else "")
 
 
-def _serve(args, config, stdout, clock, registry, routing) -> int:
+def _serve(args, config, path, stdout, clock, registry, routing, first=False) -> int:
     """The API, the sign-in page and the runner until Ctrl+C, holding the runner lock all the while."""
     import uvicorn
 
     from .api import create_app
 
-    settings, refusal = serve_settings(config, args.host, args.port)
+    settings, refusal = serve_settings(config, args.host, args.port, path)
     if refusal:
         stdout.write(refusal)
         return REFUSED
@@ -121,7 +143,7 @@ def _serve(args, config, stdout, clock, registry, routing) -> int:
                      "local disk. Stop with Ctrl+C.\n")
         if settings.operator:
             link = sign_in_link(settings, issue_login_code(login_folder(config.ledger_url), settings.operator,
-                                                           clock()))
+                                                           clock()), setup=first)
             stdout.write(f"Sign in as {settings.operator} (valid 5 minutes, once): {link}\n")
             if not args.no_browser:
                 webbrowser.open(link)

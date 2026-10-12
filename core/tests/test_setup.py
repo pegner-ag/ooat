@@ -70,7 +70,8 @@ def test_the_default_operator_is_the_os_account_or_operator(monkeypatch):
 
 def test_key_variables_are_names_of_set_variables_of_the_vendor():
     environ = {"ANTHROPIC_API_KEY": "sk-1", "ANTHROPIC_TOKEN": "  ", "ANTHROPIC_MODEL": "opus",
-               "OPENAI_API_KEY": "sk-2", "ANTHROPIC_ADMIN_KEY": "sk-3", "anthropic_old_key": "sk-4"}  # lower case: not a name ooat.toml accepts
+               "OPENAI_API_KEY": "sk-2", "ANTHROPIC_ADMIN_KEY": "sk-3",
+               "anthropic_old_key": "sk-4"}  # lower case: not a name ooat.toml accepts
     assert setup.key_variables(fake_manifest("prv.anthropic.api"), environ) == ["ANTHROPIC_ADMIN_KEY",
                                                                                 "ANTHROPIC_API_KEY"]
 
@@ -108,3 +109,8 @@ def test_a_bridge_token_may_submit_read_answer_and_rate_up_to_internal(tmp_path)
     assert secret and secret not in str(event)
     assert event["body"]["scopes"] == ["submit", "read", "answer", "rate"]
     assert event["body"]["max_data_class"] == "internal" and event["body"]["name"] == "chat"
+
+
+def test_a_ledger_url_is_shown_without_its_credentials():
+    assert setup.shown_url("postgresql://jana:s3cret@db.local:5432/ooat") == "postgresql://***@db.local:5432/ooat"
+    assert setup.shown_url("sqlite:///C:/Users/jana/ooat-ledger.sqlite") == "sqlite:///C:/Users/jana/ooat-ledger.sqlite"

@@ -105,3 +105,48 @@ def test_serve_settings_are_checked(serve, message):
 def test_tls_paths_are_resolved_against_the_config_folder(tmp_path):
     config = load_config(write_config(tmp_path, 'tls_cert = "tls/cert.pem"\ntls_key = "tls/key.pem"\n'))
     assert config.serve["tls_cert"] == (tmp_path / "tls" / "cert.pem").as_posix()
+
+
+def test_the_first_serve_sets_up_and_signs_in_to_the_setup_page(tmp_path, monkeypatch, started, ooat_home):
+    import getpass
+    import webbrowser
+
+    monkeypatch.chdir(tmp_path)  # no ooat.toml here, none in OOAT_HOME yet
+    monkeypatch.setattr(getpass, "getuser", lambda: "jana")
+    opened = []
+    monkeypatch.setattr(webbrowser, "open", opened.append)
+    first = io.StringIO()
+    registry = Registry([ScriptedModel(), decisions()])
+    code = main(["serve"], stdout=first, registry=registry, routing=RoutingPolicy(routing_document()),
+                clock=lambda: NOW)
+    assert code == 0 and len(started) == 1, first.getvalue()
+    config = load_config(ooat_home / "ooat.toml")
+    assert config.serve["operator"] == "jana"
+    assert config.ledger_url == f"sqlite:///{(ooat_home / 'ooat-ledger.sqlite').as_posix()}"
+    assert "First run" in first.getvalue() and str(ooat_home) in first.getvalue()
+    (link,) = opened
+    assert "/login#code=" in link and link.endswith("&setup=1")
+    assert started[0]["app"].state.server.settings.config_path == str(ooat_home / "ooat.toml")
+    written = (ooat_home / "ooat.toml").read_bytes()
+    again = io.StringIO()
+    assert main(["serve", "--no-browser"], stdout=again, registry=registry, routing=RoutingPolicy(routing_document()),
+                clock=lambda: NOW) == 0
+    assert "First run" not in again.getvalue() and "&setup=1" not in again.getvalue()
+    assert (ooat_home / "ooat.toml").read_bytes() == written
+
+
+def test_a_named_config_that_is_missing_is_still_refused(tmp_path, started, ooat_home):
+    stdout = io.StringIO()
+    assert main(["--config", str(tmp_path / "missing.toml"), "serve"], stdout=stdout) == 1
+    assert started == [] and not (ooat_home / "ooat.toml").exists()
+
+
+def test_a_first_serve_that_finds_a_config_written_meanwhile_uses_it(tmp_path, monkeypatch, ooat_home):
+    from ooat_core import serve_cli
+
+    monkeypatch.chdir(tmp_path)
+    path = ooat_home / "ooat.toml"
+    path.write_text('[ledger]\nurl = "sqlite:///other.sqlite"\n', encoding="utf-8")  # another first start won the race
+    config = serve_cli.first_run(path, Registry([ScriptedModel()]), io.StringIO())
+    assert config.ledger_url.endswith("other.sqlite")
+    assert path.read_text(encoding="utf-8") == '[ledger]\nurl = "sqlite:///other.sqlite"\n'

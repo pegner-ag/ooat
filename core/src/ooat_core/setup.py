@@ -12,6 +12,7 @@ import re
 import sys
 import tomllib
 from dataclasses import dataclass
+from urllib.parse import urlsplit, urlunsplit
 from datetime import datetime
 from pathlib import Path
 
@@ -51,6 +52,14 @@ def find_config(explicit: str | None, cwd: Path | None = None, environ=os.enviro
 def missing_config(path: Path) -> str:
     return (f"No ooat.toml found ({path}): run `ooat init`, or `ooat serve` to set OOAT up in the browser. "
             "Nothing was changed.\n")
+
+
+def shown_url(url: str) -> str:
+    """A ledger URL as it may be shown: a user name and password in it become ***."""
+    parts = urlsplit(url)
+    if "@" not in parts.netloc:
+        return url
+    return urlunsplit(parts._replace(netloc="***@" + parts.netloc.rsplit("@", 1)[1]))
 
 
 def operator_name() -> str:
