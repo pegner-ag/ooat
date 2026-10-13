@@ -315,3 +315,12 @@ def test_a_refused_event_inside_the_transaction_leaves_the_ledger_writable(ledge
         ledger.append(answer)  # refused inside the write transaction, which must be rolled back
     ledger.append(new_event("HIL_RESPONSE", task=task, actor=HIL, body={"request": request["id"], "choice": "hold"}))
     assert len(ledger.events(task=task)) == 2
+
+
+def test_a_task_is_reverted_once():
+    ledger = Ledger.open("sqlite:///:memory:")
+    task = new_id("tsk")
+    body = {"project": "bots", "restored": [], "skipped": [], "kept": []}
+    ledger.append(new_event("WORKSPACE_REVERTED", task=task, actor={"kind": "hil", "id": "operator"}, body=body))
+    with pytest.raises(SpecValidationError, match="already reverted"):
+        ledger.append(new_event("WORKSPACE_REVERTED", task=task, actor={"kind": "hil", "id": "operator"}, body=body))
