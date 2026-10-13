@@ -18,6 +18,7 @@ written for a sub-project only when the ones it depends on are done, so it can u
 | 04 | Task runtime T0–T2 — design: `task-04-task-runtime/design.md` (ADR 0011). Plans: 04a decision layer (done), 04b Topology Gate T0–T2 (done), 04c `ooat task` / `ooat hil` commands, worker, acceptance, closing, rating (done); owner decisions in ADR 0014; 04d estimate from observed runs (done) | 01–03, 03e | done |
 | 03f | Antigravity CLI connector (`agy`, Google login; replaced Gemini CLI) — design and plan: `task-03f-antigravity-cli/` (`plan-03f.md`) | 03 | done |
 | 05 | REST intake and Telegram bot (tasks per project), HIL notifier with one-tap answers, dashboard: HIL queue, rating queue, exceptions, tasks. The operator's everyday work (submit, answer, rate) must not need the command line: the owner found the `ooat` commands very unfriendly (2026-10-05). Design: `task-05-operator-ux/design.md` (`ooat serve`, web app, chat bridge; plans 05a–05c, with 01c) | 04 | design |
+| 07 | Project workspace: agents read and write the files of a project's folders through OOAT's own MCP file tools (no commands; containers later) — design: `task-07-project-workspace/design.md` (ADR 0017); plans 07a–07c | 04, 05 | 07a plan |
 | 06 | Baseline: eval runner, 5 seed tasks at T2 with cost, HIL hours and acceptance | 02–05 | later |
 
 ## Constraints carried into later sub-projects
