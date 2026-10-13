@@ -298,3 +298,28 @@ def test_task_revert_asks_and_writes_the_originals_back(tmp_path):
     code, out = ooat(env, "task", "revert", task, "--operator", "Martin", answers="y\n")
     assert code == 0 and "Restored 1 file" in out
     assert (root / "src" / "bot.py").read_text(encoding="utf-8") == "def main():\n    return 1\n"
+
+
+def test_answering_revert_asks_first(tmp_path):
+    root = tmp_path / "Bots"
+    (root / "src").mkdir(parents=True)
+    (root / "src" / "bot.py").write_bytes(b"def main():\n    return 1\n")
+    (tmp_path / "ooat.toml").write_text(
+        f'[ledger]\nurl = "sqlite:///ledger.sqlite"\n\n[projects.bots]\nfolders = ["{root.as_posix()}"]\n'
+        'write = true\nmax_operations = 2\n', encoding="utf-8")
+    edit = ("edit_file", {"path": "Bots/src/bot.py", "old": "1", "new": "2"})
+    read = ("read_file", {"path": "Bots/src/bot.py"})
+    model, jev = WorkspaceModel([[read, edit, read]]), decisions()
+    ledger = Ledger.open(f"sqlite:///{(tmp_path / 'ledger.sqlite').as_posix()}")
+    for connector in (model, jev):
+        acknowledge(ledger, connector)
+    ledger.close()
+    env = {"config": tmp_path / "ooat.toml", "registry": Registry([model, jev])}
+    code, out = ooat(env, "task", "submit", "--operator", "Martin", "--goal", "Oprav bot.", "--project", "bots",
+                     "--acceptance", "main vrací 2")
+    request = out.split("Question ", 1)[1].split(" ", 1)[0]
+    code, out = ooat(env, "hil", "answer", request, "--operator", "Martin", "--choice", "revert", answers="n\n")
+    assert code == 1 and "Nothing was answered." in out
+    assert (root / "src" / "bot.py").read_text(encoding="utf-8").endswith("return 2\n")
+    code, out = ooat(env, "hil", "answer", request, "--operator", "Martin", "--choice", "revert", answers="y\n")
+    assert code == 0 and (root / "src" / "bot.py").read_text(encoding="utf-8").endswith("return 1\n")

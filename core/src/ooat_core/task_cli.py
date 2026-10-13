@@ -291,6 +291,12 @@ def _hil_answer(args, ledger, runtime, stdin, stdout, ask) -> int:
         raise ValueError("give --choice, --text or both")
     if args.choice == "narrow_scope" and not (args.text or "").strip():
         raise ValueError("narrow_scope needs the narrowed scope as --text")
+    if args.choice == "revert":  # writing the originals back takes a second confirmation (design 07 §12)
+        question = ("Revert the project files this task changed? A file changed since is skipped; created files "
+                    "stay. [y/N] ")
+        if (ask(question, stdin, stdout) or "").strip().lower() not in ("y", "yes"):
+            stdout.write("Nothing was answered.\n")
+            return REFUSED
     response = hil.answer(ledger, runtime, args.request, operator=args.operator, choice=args.choice, text=args.text,
                           channel="cli")
     stdout.write(f"Answered {args.request}.\n")
