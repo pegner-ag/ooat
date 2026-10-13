@@ -462,3 +462,13 @@ def test_a_project_above_the_tokens_cap_is_refused_at_intake(tmp_path):
     response = served.client.post("/api/v1/tasks", headers=served.token(),
                                   json={"project": "bots", "goal": "Oprav bot."})
     assert (response.status_code, response.json()["error"]["code"]) == (403, "DATA_CLASS_ABOVE_TOKEN")
+
+
+def test_the_task_detail_carries_the_workspace_and_its_artifacts_by_type(tmp_path):
+    root, served = on_project(tmp_path)
+    bot = served.token()
+    task = served.submit(bot, project="bots", acceptance=CRITERIA)["task"]
+    served.run()
+    detail = get(served, f"/api/v1/tasks/{task}", bot)
+    assert detail["workspace"]["files"][0]["path"] == "Bots/src/bot.py" and detail["workspace"]["revertable"]
+    assert {"markdown_document", "workspace_original", "workspace_diff"} <= {a["type"] for a in detail["artifacts"]}
