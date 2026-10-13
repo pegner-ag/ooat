@@ -163,13 +163,16 @@ class Ledger:
 
     def _check_closed(self, event: dict) -> None:
         """Checked inside the write, so a racing writer cannot slip past: the operator decides nothing and no answer
-        lands on a closed task (design 05 §12), and a task is rated once (a second rating would count twice in θ)."""
+        lands on a closed task (design 05 §12), a task is rated once (a second rating would count twice in θ), and a
+        task's workspace changes are reverted once (ADR 0017)."""
         hil_decision = event["type"] == "DECISION" and event["actor"]["kind"] == "hil"
         if (hil_decision or event["type"] == "HIL_RESPONSE") \
                 and self.events(task=event["task"], types=["TASK_CLOSED"]):
             raise SpecValidationError("event", [f"$.task: task is closed: {event['task']}"])
         if event["type"] == "TASK_RATED" and self.events(task=event["task"], types=["TASK_RATED"]):
             raise SpecValidationError("event", [f"$.task: task is already rated: {event['task']}"])
+        if event["type"] == "WORKSPACE_REVERTED" and self.events(task=event["task"], types=["WORKSPACE_REVERTED"]):
+            raise SpecValidationError("event", [f"$.task: task is already reverted: {event['task']}"])
 
     def _check_intake(self, event: dict) -> None:
         """One task per intake key and channel, also across restarts and racing deliveries (ADR 0016)."""

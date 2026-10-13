@@ -53,7 +53,11 @@ API with web sessions and operator tokens, and the task runner (design 05a). Tea
   `read_file`, `edit_file`, `write_file` with limits, saved originals and `journal.jsonl`), `server.py` (the tools
   as an MCP server over stdio), `__main__.py` (`python -m ooat_core.workspace <grant.json>`); `mcp_config()` is
   the config a CLI connector passes. The gateway routes a request with `ModelRequest.workspace` only to a
-  connector whose manifest has `features.workspace: true`
+  connector whose manifest has `features.workspace: true`, and at least in the project's data class.
+  `runs.py` is the runtime's side (plan 07b): `Workspaces` builds the grant of each call (per task and role, the
+  critic read only, a raised limit multiplied), the per-project lock that keeps a revert from writing during a
+  call, `record()` (the journal as `WORKSPACE_USED`, originals and a diff as artifacts in a class raised by their
+  text, token-like path segments hidden), `change_section()` (OOAT's list of changed files) and `revert()`
 - `connectors/cli.py` — `run_cli()`: vendor CLI with the prompt on stdin, in an empty temporary directory,
   typed `UNAVAILABLE` / `TIMEOUT` failures
 - `connectors/conformance.py` — `check_connector()`: the contract every connector package tests;
@@ -76,11 +80,16 @@ API with web sessions and operator tokens, and the task runner (design 05a). Tea
   the four cost parts; applies a declared default when a question's deadline has passed. A provider failure
   (quota, outage, timeout) pauses the task as RUNNING without using up an attempt; the next `run` resumes it from
   the ledger, and `runnable()` lists the tasks that can move without the operator. A used-up contract budget
-  (capped by the role) asks the operator to raise it or stop; a usable earlier document is kept as PARTIAL
+  (capped by the role) asks the operator to raise it or stop; a usable earlier document is kept as PARTIAL. A
+  task on a project in `[projects]` (design 07): intake records `body.workspace` and raises the data class and the
+  risk class (R1 when it writes); the worker works on the files, the critic checks them read only, the project's
+  timeout applies, and the journal is recorded after every call; the document ends with OOAT's change list. A
+  reached limit asks `raise_limit`, `follow_up`, `keep` (default after 48 h) or `revert`. `.revert()` writes back
+  a closed task's originals
 - `rating.py` — `task_decisions()`, `checked_verdict()`, `rate()`: TASK_RATED (once per task) with the operator's verdict per
   decision; typing the answer the decision gave counts as confirmed, a choice correction must be one of its options
 - `operator_cli.py` — the `ooat` command: `ooat connectors list | show | enable | disable`
-- `task_cli.py` — `ooat task submit | run [--all] | show | rate` and `ooat hil list | answer`; while another
+- `task_cli.py` — `ooat task submit | run [--all] | show | rate | revert` and `ooat hil list | answer`; while another
   process holds the runner lock (`ooat serve`), `run` refuses and `submit` / `hil answer` only record
 - `hil.py` — `answer()`: the operator's HIL_RESPONSE from every channel; refuses R3 (ADR 0016), a late or second
   answer and a closed task's question; `open_requests()`

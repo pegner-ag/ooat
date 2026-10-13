@@ -54,7 +54,7 @@ await show(bridge.on_button(data))                            # a button press
 
 The client is synchronous (standard library only); an async bot runs `watch` in a thread as above. Without the
 bridge, `OoatClient` alone has `submit`, `follow` (the timeline until `TASK_CLOSED`), `task`, `events`,
-`questions`, `answer`, `rate`, `cancel`, `artifact` and `stats`; a refusal raises `OoatError` with the API's code.
+`questions`, `answer`, `rate`, `cancel`, `revert`, `artifact` and `stats`; a refusal raises `OoatError` with the API's code.
 
 ## Network
 

@@ -29,7 +29,8 @@ def now() -> datetime:
 
 
 class Served:
-    def __init__(self, tmp_path, model=None, jev=None, classes=("public", "internal"), runner=False, **settings):
+    def __init__(self, tmp_path, model=None, jev=None, classes=("public", "internal"), runner=False, config=None,
+                 **settings):
         self.url = f"sqlite:///{(tmp_path / 'ledger.sqlite').as_posix()}"
         self.model, self.jev = model or ScriptedModel(), jev or decisions()
         with self.ledger() as ledger:
@@ -37,7 +38,8 @@ class Served:
             acknowledge(ledger, self.jev)
         self.settings = ServeSettings(ledger_url=self.url, blobs_dir=tmp_path / "blobs", operator="operator",
                                       **settings)
-        self.app = create_app(self.settings, config=parse_config({}), registry=Registry([self.model, self.jev]),
+        self.app = create_app(self.settings, config=config or parse_config({}),
+                              registry=Registry([self.model, self.jev]),
                               routing=RoutingPolicy(routing_document()), clock=now, start_runner=runner)
         self.server = self.app.state.server
         scheme = "https" if self.settings.tls else "http"

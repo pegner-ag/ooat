@@ -42,8 +42,8 @@
       "then": {"properties": {"actor": {"properties": {"kind": {"const": "agent"}}}}}
     },
     {
-      "description": "Only a human answers, rates, reports defects, acknowledges or disables adapters, issues or revokes operator tokens.",
-      "if": {"properties": {"type": {"enum": ["HIL_RESPONSE", "TASK_RATED", "DEFECT_FOUND", "ADAPTER_ACKNOWLEDGED", "ADAPTER_DISABLED", "OPERATOR_TOKEN_ISSUED", "OPERATOR_TOKEN_REVOKED"]}}},
+      "description": "Only a human answers, rates, reports defects, acknowledges or disables adapters, issues or revokes operator tokens, reverts a task's workspace changes.",
+      "if": {"properties": {"type": {"enum": ["HIL_RESPONSE", "TASK_RATED", "DEFECT_FOUND", "ADAPTER_ACKNOWLEDGED", "ADAPTER_DISABLED", "OPERATOR_TOKEN_ISSUED", "OPERATOR_TOKEN_REVOKED", "WORKSPACE_REVERTED"]}}},
       "then": {"properties": {"actor": {"properties": {"kind": {"const": "hil"}}}}}
     },
     {
@@ -71,7 +71,9 @@
     {"if": {"properties": {"type": {"const": "ADAPTER_ACKNOWLEDGED"}}}, "then": {"properties": {"body": {"$ref": "#/$defs/body_adapter_acknowledged"}}}},
     {"if": {"properties": {"type": {"const": "ADAPTER_DISABLED"}}}, "then": {"properties": {"body": {"$ref": "#/$defs/body_adapter_disabled"}}}},
     {"if": {"properties": {"type": {"const": "OPERATOR_TOKEN_ISSUED"}}}, "then": {"properties": {"body": {"$ref": "#/$defs/body_operator_token_issued"}}}},
-    {"if": {"properties": {"type": {"const": "OPERATOR_TOKEN_REVOKED"}}}, "then": {"properties": {"body": {"$ref": "#/$defs/body_operator_token_revoked"}}}}
+    {"if": {"properties": {"type": {"const": "OPERATOR_TOKEN_REVOKED"}}}, "then": {"properties": {"body": {"$ref": "#/$defs/body_operator_token_revoked"}}}},
+    {"if": {"properties": {"type": {"const": "WORKSPACE_USED"}}}, "then": {"properties": {"body": {"$ref": "#/$defs/body_workspace_used"}, "actor": {"properties": {"kind": {"const": "system"}}}}}},
+    {"if": {"properties": {"type": {"const": "WORKSPACE_REVERTED"}}}, "then": {"properties": {"body": {"$ref": "#/$defs/body_workspace_reverted"}}}}
   ],
   "$defs": {
     "event_type": {
@@ -80,7 +82,8 @@
         "OBJECTION", "OBJECTION_RESOLVED", "DECISION", "GATE_PASSED", "GATE_FAILED",
         "HIL_REQUEST", "HIL_RESPONSE", "BUDGET_WARNING", "QUOTA_WARNING",
         "TASK_CLOSED", "TASK_RATED", "DEFECT_FOUND", "ADAPTER_ACKNOWLEDGED", "ADAPTER_DISABLED",
-        "OPERATOR_TOKEN_ISSUED", "OPERATOR_TOKEN_REVOKED"
+        "OPERATOR_TOKEN_ISSUED", "OPERATOR_TOKEN_REVOKED",
+        "WORKSPACE_USED", "WORKSPACE_REVERTED"
       ]
     },
     "actor": {
@@ -141,7 +144,9 @@
         "profile": {"description": "Orchestrator profile, e.g. ceo, pm, key_account.", "type": "string", "pattern": "^[a-z][a-z0-9_]*$"},
         "deadline": {"type": "string", "format": "date-time"},
         "channel": {"$ref": "#/$defs/channel"},
-        "intake_key": {"description": "The client's idempotency key; unique per channel, checked by the ledger (ADR 0016).", "type": "string", "pattern": "^[!-~]{1,128}$"}
+        "intake_key": {"description": "The client's idempotency key; unique per channel, checked by the ledger (ADR 0016).", "type": "string", "pattern": "^[!-~]{1,128}$"},
+        "workspace": {"description": "The project's folders the task works on, from ooat.toml at intake (ADR 0017).", "type": "object", "required": ["write", "folders"], "additionalProperties": false, "properties": {"write": {"type": "boolean"}, "folders": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}}}},
+        "follows": {"description": "The task this one continues after a workspace limit (ADR 0017).", "$ref": "common.schema.json#/$defs/task_id"}
       },
       "dependentRequired": {"intake_key": ["channel"]}
     },
@@ -318,7 +323,7 @@
       }
     },
     "body_hil_request": {
-      "description": "Max. 3 options, always a recommendation and a default on silence; for R3 the default must be not acting.",
+      "description": "2 to 3 options (the workspace limit question has 4, ADR 0017), always a recommendation and a default on silence; for R3 the default must be not acting.",
       "type": "object",
       "required": ["question", "options", "recommended", "default_on_silence", "deadline", "blocking", "evidence"],
       "additionalProperties": false,
@@ -328,7 +333,7 @@
         "options": {
           "type": "array",
           "minItems": 2,
-          "maxItems": 3,
+          "maxItems": 4,
           "items": {
             "type": "object",
             "required": ["id", "label", "cost_usd"],
@@ -520,6 +525,11 @@
         "operator": {"$ref": "#/$defs/text"},
         "reason": {"$ref": "#/$defs/text"}
       }
-    }
+    },
+    "workspace_path": {"description": "A path as the agent wrote it, cut to 300 characters.", "type": ["string", "null"], "maxLength": 300},
+    "content_hash": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "count": {"type": "integer", "minimum": 0},
+    "body_workspace_used": {"type": "object", "required": ["project", "by", "write", "read", "changed", "created", "refused", "operations", "written_bytes", "limit", "journal_lines"], "additionalProperties": false, "properties": {"project": {"type": "string", "pattern": "^[a-z0-9][a-z0-9_-]*$"}, "by": {"enum": ["worker", "critic"]}, "write": {"type": "boolean"}, "read": {"type": "array", "items": {"type": "object", "required": ["path", "times"], "additionalProperties": false, "properties": {"path": {"$ref": "#/$defs/workspace_path"}, "times": {"type": "integer", "minimum": 1}}}}, "changed": {"type": "array", "items": {"type": "object", "required": ["path", "before", "after", "added", "removed"], "additionalProperties": false, "properties": {"path": {"$ref": "#/$defs/workspace_path"}, "before": {"$ref": "#/$defs/content_hash"}, "after": {"$ref": "#/$defs/content_hash"}, "added": {"$ref": "#/$defs/count"}, "removed": {"$ref": "#/$defs/count"}, "original": {"$ref": "common.schema.json#/$defs/artifact_ref"}, "interrupted": {"description": "Someone else wrote the file between two of the task's writes: revert skips it.", "type": "boolean"}}}}, "created": {"type": "array", "items": {"type": "object", "required": ["path", "after", "added"], "additionalProperties": false, "properties": {"path": {"$ref": "#/$defs/workspace_path"}, "after": {"$ref": "#/$defs/content_hash"}, "added": {"$ref": "#/$defs/count"}}}}, "refused": {"type": "array", "items": {"type": "object", "required": ["path", "tool", "reason"], "additionalProperties": false, "properties": {"path": {"$ref": "#/$defs/workspace_path"}, "tool": {"type": "string", "maxLength": 40}, "reason": {"type": "string", "maxLength": 200}}}}, "operations": {"description": "Operations of this role in the task so far (a total, not per event).", "$ref": "#/$defs/count"}, "written_bytes": {"description": "Bytes this role wrote in the task so far (a total).", "$ref": "#/$defs/count"}, "limit": {"oneOf": [{"type": "null"}, {"type": "object", "required": ["kind", "operation", "tool", "path"], "additionalProperties": false, "properties": {"kind": {"enum": ["operations", "write_bytes"]}, "operation": {"$ref": "#/$defs/count"}, "tool": {"type": "string", "maxLength": 40}, "path": {"$ref": "#/$defs/workspace_path"}}}]}, "journal_lines": {"description": "Journal lines covered so far (a total); the next event starts after them.", "$ref": "#/$defs/count"}, "diff": {"description": "A unified diff of the task's changes so far (artifact kind workspace_diff).", "$ref": "common.schema.json#/$defs/artifact_ref"}}, "description": "What the calls of one role (worker or critic) did on a project's folders since the last such event, from OOAT's journal: paths, hashes and counts, never contents (ADR 0017)."},
+    "body_workspace_reverted": {"type": "object", "required": ["project", "restored", "skipped", "kept"], "additionalProperties": false, "properties": {"project": {"type": "string", "pattern": "^[a-z0-9][a-z0-9_-]*$"}, "restored": {"type": "array", "items": {"type": "object", "required": ["path", "after"], "additionalProperties": false, "properties": {"path": {"$ref": "#/$defs/workspace_path"}, "after": {"$ref": "#/$defs/content_hash"}}}}, "skipped": {"type": "array", "items": {"type": "object", "required": ["path", "reason"], "additionalProperties": false, "properties": {"path": {"$ref": "#/$defs/workspace_path"}, "reason": {"type": "string", "maxLength": 200}}}}, "kept": {"type": "array", "items": {"$ref": "#/$defs/workspace_path"}}, "channel": {"$ref": "#/$defs/channel"}}, "description": "The operator's revert of a task's changes: originals written back where the file is unchanged since; created files are never deleted (ADR 0017)."}
   }
 }

@@ -38,7 +38,7 @@ class ScriptedModel(FakeConnector):
 
     def complete(self, request, secrets):
         self.calls.append(request)
-        role = "critic" if request.system == CRITIC_SYSTEM else "worker"
+        role = "critic" if request.system.startswith(CRITIC_SYSTEM) else "worker"
         self.attempts[role] += 1
         if (role, self.attempts[role]) in self.outages:
             raise self.outages[(role, self.attempts[role])]
@@ -82,3 +82,28 @@ def acknowledge(ledger, connector, classes=("public", "internal")):
         "adapter": connector.manifest["id"], "manifest_version": connector.manifest["version"],
         "allowed_data_classes": list(classes), "operator": "Operator", "automation_confirmed": True,
         "jurisdiction_sha256": jurisdiction_fingerprint(connector.manifest)}))
+
+
+from ooat_core.workspace.tools import ToolError, Workspace  # noqa: E402
+
+
+class WorkspaceModel(ScriptedModel):
+    """A model that can work with project folders: each worker call first runs its list of tool calls through
+    OOAT's own tools on the request's grant, as the MCP server would for a real CLI; then it answers as
+    ScriptedModel. `grants` holds the grant of every call (None when it had none)."""
+
+    def __init__(self, tools=(), documents=(DOCUMENT,), **options):
+        super().__init__(documents, **options)
+        self.manifest = {**self.manifest, "features": {"workspace": True}}
+        self.tools, self.grants = [list(calls) for calls in tools], []
+
+    def complete(self, request, secrets):
+        self.grants.append(request.workspace)
+        if request.workspace is not None and not request.system.startswith(CRITIC_SYSTEM) and self.tools:
+            workspace = Workspace(request.workspace)
+            for tool, arguments in self.tools.pop(0):
+                try:
+                    workspace.call(tool, arguments)
+                except ToolError:
+                    pass  # the agent reads the refusal and carries on
+        return super().complete(request, secrets)

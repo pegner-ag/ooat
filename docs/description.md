@@ -64,8 +64,12 @@ Chosen by decision (`docs/adr/`), not yet used in code:
 data folder); setup writes it there and never overwrites one (plan 01c). `ooat.toml` holds
 operator preferences (ledger URL, per-tier pins, connector settings, `[policy]` limits on countries
 and personal-data regions; `[projects.<slug>]` maps a project to its folders, with `write`, `data_class`, `deny`
-and limits, for agents that work on files through OOAT's own tools — tasks use it from plan 07b; secrets only as
-environment variable names). Connector enablement is ledger state
+and limits, for agents that work on files through OOAT's own tools; secrets only as environment variable names).
+A task on such a project runs its worker on the real files, records every call as `WORKSPACE_USED`, and asks at a
+limit whether to raise it for the task, continue in a follow-up task, keep the changes or revert them; a closed
+task's changes are reverted with `POST /tasks/{id}/revert`, `ooat task revert` or `OoatClient.revert` (the web app
+and the chat bridge follow with plan 07c). Config files holding connection strings are not hidden by default: add
+them to the project's `deny`, e.g. `deny = ["appsettings*.json", "web.config"]`. Connector enablement is ledger state
 (`ADAPTER_ACKNOWLEDGED`, `ADAPTER_DISABLED`, ADR 0010), written by `ooat connectors enable | disable` after the
 operator has read the connection consequences card; for client or personal data the operator also takes
 responsibility there (legal basis, processing agreement, region; ADR 0012), renewed every 12 months. Hook files a

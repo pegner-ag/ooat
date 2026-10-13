@@ -20,6 +20,7 @@ from .rating import checked_verdict, rate, task_decisions
 from .routing import load_routing
 from .runtime import RunOutcome, Runtime
 from .state import task_state
+from .workspace.runs import Workspaces
 
 REFUSED = 1
 RUNS = {("task", "submit"), ("task", "run"), ("hil", "answer")}  # commands that run a task in the foreground
@@ -54,6 +55,9 @@ def add_commands(commands) -> None:
     target.add_argument("--all", dest="all_tasks", action="store_true",
                         help="every task that can move without you, e.g. those paused by a provider failure")
     actions.add_parser("show", help="timeline, costs and the document").add_argument("task")
+    revert = actions.add_parser("revert", help="write back the originals of the project files a closed task changed")
+    revert.add_argument("task")
+    revert.add_argument("--operator", required=True)
     rating = actions.add_parser("rate", help="rate a closed task and confirm or correct its decisions")
     rating.add_argument("task")
     rating.add_argument("--operator", required=True)
@@ -99,9 +103,10 @@ def run(args, config, path, stdin, stdout, registry, routing, clock, ask) -> int
         gateway = Gateway(ledger, registry, routing or load_routing(routing_path()), config, SecretResolver(config),
                           clock=clock)
         runtime = Runtime(ledger, gateway, ArtifactStore(ledger, BlobStore(blobs)), settings_from_config(config),
-                          clock=clock)
+                          clock=clock, workspaces=Workspaces(config, path, setup.data_folder() / "workspaces"))
         handler = {("task", "submit"): _submit, ("task", "run"): _run_task, ("task", "show"): _show,
-                   ("task", "rate"): _rate, ("hil", "list"): _hil_list, ("hil", "answer"): _hil_answer}
+                   ("task", "rate"): _rate, ("task", "revert"): _revert, ("hil", "list"): _hil_list,
+                   ("hil", "answer"): _hil_answer}
         runs = (args.command, args.action) in RUNS and not getattr(args, "no_run", False)
         lock = runner_lock.for_ledger(config.ledger_url) if runs else None
         # Another process holding the lock (`ooat serve`) runs the tasks; this one only records.
@@ -122,6 +127,23 @@ def run(args, config, path, stdin, stdout, registry, routing, clock, ask) -> int
         return REFUSED
     finally:
         ledger.close()
+
+
+def _revert(args, ledger, runtime, stdin, stdout, ask) -> int:
+    question = (f"Revert the project files {args.task} changed? A file changed since is skipped; created files stay. "
+                "[y/N] ")
+    if (ask(question, stdin, stdout) or "").strip().lower() not in ("y", "yes"):  # None: the input ended
+        stdout.write("Nothing was reverted.\n")
+        return REFUSED
+    body = runtime.revert(args.task, operator=args.operator, channel="cli")["body"]
+    restored = len(body["restored"])
+    stdout.write(f"Restored {restored} file{'' if restored == 1 else 's'}, skipped {len(body['skipped'])}, "
+                 f"kept {len(body['kept'])} created.\n")
+    for item in body["skipped"]:
+        stdout.write(f"  skipped {item['path']}: {item['reason']}\n")
+    for path in body["kept"]:
+        stdout.write(f"  kept {path}\n")
+    return 0
 
 
 def _report(task: str, outcome: RunOutcome, ledger: Ledger, stdout) -> int:

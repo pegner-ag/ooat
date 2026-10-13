@@ -38,9 +38,10 @@ from .ledger import Ledger
 from .rating import AlreadyRated, NotClosed
 from .routing import RoutingPolicy
 from .runner import Runner
-from .runtime import Runtime, TaskClosed, UnknownTask
+from .runtime import Runtime, TaskClosed, TaskOpen, UnknownTask
 from .sessions import SESSION_TTL, Sessions, login_folder, redeem_login_code
 from .validation import SpecValidationError
+from .workspace.runs import AlreadyReverted, WorkspaceBusy, Workspaces
 
 log = logging.getLogger("ooat.serve")
 MAX_BODY = 20 * 1024 * 1024  # design 05 §5: 413 TOO_LARGE above it
@@ -116,7 +117,9 @@ class Server:
         gateway = Gateway(ledger, self.registry, self.routing, self.config, SecretResolver(self.config),
                           clock=self.clock)
         return Runtime(ledger, gateway, ArtifactStore(ledger, BlobStore(self.settings.blobs_dir)),
-                       settings_from_config(self.config), clock=self.clock)
+                       settings_from_config(self.config), clock=self.clock,
+                       workspaces=Workspaces(self.config, self.settings.config_path,
+                                             setup.data_folder() / "workspaces"))
 
     def runtime(self) -> Runtime:
         """This thread's Runtime (API handlers run in a thread pool)."""
@@ -265,6 +268,8 @@ def _errors(app: FastAPI) -> None:
                                (UnknownTask, 404, "NOT_FOUND"), (hil.UnknownRequest, 404, "NOT_FOUND"),
                                (hil.AlreadyAnswered, 409, "ALREADY_ANSWERED"), (NotClosed, 409, "NOT_CLOSED"),
                                (AlreadyRated, 409, "ALREADY_RATED"), (TaskClosed, 409, "NOT_OPEN"),
+                               (TaskOpen, 409, "NOT_CLOSED"), (AlreadyReverted, 409, "ALREADY_REVERTED"),
+                               (WorkspaceBusy, 409, "BUSY"),
                                (hil.R3NeedsBoundIdentity, 403, "R3_NEEDS_BOUND_IDENTITY"),
                                (ValueError, 400, "INVALID")):
         app.add_exception_handler(kind, handler(status, code))

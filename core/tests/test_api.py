@@ -412,3 +412,53 @@ def _reader(served, headers):
     request = Request({"type": "http", "method": "GET", "path": "/", "app": served.app, "query_string": b"",
                        "headers": [(b"authorization", headers["Authorization"].encode())]})
     return scope("read")(principal(request))
+
+
+from runtime_fakes import WorkspaceModel  # noqa: E402
+
+from ooat_core.config import parse_config  # noqa: E402
+
+ORIGINAL = b"import os\r\n\r\ndef main():\r\n    return 1\r\n"
+EDIT = [("edit_file", {"path": "Bots/src/bot.py", "old": "return 1", "new": "return 2"})]
+
+
+def on_project(tmp_path, data_class="internal"):
+    root = tmp_path / "Bots"
+    (root / "src").mkdir(parents=True)
+    (root / "src" / "bot.py").write_bytes(ORIGINAL)
+    config = parse_config({"projects": {"bots": {"folders": [str(root)], "write": True, "data_class": data_class}}})
+    return root, Served(tmp_path, model=WorkspaceModel([EDIT]), config=config)
+
+
+def test_a_closed_tasks_changes_are_reverted_through_the_api_once(tmp_path):
+    root, served = on_project(tmp_path)
+    bot = served.token()
+    task = served.submit(bot, project="bots", acceptance=CRITERIA)["task"]
+    served.run()
+    assert (root / "src" / "bot.py").read_bytes() != ORIGINAL
+    used = [e for e in get(served, f"/api/v1/tasks/{task}/events", bot)["events"] if e["type"] == "WORKSPACE_USED"]
+    diff = served.client.get(f"/api/v1/artifacts/{used[0]['body']['diff']}", headers=bot)
+    assert diff.status_code == 200 and "+    return 2" in diff.text
+    reverted = served.client.post(f"/api/v1/tasks/{task}/revert", headers=bot)
+    assert reverted.status_code == 200 and reverted.json()["restored"][0]["path"] == "Bots/src/bot.py"
+    assert (root / "src" / "bot.py").read_bytes() == ORIGINAL
+    again = served.client.post(f"/api/v1/tasks/{task}/revert", headers=bot)
+    assert (again.status_code, again.json()["error"]["code"]) == (409, "ALREADY_REVERTED")
+
+
+def test_revert_needs_the_answer_scope_and_a_closed_task(tmp_path):
+    root, served = on_project(tmp_path)
+    reader = served.token(scopes=("submit", "read"))
+    task = served.submit(reader, project="bots", acceptance=[])["task"]  # no criteria: the Gate asks, it waits
+    served.run()
+    refused = served.client.post(f"/api/v1/tasks/{task}/revert", headers=reader)
+    assert (refused.status_code, refused.json()["error"]["code"]) == (403, "SCOPE")
+    still_open = served.client.post(f"/api/v1/tasks/{task}/revert", headers=served.token())
+    assert (still_open.status_code, still_open.json()["error"]["code"]) == (409, "NOT_CLOSED")
+
+
+def test_a_project_above_the_tokens_cap_is_refused_at_intake(tmp_path):
+    root, served = on_project(tmp_path, data_class="client_confidential")
+    response = served.client.post("/api/v1/tasks", headers=served.token(),
+                                  json={"project": "bots", "goal": "Oprav bot."})
+    assert (response.status_code, response.json()["error"]["code"]) == (403, "DATA_CLASS_ABOVE_TOKEN")

@@ -45,5 +45,8 @@ code execution in a container (§9 point 3). Design: `tasks/f1-skeleton/task-07-
 - An agent writes the operator's real files without a copy or branch. The safety net is the journal, the stored
   originals and revert, not isolation; content in the files can still steer the agent within the granted folders.
 - The agent cannot run tests, so a change it makes is unverified by execution until containers exist.
+- "One writing task per project" holds under the Solo profile through the runner lock: one process runs one task
+  at a time. The per-project lock (plan 07b) only keeps a revert from writing during a call. A profile that runs
+  tasks concurrently needs the project lock held for the whole task.
 - Decided by the owner on 2026-10-12 with design 07: `keep` is the default after 48 h, and revert asks for a
   second confirmation.

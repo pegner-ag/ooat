@@ -59,3 +59,24 @@ def test_refusals_reach_the_bot_as_typed_errors(tmp_path):
                 call()
             refusals.append((refused.value.status, refused.value.code))
     assert refusals == [(403, "SCOPE"), (403, "DATA_CLASS_ABOVE_TOKEN"), (404, "NOT_FOUND")]
+
+
+def test_revert_through_the_client(tmp_path):
+    from unittest.mock import ANY
+
+    from runtime_fakes import WorkspaceModel
+
+    from ooat_core.config import parse_config
+
+    root = tmp_path / "Bots"
+    (root / "src").mkdir(parents=True)
+    (root / "src" / "bot.py").write_text("x = 1\n", encoding="utf-8")
+    config = parse_config({"projects": {"bots": {"folders": [str(root)], "write": True}}})
+    model = WorkspaceModel([[("write_file", {"path": "Bots/src/bot.py", "content": "x = 2\n"})]])
+    served = Served(tmp_path, model=model, config=config, runner=True)
+    with listening(served) as url:
+        client = OoatClient(url, secret(served.token()))
+        task = client.submit(project="bots", goal=GOAL, acceptance=CRITERIA)
+        list(client.follow(task))
+        assert client.revert(task)["restored"] == [{"path": "Bots/src/bot.py", "after": ANY}]
+    assert (root / "src" / "bot.py").read_text(encoding="utf-8") == "x = 1\n"

@@ -209,3 +209,14 @@ def test_search_skips_a_file_it_cannot_read(root, tmp_path, monkeypatch):
 
     monkeypatch.setattr(Path, "read_bytes", locked)
     assert workspace(root, tmp_path).call("search", {"query": "def main"}) == "Bots/src/bot.py:3: def main():"
+
+
+def test_a_failed_write_does_not_count_against_the_limit_after_a_restart(root, tmp_path):
+    journal = tmp_path / "journal"
+    journal.mkdir()
+    (journal / "journal.jsonl").write_bytes(
+        b'{"n": 1, "tool": "write_file", "path": "Bots/a.txt", "real": "x", "before": null, "after": "sha256:'
+        + b"0" * 64 + b'", "bytes": 100, "added": 1, "removed": 0}\n'
+        b'{"n": 1, "tool": "write_file", "path": "Bots/a.txt", "failed": true}\n')
+    ws = workspace(root, tmp_path, write_bytes=150)
+    assert ws.call("write_file", {"path": "Bots/b.txt", "content": "x" * 100}) == "wrote Bots/b.txt"
