@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { setLanguage } from "../src/ooat_core/web/app/i18n.js";
-import { documents, fileLine, revertReport } from "../src/ooat_core/web/app/workspace.js";
+import { documents, fileLine, hasWork, revertReport } from "../src/ooat_core/web/app/workspace.js";
 
 test("a file's line says what OOAT saw happen to it", () => {
   setLanguage("en");
@@ -21,4 +21,10 @@ test("the document viewer gets documents only, never an original or a diff", () 
   const found = documents([{type: "markdown_document", ref: "art_1"}, {type: "workspace_original", ref: "art_2"},
     {type: "workspace_diff", ref: "art_3"}, {type: "attachment", ref: "art_4"}]);
   assert.deepEqual(found.map((a) => a.ref), ["art_1"]);
+});
+
+test("a task with nothing to show about its files gets no section", () => {
+  assert.equal(hasWork({files: [], refused: 0, limit: false, reverted: null}), false);
+  assert.equal(hasWork({files: [], refused: 1, limit: false, reverted: null}), true);
+  assert.equal(hasWork({files: [{path: "a"}], refused: 0, limit: false, reverted: null}), true);
 });

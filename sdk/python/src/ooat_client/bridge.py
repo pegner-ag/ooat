@@ -113,14 +113,14 @@ class Bridge:
             raise ValueError(self._t("no_goal"))
         task = self.client.submit(project=self.project, goal=goal, acceptance=acceptance, attachments=files,
                                   key=f"{self.chat.id}:{message_id}")
-        if not self._told_text_only:
+        if not self._told_text_only:  # the project is the bridge's own: one look tells for every task
             try:
                 plain = self.client.task(task).get("workspace") is None
-            except OoatError:
-                plain = False  # say nothing rather than something wrong
-            if plain:
                 self._told_text_only = True
-                self._send(self._t("no_folders", project=self.project))
+                if plain:
+                    self._send(self._t("no_folders", project=self.project))
+            except (OoatError, ChatFailed):
+                pass  # the task exists: never lose its id for a notice
         return task
 
     def on_button(self, data: str) -> str:
@@ -137,9 +137,9 @@ class Bridge:
                 return self._t("confirm_below")
             if kind == "V":
                 result = self.client.revert(rest)
-                return "\n".join([self._t("reverted", restored=len(result["restored"]),
-                                          skipped=len(result["skipped"]), kept=len(result["kept"]))]
-                                 + [self._t("skipped", path=s["path"], reason=s["reason"]) for s in result["skipped"]])
+                # The report goes out as a message: a button's answer may be shown as a short toast (200 characters).
+                self._send(self._revert_report(len(result["restored"]), result["skipped"], len(result["kept"])))
+                return self._t("revert_done")
             if kind == "a":
                 request, _, choice = rest.partition(":")
                 if choice in TEXT_OPTIONS:
@@ -270,13 +270,21 @@ class Bridge:
             self._send(self._t("redacted"))
         else:
             self._document(task, document.content)
-        self._diff(task, detail)
+        workspace = detail.get("workspace")
+        if isinstance(workspace, dict) and isinstance(workspace.get("reverted"), dict):  # what came back, not the diff
+            reverted = workspace["reverted"]
+            self._send(self._revert_report(len(reverted["restored"]), reverted["skipped"], len(reverted["kept"])))
+        else:
+            self._diff(task, detail)
         rows = [[Button(self._t("accepted", value=v), f"r:{task}:{v}:y") for v in VALUES],
                 [Button(self._t("rejected", value=v), f"r:{task}:{v}:n") for v in VALUES]]
-        workspace = detail.get("workspace")
         if isinstance(workspace, dict) and workspace.get("revertable"):  # next to "not accepted" (design 07 §7)
             rows.append([Button(self._t("revert"), f"v:{task}")])
         self._send(footer, rows)
+
+    def _revert_report(self, restored: int, skipped: list[dict], kept: int) -> str:
+        return "\n".join([self._t("reverted", restored=restored, skipped=len(skipped), kept=kept)]
+                         + [self._t("skipped", path=s["path"], reason=s["reason"]) for s in skipped])
 
     def _limited_work(self, task: str) -> None:
         """What the agent did before its limit, as OOAT recorded it: the document and the diff, each only within the

@@ -15,6 +15,15 @@ export function revertReport(result) {
   ...result.skipped.map((s) => t("task.revertSkipped", {path: s.path, reason: s.reason}))];
 }
 
+/**
+ * Whether there is anything to show about the files: no empty section for a task that only read, or has not
+ * started yet.
+ * @param {{files: any[], refused: number, limit: boolean, reverted: any}} ws
+ */
+export function hasWork(ws) {
+  return ws.files.length > 0 || ws.refused > 0 || ws.limit || ws.reverted !== null;
+}
+
 /** @template {{type: string}} T @param {T[]} artifacts @returns {T[]} */
 export function documents(artifacts) {
   return artifacts.filter((a) => a.type === "markdown_document");

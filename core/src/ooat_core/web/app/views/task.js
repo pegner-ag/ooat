@@ -6,7 +6,7 @@ import { clock, money, text, title } from "../format.js";
 import { t } from "../i18n.js";
 import { showMarkdown } from "../markdown.js";
 import { describe } from "../timeline.js";
-import { documents, fileLine, revertReport } from "../workspace.js";
+import { documents, fileLine, hasWork, revertReport } from "../workspace.js";
 
 const CLOSED = ["CLOSED_DONE", "CLOSED_PARTIAL", "CLOSED_ABSTAINED", "CANCELLED"];
 const REDRAW_ON = ["RESULT", "HIL_REQUEST", "HIL_RESPONSE", "TASK_CLOSED"];
@@ -126,7 +126,9 @@ function drawResult(element, ctx, detail, viewing) {
         download(ctx, a).catch((error) => report(element, error))},
       `${a.name ?? a.ref}${a.untrusted ? ` (${t("task.untrusted")})` : ""}`)))));
   }
-  if (detail.workspace && !detail.workspace.redacted) parts.push(...workspaceParts(ctx, detail));
+  if (detail.workspace && !detail.workspace.redacted && hasWork(detail.workspace)) {
+    parts.push(...workspaceParts(ctx, detail));
+  }
   element.replaceChildren(...parts);
 }
 

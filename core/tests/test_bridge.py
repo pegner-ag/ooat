@@ -160,7 +160,8 @@ def test_a_result_brings_the_diff_and_a_revert_that_needs_a_second_tap(tmp_path)
         assert bridge.on_button(button(footer, "Revert").data) == "Confirm below."
         assert root.joinpath("src", "bot.py").read_bytes() != ORIGINAL  # one tap writes nothing
         confirm = chat.find("V:")
-        assert bridge.on_button(button(confirm, "Yes, revert").data).startswith("Restored 1, skipped 0")
+        assert bridge.on_button(button(confirm, "Yes, revert").data) == "Reverted: the details are below."
+        assert chat.sent[-1]["text"].startswith("Restored 1, skipped 0")
         assert root.joinpath("src", "bot.py").read_bytes() == ORIGINAL
 
 
@@ -200,3 +201,46 @@ def test_a_workspace_above_the_tokens_class_posts_no_diff_and_no_revert(tmp_path
         bridge = Bridge(OoatClient(url, secret(served.token(cap="public"))), chat, "bots")
         assert finished(watching(bridge, task))
     assert not [m for m in chat.sent if m.get("file", "").endswith(".diff")] and not chat.find("v:")
+
+
+def test_a_revert_that_skips_a_file_shows_it_in_the_chat(tmp_path):
+    root, served = project(tmp_path, [EDIT])
+    chat = FakeChat()
+    with listening(served) as url:
+        bridge = Bridge(OoatClient(url, secret(served.token())), chat, "bots")
+        task = bridge.on_message(TASK_TEXT, "1")
+        assert finished(watching(bridge, task))
+        bridge.on_button(button(chat.find("v:"), "Revert").data)
+        root.joinpath("src", "bot.py").write_bytes(b"changed by hand\n")
+        answer = bridge.on_button(button(chat.find("V:"), "Yes, revert").data)
+        assert len(answer) <= 200  # a callback answer (toast) on Telegram
+        assert any("Skipped Bots/src/bot.py: changed since the task" in m["text"] for m in chat.sent)
+
+
+def test_a_limit_question_answered_revert_shows_what_was_skipped_and_no_second_diff(tmp_path):
+    root, served = project(tmp_path, [EDIT + [("read_file", {"path": "Bots/src/bot.py"})]], max_operations=2)
+    chat = FakeChat()
+    with listening(served) as url:
+        bridge = Bridge(OoatClient(url, secret(served.token())), chat, "bots")
+        task = bridge.on_message(TASK_TEXT, "1")
+        watcher = watching(bridge, task)
+        question = wait_for(lambda: chat.find("a:"))
+        root.joinpath("src", "bot.py").write_bytes(b"changed by hand\n")
+        bridge.on_button(button(question, "Revert").data)
+        bridge.on_button(button(chat.find("c:"), "Yes, revert").data)
+        assert finished(watcher)
+    assert any("Skipped Bots/src/bot.py: changed since the task" in m["text"] for m in chat.sent)
+    assert len([m for m in chat.sent if m.get("file") == f"{task}.diff"]) == 1  # only before the question
+
+
+def test_a_chat_that_fails_on_the_notice_still_gets_the_task(tmp_path):
+    class Failing(FakeChat):
+        def send(self, text, buttons=()):
+            if "no folders" in text:
+                raise OSError("the platform is down")
+            return super().send(text, buttons)
+
+    served = Served(tmp_path, runner=True)
+    with listening(served) as url:
+        bridge = Bridge(OoatClient(url, secret(served.token())), Failing(), "docs")
+        assert bridge.on_message(f"{GOAL}\nDone when:\n{CRITERIA[0]}", "1").startswith("tsk_")

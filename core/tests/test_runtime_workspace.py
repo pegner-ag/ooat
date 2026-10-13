@@ -276,3 +276,12 @@ def test_the_limit_question_does_not_quote_file_contents(tmp_path):
     setup, task, _, request = limited(tmp_path)
     assert "Smlouva platí" not in request["body"]["question"]  # the summary stays in the classed document
     assert "document" in request["body"]["question"]
+
+
+def test_a_revert_answer_that_skips_a_file_says_so_in_the_close(tmp_path):
+    setup, task, _, request = limited(tmp_path)
+    (setup.root / "src" / "bot.py").write_bytes(b"changed by hand\n")
+    setup.answer(task, request["id"], choice="revert")
+    setup.runtime.run(task)
+    summary = setup.bodies(task, "TASK_CLOSED")[0]["summary"]
+    assert "skipped 1" in summary and "Bots/src/bot.py (changed since the task)" in summary
