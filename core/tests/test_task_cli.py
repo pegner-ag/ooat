@@ -271,3 +271,30 @@ def test_a_hand_over_after_the_decision_tier_failed_is_labelled_too():
     event["body"] = {"gate": "gate.critic.check_criterion", "evidence": ["0 of 1"],
                      "criteria": [{"id": "c1", "passed": False, "note": "Too long."}]}
     assert _label(event) == "GATE_FAILED"
+
+
+from runtime_fakes import WorkspaceModel  # noqa: E402
+
+
+def test_task_revert_asks_and_writes_the_originals_back(tmp_path):
+    root = tmp_path / "Bots"
+    (root / "src").mkdir(parents=True)
+    (root / "src" / "bot.py").write_bytes(b"def main():\n    return 1\n")
+    (tmp_path / "ooat.toml").write_text(
+        f'[ledger]\nurl = "sqlite:///ledger.sqlite"\n\n[projects.bots]\nfolders = ["{root.as_posix()}"]\n'
+        'write = true\n', encoding="utf-8")
+    model, jev = WorkspaceModel([[("edit_file", {"path": "Bots/src/bot.py", "old": "1", "new": "2"})]]), decisions()
+    ledger = Ledger.open(f"sqlite:///{(tmp_path / 'ledger.sqlite').as_posix()}")
+    for connector in (model, jev):
+        acknowledge(ledger, connector)
+    ledger.close()
+    env = {"config": tmp_path / "ooat.toml", "registry": Registry([model, jev])}
+    code, out = ooat(env, "task", "submit", "--operator", "Martin", "--goal", "Oprav bot.", "--project", "bots",
+                     "--acceptance", "main vrací 2")
+    task = task_id(out)
+    assert (root / "src" / "bot.py").read_text(encoding="utf-8").endswith("return 2\n")
+    code, out = ooat(env, "task", "revert", task, "--operator", "Martin", answers="n\n")
+    assert code == 1 and "Nothing was reverted." in out
+    code, out = ooat(env, "task", "revert", task, "--operator", "Martin", answers="y\n")
+    assert code == 0 and "Restored 1 file" in out
+    assert (root / "src" / "bot.py").read_text(encoding="utf-8") == "def main():\n    return 1\n"

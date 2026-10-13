@@ -231,3 +231,22 @@ def test_raise_gives_one_more_attempt_with_doubled_limits_and_the_summary_as_fee
     assert setup.model.grants[1].max_operations == 4  # grants[0] is the limited call, [1] the raised one
     assert "workspace limit" in setup.model.worker_prompts[1]
     assert setup.workspaces.config.projects["bots"].max_operations == 2  # ooat.toml's limit is unchanged
+
+
+import pytest  # noqa: E402
+
+from ooat_core.runtime import TaskOpen  # noqa: E402
+
+
+def test_the_operator_reverts_a_closed_task_once(tmp_path):
+    setup = Setup(tmp_path)
+    task = setup.submit()
+    setup.runtime.run(task)
+    event = setup.runtime.revert(task, operator="Martin", channel="cli")
+    assert setup.bot() == ORIGINAL and event["body"]["restored"][0]["path"] == "Bots/src/bot.py"
+
+
+def test_an_open_task_is_not_reverted_from_outside(tmp_path):
+    setup, task, _, _ = limited(tmp_path)
+    with pytest.raises(TaskOpen):
+        setup.runtime.revert(task, operator="Martin")

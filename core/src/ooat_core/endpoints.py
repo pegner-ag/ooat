@@ -127,6 +127,10 @@ def resource_routes() -> APIRouter:
     def submit(body: TaskIn, request: Request, who: Principal = Depends(scope("submit")),
                idempotency_key: str | None = Header(default=None)) -> dict:
         require_within(who, body.data_class)
+        server = server_of(request)
+        mapped = server.config.projects.get(body.project) if body.project else None
+        if mapped is not None:  # the project's class is the task's minimum (design 07 §3)
+            require_within(who, mapped.data_class)
         if idempotency_key is not None and not INTAKE_KEY.match(idempotency_key):
             raise ApiError(400, "INVALID", "Idempotency-Key is 1 to 128 printable ASCII characters without spaces")
         if body.value is not None and body.value_usd is not None:
@@ -135,7 +139,6 @@ def resource_routes() -> APIRouter:
             contents = [base64.b64decode(a.content_base64, validate=True) for a in body.attachments]
         except (binascii.Error, ValueError):
             raise ApiError(400, "INVALID", "an attachment's content_base64 is not base64") from None
-        server = server_of(request)
         runtime = server.runtime()
         value = {"class": body.value} if body.value else {"usd": body.value_usd} if body.value_usd is not None else None
         task = runtime.submit(operator=who.operator, goal=body.goal, acceptance=body.acceptance, project=body.project,
@@ -192,6 +195,15 @@ def resource_routes() -> APIRouter:
         server.runner.enqueue(task)
         return {"task": task, "cancel": "requested" if asked else "already requested"}
 
+    @api.post("/tasks/{task}/revert")
+    def revert(task: str, request: Request, who: Principal = Depends(scope("answer"))) -> dict:
+        """Write back the originals of the project files a closed task changed (design 07 §7); the second
+        confirmation is the surface's (web, chat), before it calls this."""
+        server = server_of(request)
+        require_within(who, one_task(server, task)[1])
+        body = server.runtime().revert(task, operator=who.operator, channel=who.channel)["body"]
+        return {"task": task, "restored": body["restored"], "skipped": body["skipped"], "kept": body["kept"]}
+
     # Artifacts -------------------------------------------------------------------------------------------------
 
     def readable(server: Server, ref: str, who: Principal) -> tuple[dict, bytes | None]:
@@ -205,8 +217,10 @@ def resource_routes() -> APIRouter:
         return record, server.runtime().artifacts.read(ref)
 
     def producing_task(server: Server, record: dict) -> str:
-        """Attachments come with TASK_SUBMITTED, documents with RESULT; 404 for an artifact of any other event."""
-        task = next((e["task"] for e in server.runtime().ledger.events(types=["TASK_SUBMITTED", "RESULT"])
+        """Attachments come with TASK_SUBMITTED, documents with RESULT, a workspace's originals and diffs with
+        WORKSPACE_USED; 404 for an artifact of any other event."""
+        task = next((e["task"] for e in server.runtime().ledger.events(types=["TASK_SUBMITTED", "RESULT",
+                                                                             "WORKSPACE_USED"])
                      if e["id"] == record["produced_by_event"]), None)
         if task is None:
             raise ApiError(404, "NOT_FOUND", "no task produced this artifact")

@@ -56,6 +56,10 @@ class TaskClosed(ValueError):
     """The task is already closed; nothing can change it but a rating."""
 
 
+class TaskOpen(ValueError):
+    """The task is still open: its changes are reverted through its own question, or after it closes."""
+
+
 @dataclass(frozen=True)
 class RunOutcome:
     state: str  # the task state after the run
@@ -159,6 +163,18 @@ class Runtime:
         except DuplicateIntake as repeated:  # a retried delivery; the staged blobs stay unreferenced
             return repeated.task
         return task
+
+    def revert(self, task: str, *, operator: str, channel: str | None = None) -> dict:
+        """The operator reverts a closed task's project changes (design 07 §7); returns WORKSPACE_REVERTED."""
+        operator = checked_operator(operator)
+        state = task_state(self.ledger.events(task=task))
+        if state is None:
+            raise UnknownTask(f"unknown task {task}")
+        if state not in CLOSED:
+            raise TaskOpen(f"task {task} is {state}; answer its question or wait until it closes")
+        if self.workspaces is None:
+            raise WorkspaceUnavailable("this process has no project folders configured")
+        return self.workspaces.revert(self.ledger, self.artifacts, task, operator=operator, channel=channel)
 
     def cancel(self, task: str, *, operator: str, channel: str | None = None) -> bool:
         """The operator stops a task: a DECISION by them, after which the task closes as CANCELLED at its next run.

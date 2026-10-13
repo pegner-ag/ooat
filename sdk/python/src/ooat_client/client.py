@@ -191,6 +191,11 @@ class OoatClient:
     def cancel(self, task: str) -> dict:
         return self._json("POST", f"/tasks/{quote(task)}/cancel")
 
+    def revert(self, task: str) -> dict:
+        """Write back the originals of the project files a closed task changed. Ask the operator to confirm
+        first (design 07: revert takes a second confirmation)."""
+        return self._json("POST", f"/tasks/{quote(task)}/revert")
+
     def artifact(self, ref: str) -> Artifact:
         """The artifact's bytes, or the server's notice when it is above the token's data class."""
         with self._open("GET", f"/artifacts/{quote(ref)}", headers={"Accept": "*/*"}) as response:
