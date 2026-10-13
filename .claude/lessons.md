@@ -60,3 +60,6 @@
   `should_exit`. `Served(runner=True)` lets the app's lifespan start the runner thread.
 - `core/tests/conftest.py` sets `OOAT_HOME` to a temporary folder for every test: commands without `--config` fall
   back to the user data folder's `ooat.toml` (plan 01c), and a test must never read or write the real one.
+- Claude Code headless (2.1.287): `--tools ""` with `--strict-mcp-config` and `--mcp-config <file>` leaves only that
+  MCP server's tools; `--allowedTools mcp__<server>` allows all of them, without it every call is denied
+  (`permission_denials`) and the tool never runs. OOAT's workspace server is `mcp__ooat_workspace`.

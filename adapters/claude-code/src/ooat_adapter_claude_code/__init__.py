@@ -5,6 +5,7 @@ import re
 
 from ooat_core.connectors import ConnectorError, Detection, ModelRequest, ModelResponse
 from ooat_core.connectors.cli import find_executable, run_cli
+from ooat_core.workspace import SERVER_NAME, mcp_config
 
 MANIFEST = {
     "id": "prv.anthropic.subscription_cli",
@@ -18,7 +19,8 @@ MANIFEST = {
     "automation_permitted": "unknown",
     "concurrency": 1,
     "data_policy": {"training_on_inputs": None, "retention_days": None, "allowed_data_classes": ["public", "internal"]},
-    "features": {"tool_use": None, "vision": None, "context_tokens": None},  # unsourced facts stay null
+    # Unsourced facts stay null; workspace is this connector's own fact, checked by its live test (ADR 0017).
+    "features": {"tool_use": None, "vision": None, "context_tokens": None, "workspace": True},
     "jurisdiction": {
         "vendor_entity": None,
         "vendor_country": None,
@@ -67,8 +69,12 @@ class ClaudeCodeConnector:
         # System text goes in a file and the prompt through stdin: no caller text in argv (see connectors/cli.py).
         args = [self._executable, "-p", "--output-format", "json", "--model", model,
                 "--system-prompt-file", "system.txt", *ISOLATION]
-        result = run_cli(args, request.prompt, request.timeout_s,
-                         files={"system.txt": request.system or DEFAULT_SYSTEM})
+        files = {"system.txt": request.system or DEFAULT_SYSTEM}
+        if request.workspace is not None:
+            # Only OOAT's own MCP server: --tools "" and --strict-mcp-config stay, so no built-in tool exists.
+            files["mcp.json"] = mcp_config(request.workspace)
+            args += ["--mcp-config", "mcp.json", "--allowedTools", f"mcp__{SERVER_NAME}"]
+        result = run_cli(args, request.prompt, request.timeout_s, files=files)
         return parse_result(result.stdout, result.stderr, model)
 
 

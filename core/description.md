@@ -36,7 +36,8 @@ API with web sessions and operator tokens, and the task runner (design 05a). Tea
   narrow the scope / do not run), or T2. `task_facts()` and `gated_data_class()` read the task and the
   operator's answers back for the runtime
 - `config.py` — `load_config()` for `ooat.toml`: ledger URL, per-tier pins, connector settings, and the
-  `[policy]` limits `blocked_countries` and `personal_data_regions` (ADR 0012); no secrets, no enablement
+  `[policy]` limits `blocked_countries` and `personal_data_regions` (ADR 0012), and `[projects.<slug>]`: a
+  project's folders, `write`, `data_class`, `deny` and limits (design 07); no secrets, no enablement
 - `credentials_env.py` — `SecretResolver`: values from named environment variables, `redact()`
 - `routing.py` — `RoutingPolicy` from `routing.json`: dated prices, optional tier allow-list, data-class policy
 - `gateway.py` — `Gateway.estimate()` / `.call()`: data-class guard (the operator's responsibility stands in
@@ -46,6 +47,13 @@ API with web sessions and operator tokens, and the task runner (design 05a). Tea
   `.decide()`: the same rules for decision connectors; every choice is asked twice with reversed options,
   answers are checked before use, and when no decision connector can answer, the `economy` text tier answers the
   same questions (`DecisionResult.engine` and `.model` say which, `.fallback_from` why)
+- `workspace/` — a project's folders for one model call (design 07, ADR 0017): `grant.py` (`WorkspaceGrant`,
+  `grant_for()` from `[projects]`, the never-visible and read-only lists), `guard.py` (`Guard.resolve()`: a path
+  checked as written and on its real path), `tools.py` (`Workspace`: `list_dir`, `find_files`, `search`,
+  `read_file`, `edit_file`, `write_file` with limits, saved originals and `journal.jsonl`), `server.py` (the tools
+  as an MCP server over stdio), `__main__.py` (`python -m ooat_core.workspace <grant.json>`); `mcp_config()` is
+  the config a CLI connector passes. The gateway routes a request with `ModelRequest.workspace` only to a
+  connector whose manifest has `features.workspace: true`
 - `connectors/cli.py` — `run_cli()`: vendor CLI with the prompt on stdin, in an empty temporary directory,
   typed `UNAVAILABLE` / `TIMEOUT` failures
 - `connectors/conformance.py` — `check_connector()`: the contract every connector package tests;
