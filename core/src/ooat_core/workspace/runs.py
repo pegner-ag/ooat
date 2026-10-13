@@ -14,7 +14,8 @@ from ..ledger import new_event
 from ..pii import raised_class
 from ..runner_lock import RunnerLock
 from .grant import WorkspaceGrant, WorkspaceUnavailable, grant_for
-from .tools import read_journal, sha256
+from .guard import Guard, Refused
+from .tools import _atomic_write, read_journal, sha256
 
 ACTOR = {"kind": "system", "id": "ooat-runtime"}
 MAX_PATH = 300  # a path as the agent wrote it, cut for the ledger
@@ -160,6 +161,67 @@ class Workspaces:
                 body["diff"] = artifact.ref
         return ledger.append(new_event("WORKSPACE_USED", task=task, contract=contract, actor=ACTOR,
                                        refs=[a.ref for a in staged], body=body), staged)
+
+    # Revert -----------------------------------------------------------------------------------------------------
+
+    def revert(self, ledger, artifacts, task: str, *, operator: str, channel: str | None = None) -> dict:
+        """Write back each changed file's original where the file still is as the task left it (design 07 §7).
+        A file changed since is skipped; created files are never deleted, only listed; every path goes through
+        the guard of the project's current config (a project now read only can still be reverted by its
+        operator). Runs once per task, under the project's lock; if the ledger refuses the event, the files are
+        written back to what they were before the revert, so the disk never differs from what the ledger says."""
+        used = [e["body"] for e in ledger.events(task=task, types=["WORKSPACE_USED"]) if e["body"]["by"] == "worker"]
+        created = list(dict.fromkeys(i["path"] for body in used for i in body["created"]))
+        files = {}
+        for body in used:
+            for item in body["changed"]:
+                if item["path"] not in created:
+                    entry = files.setdefault(item["path"], {"original": item.get("original")})
+                    entry["after"] = item["after"]
+        if not files and not created:
+            raise ValueError(f"task {task} changed no project files")
+        project = used[0]["project"]
+        lock = self.lock(project)
+        if not lock.acquire():
+            raise WorkspaceBusy(f"a task is writing project {project} now; revert after it")
+        try:
+            if ledger.events(task=task, types=["WORKSPACE_REVERTED"]):  # checked under the lock
+                raise AlreadyReverted(f"the changes of task {task} were reverted already")
+            guard = Guard(self.grant(task, project, role="revert"))
+            restored, skipped, undo = [], [], []
+            try:
+                for path, entry in files.items():
+                    try:
+                        _, real = guard.resolve(path, writing=True)
+                    except Refused as refusal:
+                        skipped.append({"path": path, "reason": f"refused: {refusal.reason}"[:200]})
+                        continue
+                    try:
+                        current = real.read_bytes()
+                    except OSError:
+                        skipped.append({"path": path, "reason": "not readable now"})
+                        continue
+                    if sha256(current) != entry["after"]:
+                        skipped.append({"path": path, "reason": "changed since the task"})
+                        continue
+                    if entry["original"] is None:
+                        skipped.append({"path": path, "reason": "no saved original"})
+                        continue
+                    original = artifacts.read(entry["original"])
+                    _atomic_write(real, original)
+                    undo.append((real, current))
+                    restored.append({"path": path, "after": sha256(original)})
+                body = {"project": project, "restored": restored, "skipped": skipped, "kept": created}
+                if channel is not None:
+                    body["channel"] = channel
+                return ledger.append(new_event("WORKSPACE_REVERTED", task=task,
+                                               actor={"kind": "hil", "id": operator}, body=body))
+            except BaseException:
+                for real, content in reversed(undo):
+                    _atomic_write(real, content)
+                raise
+        finally:
+            lock.release()
 
 
 def _diff(lines: list[dict], grant: WorkspaceGrant, failed: set) -> str:

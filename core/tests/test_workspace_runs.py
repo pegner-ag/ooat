@@ -170,3 +170,94 @@ def test_the_mcp_server_never_imports_the_ledger():
     code = "import sys, ooat_core.workspace.__main__; print('ooat_core.ledger' in sys.modules)"
     out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=True).stdout
     assert out.strip() == "False"
+
+
+from ooat_core.workspace.runs import AlreadyReverted, WorkspaceBusy  # noqa: E402
+from ooat_core.workspace.tools import sha256  # noqa: E402
+
+EDITED = ORIGINAL.replace(b"return 1", b"return 2")
+
+
+def changed_task(s):
+    """One worker call: bot.py edited, a test file created; recorded."""
+    grant = s.workspaces.grant(s.task, "bots")
+    tools = Workspace(grant)
+    tools.call("edit_file", {"path": "Bots/src/bot.py", "old": "return 1", "new": "return 2"})
+    tools.call("write_file", {"path": "Bots/tests/test_bot.py", "content": "def test():\n    pass\n"})
+    record(s, grant)
+    return grant
+
+
+def revert(s, **extra):
+    return s.workspaces.revert(s.ledger, s.artifacts, s.task, operator="Martin", **extra)
+
+
+def test_revert_writes_the_originals_back_byte_for_byte_and_keeps_created_files(s):
+    changed_task(s)
+    assert (s.root / "src" / "bot.py").read_bytes() == EDITED
+    event = revert(s, channel="cli")
+    assert (s.root / "src" / "bot.py").read_bytes() == ORIGINAL  # CRLF kept exactly
+    assert (s.root / "tests" / "test_bot.py").exists()
+    assert event["body"] == {"project": "bots", "restored": [{"path": "Bots/src/bot.py", "after": sha256(ORIGINAL)}],
+                             "skipped": [], "kept": ["Bots/tests/test_bot.py"], "channel": "cli"}
+    assert event["actor"] == {"kind": "hil", "id": "Martin"}
+
+
+def test_revert_skips_a_file_changed_since_the_task_and_runs_once(s):
+    changed_task(s)
+    (s.root / "src" / "bot.py").write_bytes(b"changed by hand\r\n")
+    event = revert(s)
+    assert event["body"]["skipped"] == [{"path": "Bots/src/bot.py", "reason": "changed since the task"}]
+    assert (s.root / "src" / "bot.py").read_bytes() == b"changed by hand\r\n"
+    with pytest.raises(AlreadyReverted):
+        revert(s)
+
+
+def test_a_file_created_and_edited_in_a_later_call_stays_created(s):
+    grant = s.workspaces.grant(s.task, "bots")
+    Workspace(grant).call("write_file", {"path": "Bots/notes.md", "content": "a\n"})
+    record(s, grant)
+    Workspace(grant).call("edit_file", {"path": "Bots/notes.md", "old": "a", "new": "b"})
+    record(s, grant)
+    event = revert(s)
+    assert (event["body"]["restored"], event["body"]["kept"]) == ([], ["Bots/notes.md"])
+    assert (s.root / "notes.md").read_text(encoding="utf-8") == "b\n"
+
+
+def test_revert_does_not_write_while_the_project_is_locked(s):
+    changed_task(s)
+    lock = s.workspaces.lock("bots")
+    assert lock.acquire()
+    try:
+        with pytest.raises(WorkspaceBusy):
+            revert(s)
+    finally:
+        lock.release()
+    assert (s.root / "src" / "bot.py").read_bytes() == EDITED
+
+
+def test_revert_goes_through_the_guard_of_the_projects_current_config(s, tmp_path):
+    changed_task(s)
+    s.workspaces = Workspaces(parse_config({"projects": {"bots": {"folders": [str(s.root)], "write": True,
+                                                                  "deny": ["src/**"]}}}), None, tmp_path / "ws")
+    event = revert(s)
+    assert event["body"]["skipped"] == [{"path": "Bots/src/bot.py",
+                                         "reason": "refused: denied by the project's settings"}]
+    assert (s.root / "src" / "bot.py").read_bytes() == EDITED
+
+
+def test_a_revert_the_ledger_refuses_leaves_the_files_as_they_were(s, monkeypatch):
+    changed_task(s)
+
+    def refuse(event, artifacts=()):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(s.ledger, "append", refuse)
+    with pytest.raises(OSError):
+        revert(s)
+    assert (s.root / "src" / "bot.py").read_bytes() == EDITED  # written back to what it was before the revert
+
+
+def test_a_task_that_changed_nothing_has_nothing_to_revert(s):
+    with pytest.raises(ValueError, match="changed no project files"):
+        revert(s)
