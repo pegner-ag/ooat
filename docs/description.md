@@ -11,7 +11,8 @@ with model and decision connectors, the Topology Gate for T0–T2 and the task r
 
 `ooat serve` opens the web app: the inbox (new task, questions and ratings waiting, tasks paused by a provider
 failure, all tasks), a task page (live timeline, the document of every attempt rendered, as source or as a diff,
-attachments, cancel, the rating card), Usage (spend, calls and tokens by role and by connector) and Connectors (the
+attachments, cancel, the rating card; for a task on a project's folders the files OOAT saw change, the diff and
+revert behind a confirm step, also for a limit question's `revert` answer), Usage (spend, calls and tokens by role and by connector) and Connectors (the
 consequences card, enable with a typed confirmation, disable, hooks). English or Czech. The app is plain
 JavaScript served from the `ooat-core` wheel; the operator needs no Node.
 
