@@ -305,6 +305,15 @@ class Runtime:
                 remaining = last["body"]["remaining"]
                 return self._close(task, "CLOSED_PARTIAL", "Delivered in part.", f"Unmet criteria: {remaining}",
                                    artifacts=last["body"]["artifacts"])
+            if resumed and last is not None and last["body"]["outcome"] == "DONE" \
+                    and self._limit_request(task, last) is None:
+                used = self._unasked_limit(task, last)
+                if used is not None:  # the process stopped between the limited document and its question
+                    try:
+                        grant = self._grant(task, project, "worker")
+                    except WORKSPACE_PROBLEMS as problem:
+                        return self._workspace_problem(task, problem)
+                    return self._ask_limit(task, contract, last, used, grant, last.get("cost"))
             limited = self._limit_request(task, last) if resumed and last is not None else None
             if limited is not None:  # a document delivered at the workspace limit is never checked; it is asked about
                 answered = self._limit_answer(task, limited, last)
@@ -441,6 +450,16 @@ class Runtime:
         return next((e for e in self.ledger.events(task=task, types=["HIL_REQUEST"])
                      if _offers(e, LIMIT_OPTION) and result["id"] in e["body"]["evidence"]), None)
 
+    def _unasked_limit(self, task: str, result: dict) -> dict | None:
+        """The worker's WORKSPACE_USED with a reached limit right before this document, if any."""
+        events = self.ledger.events(task=task)
+        for event in reversed(events[:next(i for i, e in enumerate(events) if e["id"] == result["id"])]):
+            if event["type"] == "WORKSPACE_USED" and event["body"]["by"] == "worker":
+                return event if event["body"]["limit"] is not None else None
+            if event["type"] in ("RESULT", "CONTRACT_ISSUED", "HIL_RESPONSE"):
+                return None
+        return None
+
     def _raises(self, task: str) -> int:
         """How often the operator raised the workspace limit of this task: each doubles both limits."""
         events = self.ledger.events(task=task, types=["HIL_REQUEST", "HIL_RESPONSE"])
@@ -462,9 +481,10 @@ class Runtime:
         reached = (f"{grant.max_operations} operations" if limit["kind"] == "operations"
                    else f"{grant.max_write_bytes / 1048576:g} MB written")
         where = f"{limit['tool']} on {limit['path']}" if limit["path"] else limit["tool"]
-        summary = self.artifacts.read(delivered["body"]["artifacts"][0]).decode("utf-8")
+        # The agent's summary stays in its document, which carries the data class of what it quotes; the question
+        # is shown to every reader of the task, so it names only counts and the place of the limit.
         question = (f"Limit reached: {reached}, at operation {limit['operation']} ({where}). Files: {len(changed)} "
-                    f"changed, {len(created)} created. The agent's summary: {summary[:500].strip()} What next?")
+                    f"changed, {len(created)} created. The agent's summary is in its document. What next?")
         doubled = f"{grant.max_operations * 2} operations and {grant.max_write_bytes * 2 / 1048576:g} MB"
         deadline = (self.clock() + timedelta(hours=self.settings.hil_deadline_hours)).strftime("%Y-%m-%dT%H:%M:%SZ")
         request = self.ledger.append(new_event("HIL_REQUEST", task=task, contract=contract, actor=ACTOR,

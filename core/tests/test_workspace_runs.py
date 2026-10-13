@@ -261,3 +261,103 @@ def test_a_revert_the_ledger_refuses_leaves_the_files_as_they_were(s, monkeypatc
 def test_a_task_that_changed_nothing_has_nothing_to_revert(s):
     with pytest.raises(ValueError, match="changed no project files"):
         revert(s)
+
+
+# Final review of plan 07b ----------------------------------------------------------------------------------------
+
+from ooat_core.workspace import runs as runs_module  # noqa: E402
+from ooat_core.workspace import tools as tools_module  # noqa: E402
+
+BY_HAND = EDITED.replace(b"import os", b"import sys")
+
+
+def test_an_edit_by_someone_else_between_calls_is_never_overwritten(s):
+    grant = s.workspaces.grant(s.task, "bots")
+    Workspace(grant).call("edit_file", {"path": "Bots/src/bot.py", "old": "return 1", "new": "return 2"})
+    record(s, grant)
+    (s.root / "src" / "bot.py").write_bytes(BY_HAND)  # the operator, while the task waits
+    Workspace(grant).call("edit_file", {"path": "Bots/src/bot.py", "old": "return 2", "new": "return 3"})
+    record(s, grant)
+    event = revert(s)
+    assert event["body"]["skipped"] == [{"path": "Bots/src/bot.py",
+                                         "reason": "changed by someone else during the task"}]
+    assert b"import sys" in (s.root / "src" / "bot.py").read_bytes()
+
+
+def test_an_edit_by_someone_else_within_one_call_is_never_overwritten(s):
+    grant = s.workspaces.grant(s.task, "bots")
+    tools = Workspace(grant)
+    tools.call("edit_file", {"path": "Bots/src/bot.py", "old": "return 1", "new": "return 2"})
+    (s.root / "src" / "bot.py").write_bytes(BY_HAND)
+    tools.call("edit_file", {"path": "Bots/src/bot.py", "old": "return 2", "new": "return 3"})
+    record(s, grant)
+    assert revert(s)["body"]["skipped"][0]["reason"] == "changed by someone else during the task"
+    assert b"import sys" in (s.root / "src" / "bot.py").read_bytes()
+
+
+def test_a_failed_first_write_keeps_the_original_for_the_diff_and_revert(s, monkeypatch):
+    written = tools_module._atomic_write
+    attempts = []
+
+    def locked_once(path, data):
+        attempts.append(path)
+        if len(attempts) == 1:
+            raise PermissionError("the file is open in another process")
+        written(path, data)
+
+    monkeypatch.setattr(tools_module, "_atomic_write", locked_once)
+    grant = s.workspaces.grant(s.task, "bots")
+    tools = Workspace(grant)
+    with pytest.raises(ToolError):
+        tools.call("edit_file", {"path": "Bots/src/bot.py", "old": "return 1", "new": "return 2"})
+    tools.call("edit_file", {"path": "Bots/src/bot.py", "old": "return 1", "new": "return 2"})
+    body = record(s, grant)["body"]
+    assert s.artifacts.read(body["changed"][0]["original"]) == ORIGINAL
+    assert "+    return 2" in s.artifacts.read(body["diff"]).decode("utf-8")
+    assert revert(s)["body"]["restored"][0]["path"] == "Bots/src/bot.py"
+    assert (s.root / "src" / "bot.py").read_bytes() == ORIGINAL
+
+
+def two_changed_files(s):
+    (s.root / "README.md").write_bytes(b"# Bots\n")
+    grant = s.workspaces.grant(s.task, "bots")
+    tools = Workspace(grant)
+    tools.call("edit_file", {"path": "Bots/src/bot.py", "old": "return 1", "new": "return 2"})
+    tools.call("edit_file", {"path": "Bots/README.md", "old": "Bots", "new": "Boti"})
+    record(s, grant)
+
+
+def test_a_file_locked_during_revert_is_skipped_and_the_rest_is_reverted(s, monkeypatch):
+    two_changed_files(s)
+    written = runs_module._atomic_write
+
+    def locked(path, data):
+        if path.name == "bot.py":
+            raise PermissionError("the file is open in another process")
+        written(path, data)
+
+    monkeypatch.setattr(runs_module, "_atomic_write", locked)
+    event = revert(s)
+    assert event["body"]["skipped"] == [{"path": "Bots/src/bot.py", "reason": "not writable now (open elsewhere?)"}]
+    assert event["body"]["restored"][0]["path"] == "Bots/README.md"
+    assert (s.root / "README.md").read_bytes() == b"# Bots\n"
+
+
+def test_when_the_ledger_refuses_every_undo_is_tried(s, monkeypatch):
+    two_changed_files(s)
+    written, undone = runs_module._atomic_write, []
+
+    def undo_of_readme_fails(path, data):
+        if path.name == "README.md" and data == b"# Boti\n":  # writing README back to what the task left
+            raise PermissionError("locked")
+        undone.append(path.name)
+        written(path, data)
+
+    def refuse(event, artifacts=()):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(runs_module, "_atomic_write", undo_of_readme_fails)
+    monkeypatch.setattr(s.ledger, "append", refuse)
+    with pytest.raises(OSError):
+        revert(s)
+    assert (s.root / "src" / "bot.py").read_bytes() == EDITED  # undone although README's undo failed

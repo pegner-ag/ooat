@@ -250,3 +250,29 @@ def test_an_open_task_is_not_reverted_from_outside(tmp_path):
     setup, task, _, _ = limited(tmp_path)
     with pytest.raises(TaskOpen):
         setup.runtime.revert(task, operator="Martin")
+
+
+# Final review of plan 07b ----------------------------------------------------------------------------------------
+
+
+def test_a_restart_before_the_limit_question_still_asks_it(tmp_path, monkeypatch):
+    setup = Setup(tmp_path, model=WorkspaceModel([EDIT + [READ]]), max_operations=2)
+    task = setup.submit()
+
+    def crash(*args, **kwargs):
+        raise RuntimeError("the process died")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(Runtime, "_ask_limit", crash)
+        with pytest.raises(RuntimeError):
+            setup.runtime.run(task)
+    outcome = setup.runtime.run(task)
+    assert outcome.state == "HIL_WAIT" and setup.model.attempts["critic"] == 0
+    assert [o["id"] for o in setup.ledger.events(task=task, types=["HIL_REQUEST"])[-1]["body"]["options"]][0] \
+        == "raise_limit"
+
+
+def test_the_limit_question_does_not_quote_file_contents(tmp_path):
+    setup, task, _, request = limited(tmp_path)
+    assert "Smlouva platí" not in request["body"]["question"]  # the summary stays in the classed document
+    assert "document" in request["body"]["question"]
