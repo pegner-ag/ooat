@@ -100,8 +100,8 @@ INVALID = [
      _set(["inputs"], ["art_01J9ZQ6X9EK3M5N7P9Q1R3S5T7"])),
     ("event_abstain_without_missing", "event", "event.abstain.json", _delete(["body", "missing"])),
     ("event_abstain_reason_too_long", "event", "event.abstain.json", _set(["body", "reason"], "x" * 301)),
-    ("event_hil_request_four_options", "event", "event.hil_request.json",
-     _set(["body", "options"], [{"id": c, "label": c, "cost_usd": 0} for c in "abcd"])),
+    ("event_hil_request_five_options", "event", "event.hil_request.json",  # 4 is the most (ADR 0017)
+     _set(["body", "options"], [{"id": c, "label": c, "cost_usd": 0} for c in "abcde"])),
     ("event_hil_request_without_default", "event", "event.hil_request.json",
      _delete(["body", "default_on_silence"])),
     ("event_hil_request_r3_without_do_not_act", "event", "event.hil_request_r3.json",
