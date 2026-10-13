@@ -63,7 +63,9 @@ Chosen by decision (`docs/adr/`), not yet used in code:
 `ooat.toml` is `--config`, else `./ooat.toml`, else the one in OOAT's data folder (`OOAT_HOME`, else the OS user
 data folder); setup writes it there and never overwrites one (plan 01c). `ooat.toml` holds
 operator preferences (ledger URL, per-tier pins, connector settings, `[policy]` limits on countries
-and personal-data regions; secrets only as environment variable names). Connector enablement is ledger state
+and personal-data regions; `[projects.<slug>]` maps a project to its folders, with `write`, `data_class`, `deny`
+and limits, for agents that work on files through OOAT's own tools — tasks use it from plan 07b; secrets only as
+environment variable names). Connector enablement is ledger state
 (`ADAPTER_ACKNOWLEDGED`, `ADAPTER_DISABLED`, ADR 0010), written by `ooat connectors enable | disable` after the
 operator has read the connection consequences card; for client or personal data the operator also takes
 responsibility there (legal basis, processing agreement, region; ADR 0012), renewed every 12 months. Hook files a

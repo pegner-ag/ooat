@@ -1,6 +1,6 @@
 import pytest
 
-from ooat_core.config import Config, load_config, parse_config
+from ooat_core.config import Config, Project, folder_name, load_config, parse_config
 from ooat_core.connectors import ConnectorError
 from ooat_core.credentials_env import REDACTED, SecretResolver
 from ooat_core.gate import settings_from_config
@@ -178,3 +178,66 @@ def test_estimate_priors_in_gate_are_range_checked(gate, ok):
     else:
         with pytest.raises(ValueError):
             parse_config({"gate": gate})
+
+
+
+
+def test_projects_map_a_slug_to_folders_with_defaults(tmp_path):
+    (tmp_path / "Bots").mkdir()
+    config = parse_config({"projects": {"telegrambots": {"folders": [str(tmp_path / "Bots")]}}})
+    assert config.projects == {"telegrambots": Project(folders=(str(tmp_path / "Bots"),))}
+    project = config.projects["telegrambots"]
+    assert (project.write, project.data_class, project.deny) == (False, "internal", ())
+    assert (project.max_operations, project.max_write_mb, project.timeout_min) == (300, 5, 30)
+
+
+def test_a_project_sets_write_class_deny_and_limits(tmp_path):
+    config = parse_config({"projects": {"web-shop": {
+        "folders": [str(tmp_path / "a"), str(tmp_path / "b")], "write": True, "data_class": "client_confidential",
+        "deny": ["src/projects.json*", "logs/**"], "max_operations": 600, "max_write_mb": 12.5, "timeout_min": 45}}})
+    project = config.projects["web-shop"]
+    assert project.write is True and project.data_class == "client_confidential"
+    assert project.deny == ("src/projects.json*", "logs/**")
+    assert (project.max_operations, project.max_write_mb, project.timeout_min) == (600, 12.5, 45)
+
+
+@pytest.mark.parametrize("projects, message", [
+    ({"Bad Name": {"folders": ["/x"]}}, "project name"),
+    ({"p": {}}, "folders"),
+    ({"p": {"folders": []}}, "folders"),
+    ({"p": {"folders": ["relative/path"]}}, "absolute"),
+    ({"p": {"folders": ["/"]}}, "root"),
+    ({"p": {"folders": ["/a/app", "/b/APP"]}}, "same last name"),
+    ({"p": {"folders": ["/a"], "write": "yes"}}, "write"),
+    ({"p": {"folders": ["/a"], "data_class": "secret"}}, "data_class"),
+    ({"p": {"folders": ["/a"], "deny": ["/etc/passwd"]}}, "deny"),
+    ({"p": {"folders": ["/a"], "deny": ["../up"]}}, "deny"),
+    ({"p": {"folders": ["/a"], "max_operations": 0}}, "max_operations"),
+    ({"p": {"folders": ["/a"], "max_write_mb": -1}}, "max_write_mb"),
+    ({"p": {"folders": ["/a"], "timeout_min": True}}, "timeout_min"),
+    ({"p": {"folders": ["/a"], "password": "hunter2"}}, "unknown settings"),
+])
+def test_invalid_projects_are_refused_without_echoing_values(projects, message):
+    with pytest.raises(ValueError) as info:
+        parse_config({"projects": projects})
+    assert message in str(info.value) and "hunter2" not in str(info.value)
+
+
+def test_loading_checks_that_project_folders_exist_and_do_not_nest(tmp_path):
+    outer = tmp_path / "outer"
+    (outer / "inner").mkdir(parents=True)
+    path = tmp_path / "ooat.toml"
+    path.write_text(f'[projects.p]\nfolders = ["{(tmp_path / "missing").as_posix()}"]\n', encoding="utf-8")
+    with pytest.raises(ValueError, match="does not exist"):
+        load_config(path)
+    path.write_text(f'[projects.p]\nfolders = ["{outer.as_posix()}", "{(outer / "inner").as_posix()}"]\n',
+                    encoding="utf-8")
+    with pytest.raises(ValueError, match="inside"):
+        load_config(path)
+    path.write_text(f'[projects.p]\nfolders = ["{outer.as_posix()}"]\n', encoding="utf-8")
+    assert load_config(path).projects["p"].folders == (outer.as_posix(),)
+
+
+def test_the_folder_name_is_the_last_segment_in_either_convention():
+    assert folder_name("C:\\DATA_DEVELOPMENT\\TelegramBOTs\\") == "TelegramBOTs"
+    assert folder_name("/srv/projects/shop") == "shop"

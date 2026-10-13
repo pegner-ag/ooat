@@ -7,6 +7,7 @@ Gate's values (design 04 §4).
 """
 
 import dataclasses
+import os
 import re
 import tomllib
 from dataclasses import dataclass, field
@@ -23,6 +24,35 @@ _HOST = re.compile(rf"^{_LABEL}(?:\.{_LABEL})*$|^[0-9a-fA-F:]{{2,39}}$")  # a DN
 _GATE_NUMBERS = ("v_min_usd", "default_budget_usd", "hil_deadline_hours")
 _GATE_TOKENS = ("expected_output_tokens", "critic_output_tokens", "fallback_tokens_per_question")
 _GATE_SHARES = ("retry_prior", "critic_prior")  # estimate priors (plan 04d), a share from 0 to 1
+_PROJECT =re.compile(r"^[a-z0-9][a-z0-9_-]*$")
+_PROJECT_KEYS = frozenset({"folders", "write", "data_class", "deny", "max_operations", "max_write_mb", "timeout_min"})
+PROJECT_CLASSES = ("public", "internal", "client_confidential", "personal")
+
+
+@dataclass(frozen=True)
+class Project:
+    """[projects.<slug>]: the folders a task on this project works on (design 07 §3). Folders stay as written; the
+    workspace grant resolves them to real paths for each call."""
+    folders: tuple[str, ...]
+    write: bool = False  # read only unless the operator says otherwise
+    data_class: str = "internal"  # the highest data class in these folders, the task's minimum
+    deny: tuple[str, ...] = ()  # glob patterns relative to each folder, added to the never-visible list
+    max_operations: int = 300
+    max_write_mb: float = 5
+    timeout_min: float = 30
+
+
+def _absolute(path: str) -> bool:
+    return PurePosixPath(path).is_absolute() or PureWindowsPath(path).is_absolute()
+
+
+def folder_name(folder: str) -> str:
+    """The name the agent sees a folder by: its last path segment, in either convention."""
+    return re.split(r"[\\/]", folder.rstrip("\\/"))[-1] if folder.rstrip("\\/") else ""
+
+
+def _number(value) -> bool:
+    return type(value) in (int, float) and value > 0
 
 
 @dataclass(frozen=True)
@@ -35,6 +65,7 @@ class Config:
     blobs_dir: str | None = None  # artifact bodies; None = an "ooat-blobs" folder next to the ledger file
     gate: dict = field(default_factory=dict)  # [gate] overrides of GateSettings
     serve: dict = field(default_factory=dict)  # [serve]: operator, host, port, hosts, tls_cert, tls_key (design 05)
+    projects: dict[str, Project] = field(default_factory=dict)  # [projects.<slug>] (design 07 §3)
 
 
 def _table(data: dict, key: str, allowed: set[str]) -> dict:
@@ -49,7 +80,7 @@ def _table(data: dict, key: str, allowed: set[str]) -> dict:
 
 
 def parse_config(data: dict) -> Config:
-    unknown = set(data) - {"ledger", "routing", "connectors", "policy", "gate", "serve"}
+    unknown = set(data) - {"ledger", "routing", "connectors", "policy", "gate", "serve", "projects"}
     if unknown:
         raise ValueError(f"unknown config sections: {sorted(unknown)}")
     ledger = _table(data, "ledger", {"url", "blobs"})
@@ -98,7 +129,7 @@ def parse_config(data: dict) -> Config:
     return Config(ledger_url=ledger_url, pins=dict(pins), connectors={k: dict(v) for k, v in connectors.items()},
                   blocked_countries=frozenset(blocked),
                   personal_data_regions=frozenset(regions) if regions is not None else None,
-                  blobs_dir=blobs_dir, gate=dict(gate), serve=_serve(data))
+                  blobs_dir=blobs_dir, gate=dict(gate), serve=_serve(data), projects=_projects(data))
 
 
 def _serve(data: dict) -> dict:
@@ -121,6 +152,47 @@ def _serve(data: dict) -> dict:
     return dict(serve)
 
 
+def _projects(data: dict) -> dict[str, Project]:
+    table = _table(data, "projects", set())
+    projects = {}
+    for slug in table:
+        if not (isinstance(slug, str) and len(slug) <= 64 and _PROJECT.match(slug)):
+            raise ValueError("projects: a project name is lower-case letters, digits, - and _ (up to 64 characters)")
+        settings = _table(table, slug, set(_PROJECT_KEYS))
+        where = f"projects.{slug}"
+        folders = settings.get("folders")
+        if not isinstance(folders, list) or not folders or not all(isinstance(f, str) for f in folders):
+            raise ValueError(f"{where}.folders must list one or more folders")
+        if not all(_absolute(f) for f in folders):
+            raise ValueError(f"{where}.folders must be absolute paths")
+        names = [folder_name(f) for f in folders]
+        if not all(names) or any(re.fullmatch(r"[A-Za-z]:", n) for n in names):
+            raise ValueError(f"{where}.folders: a drive or the root cannot be a project folder")
+        if len({n.lower() for n in names}) != len(names):
+            raise ValueError(f"{where}.folders: two folders have the same last name; the agent tells them apart by it")
+        write = settings.get("write", False)
+        if not isinstance(write, bool):
+            raise ValueError(f"{where}.write must be true or false")
+        data_class = settings.get("data_class", "internal")
+        if data_class not in PROJECT_CLASSES:
+            raise ValueError(f"{where}.data_class must be one of {', '.join(PROJECT_CLASSES)}")
+        deny = settings.get("deny", [])
+        if not isinstance(deny, list) or not all(
+                isinstance(p, str) and p.strip() and not _absolute(p) and not re.match(r"^[A-Za-z]:", p)
+                and ".." not in re.split(r"[\\/]", p) for p in deny):
+            raise ValueError(f"{where}.deny must list patterns relative to each folder, such as \"logs/**\"")
+        limits = {}
+        for key, whole in (("max_operations", True), ("max_write_mb", False), ("timeout_min", False)):
+            if key in settings:
+                value = settings[key]
+                if not _number(value) or (whole and type(value) is not int):
+                    raise ValueError(f"{where}.{key} must be a positive {'whole ' if whole else ''}number")
+                limits[key] = value
+        projects[slug] = Project(folders=tuple(folders), write=write, data_class=data_class, deny=tuple(deny),
+                                 **limits)
+    return projects
+
+
 def load_config(path: str | Path) -> Config:
     """Load ooat.toml; a relative sqlite ledger path is resolved against the config file's folder."""
     with open(path, "rb") as file:
@@ -139,4 +211,18 @@ def load_config(path: str | Path) -> Config:
            for key in ("tls_cert", "tls_key") if key in config.serve}
     if tls:
         config = dataclasses.replace(config, serve={**config.serve, **tls})
+    for slug, project in config.projects.items():
+        real = []
+        for folder in project.folders:
+            if not os.path.isdir(folder):
+                raise ValueError(f"projects.{slug}: the folder {folder} does not exist or is not a folder")
+            real.append(os.path.normcase(os.path.realpath(folder)))
+        for outer in real:
+            for inner in real:
+                try:
+                    nested = inner != outer and os.path.commonpath([inner, outer]) == outer
+                except ValueError:  # another drive
+                    nested = False
+                if nested:
+                    raise ValueError(f"projects.{slug}: {inner} is inside {outer}; list only the outer folder")
     return config

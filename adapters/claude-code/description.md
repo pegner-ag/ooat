@@ -10,6 +10,10 @@ the operator's Claude subscription and its existing login.
   `--disable-slash-commands`, `--tools ""` and `--no-session-persistence`. This keeps the
   context to the request itself: a measured "OK" call carried about 500 tokens instead of about 50,000 with the
   user's default settings and memory.
+- With a workspace grant (`ModelRequest.workspace`, design 07) the call also gets `--mcp-config mcp.json` with
+  OOAT's own MCP server only and `--allowedTools mcp__ooat_workspace`; the built-in tools stay off, so the agent
+  works on the project's folders through OOAT's guarded file tools alone. The manifest says
+  `features.workspace: true`, checked by the live test.
 - `--model` is the model the gateway routed (`claude-haiku-4-5-20251001`, `claude-sonnet-5-5`, `claude-opus-5-5`).
 - Usage: `tokens_in` = `input_tokens` + `cache_creation_input_tokens`, `tokens_cached` = `cache_read_input_tokens`,
   `tokens_out` = `output_tokens`; metering `reported`.

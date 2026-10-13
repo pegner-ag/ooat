@@ -2,6 +2,7 @@ import json
 from pathlib import Path
 
 import pytest
+from connector_fakes import fake_manifest
 
 from ooat_core.validation import SpecValidationError, validate
 
@@ -31,3 +32,10 @@ def test_every_violation_is_reported():
 def test_unknown_schema_is_an_error():
     with pytest.raises(KeyError):
         validate("nonsense", {})
+
+
+def test_a_manifest_may_say_whether_it_can_work_with_project_folders():
+    for value in (True, False, None):
+        validate("provider", {**fake_manifest(), "features": {"workspace": value}})
+    with pytest.raises(SpecValidationError):
+        validate("provider", {**fake_manifest(), "features": {"workspace": "yes"}})

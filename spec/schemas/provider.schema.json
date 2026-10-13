@@ -53,7 +53,8 @@
       "properties": {
         "tool_use": {"type": ["boolean", "null"]},
         "vision": {"type": ["boolean", "null"]},
-        "context_tokens": {"type": ["integer", "null"], "minimum": 1}
+        "context_tokens": {"type": ["integer", "null"], "minimum": 1},
+        "workspace": {"type": ["boolean", "null"], "description": "Takes OOAT's workspace tools over MCP and no tool of its own (ADR 0017)."}
       }
     },
     "jurisdiction": {"$ref": "#/$defs/jurisdiction"}

@@ -13,12 +13,15 @@ code execution in a container (§9 point 3). Design: `tasks/f1-skeleton/task-07-
    `data_class`, `deny`, limits). A task's `project` selects them; a chat bridge or token can never name a folder.
    A project without an entry runs text only, as before.
 2. The runtime puts a workspace grant on the model request; the gateway routes it only to a connector whose
-   manifest has `features.workspace: true`, else the task closes with `NO_WORKSPACE_CONNECTOR`. A workspace task
+   manifest has `features.workspace: true`, else the gateway answers `NOT_PERMITTED` with "no enabled connector can
+   work with project folders" and the task closes abstained. A workspace task
    never runs without its files.
 3. The agent gets OOAT's file tools over MCP (`list_dir`, `find_files`, `search`, `read_file`, `edit_file`,
    `write_file`) and no built-in tools of its CLI. Every path passes OOAT's guard: relative to a granted folder,
-   resolved to its real path inside it, never a fixed protected name (`.env*`, keys and certificates, `.git`,
-   OOAT's own config, ledger and blobs) nor a `deny` pattern, text files only. No delete, rename or command.
+   resolved to its real path inside it, never a fixed protected name (`.env*`, keys, certificates and credential
+   files, `.git`, OOAT's own config, ledger and blobs) nor a `deny` pattern, text files only. Files that
+   development tools run (`CLAUDE.md`, `AGENTS.md`, `.mcp.json`, `.claude/`, `.vscode/`, `.github/`, `.idea/`) are
+   read only, and so are OOAT's own code, its connectors and the interpreter. No delete, rename or command.
 4. A project with `write = true` makes the task R1, read only R0; the project's `data_class` is the task's
    minimum class. Routing by data class (ADR 0010, ADR 0012) is unchanged.
 5. The tools journal every operation; after each call `ooat-core` appends `WORKSPACE_USED` (paths, hashes,

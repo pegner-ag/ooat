@@ -11,6 +11,8 @@ from dataclasses import dataclass
 from datetime import date
 from typing import ClassVar, Literal, Protocol
 
+from ..workspace.grant import WorkspaceGrant
+
 ENTRY_POINT_GROUP = "ooat.connectors"
 # The RESULT.error.code values a connector may raise (event schema, ADR 0010).
 ERROR_CODES = frozenset({"QUOTA_EXHAUSTED", "UNAVAILABLE", "API_ERROR", "TIMEOUT"})
@@ -36,6 +38,7 @@ class ModelRequest:
     timeout_s: float = 600
     model: str | None = None  # set by the gateway to the routed model; connectors must use it
     approved_hooks: tuple[str, ...] = ()  # set by the gateway: sha256 of hook files the operator approved (ADR 0015)
+    workspace: WorkspaceGrant | None = None  # set by the runtime from the task's project (design 07); never by text
 
 
 @dataclass(frozen=True)

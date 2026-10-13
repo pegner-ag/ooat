@@ -460,9 +460,11 @@ The reference installation will trial Anthropic, OpenAI, Google Gemini, Meta and
   "automation_permitted": "unknown",
   "concurrency": 1,
   "data_policy": {"training_on_inputs": false, "retention_days": null, "allowed_data_classes": ["public", "internal", "client_confidential"]},
-  "features": {"tool_use": true, "vision": true, "context_tokens": null}
+  "features": {"tool_use": true, "vision": true, "context_tokens": null, "workspace": true}
 }
 ```
+
+`features.workspace`: the connector takes OOAT's workspace tools over MCP and no tool of its own (ADR 0017).
 
 `automation_permitted` states the provider's published terms for unattended use: `permitted`, `not_permitted` or `unknown` (ADR 0010; v0.1's `operator_confirmed` is replaced by `permitted`). The operator's confirmation is not a manifest value but part of the connector's acknowledgement in the ledger (`automation_confirmed`, section 9). Unattended use requires `automation_permitted` ≠ `not_permitted` **and** an acknowledgement in force with `automation_confirmed: true`; an acknowledgement never overrides `not_permitted`. Manual relay (`subscription_manual`) is never used unattended and cannot be `permitted`; it always needs a human in the loop. The framework never works around provider terms. Unknown fields stay `null` until measured or confirmed, never guessed.
 
@@ -817,7 +819,7 @@ Besides risk-based gates, fixed checkpoints can be switched on per task: before 
 
 ### Security
 
-1. **Least privilege:** permissions live in the role card and are enforced by the runtime, not the prompt. Default: no network, writes only to the contract workspace.
+1. **Least privilege:** permissions live in the role card and are enforced by the runtime, not the prompt. Default: no network, writes only to the contract workspace. **Project workspace (ADR 0017):** the operator maps a project to folders in `ooat.toml`. A task on that project gets OOAT's six file tools over MCP — list, find, search, read, edit, write — confined to those folders; no delete, rename or command. Every path is checked as written and on its real path; `.env*`, keys, certificates and credential files, `.git` and OOAT's own data are never visible, and files that development tools run (`CLAUDE.md`, `.mcp.json`, `.claude/`, `.vscode/`, `.github/`) are never written. Every operation is journaled.
 2. **Untrusted content:** artifacts from the web, e-mail and client documents carry an `untrusted` flag, recorded in the ledger's `artifact` table (section 7, ADR 0008). A contract that reads an `untrusted` artifact may not hold R2 or R3 permissions; a separate contract acts on a structured extract. A “met” acceptance answer on a task with `untrusted` input is also confirmed by the critic (ADR 0011).
 3. **Sandbox:** `code_exec` capabilities run in an isolated container. Static checks and deny-lists are not a containment boundary; NOOA's documentation says so explicitly. Without a container runtime these capabilities are disabled.
 4. **Secrets:** API keys and subscription sessions live only in the gateway and tools; agents receive tool handles, never credentials.

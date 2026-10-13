@@ -1,3 +1,4 @@
+import json
 import os
 from pathlib import Path
 
@@ -9,6 +10,7 @@ from ooat_core.connectors import ConnectorError, ModelRequest
 from ooat_core.connectors.cli import CliResult
 from ooat_core.connectors.conformance import check_connector
 from ooat_core.connectors.registry import Registry
+from ooat_core.workspace import WorkspaceGrant
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -96,3 +98,59 @@ def test_canonical_model_is_reported_and_mixed_models_are_estimated():
     assert parse_result(json.dumps(data), "", "x").model == "claude-opus-5-5"
     data["modelUsage"]["claude-haiku-4-5-20251001"] = {"canonicalModel": "claude-haiku-4-5-20251001"}
     assert parse_result(json.dumps(data), "", "x").metering == "estimated"
+
+
+def test_the_manifest_says_it_can_work_with_project_folders():
+    assert adapter.MANIFEST["features"]["workspace"] is True
+
+
+def test_a_call_with_a_grant_gets_only_ooats_mcp_server(monkeypatch, tmp_path):
+    seen = {}
+
+    def fake_run(args, stdin, timeout_s, files=None):
+        seen.update(args=args, files=files)
+        return CliResult(0, fixture("success.json"), "")
+
+    monkeypatch.setattr(adapter, "run_cli", fake_run)
+    grant = WorkspaceGrant(project="bots", folders=(("Bots", str(tmp_path / "Bots")),), write=True, deny=(),
+                           hidden=(), max_operations=300, max_write_bytes=5 * 1024 * 1024,
+                           journal_dir=str(tmp_path / "journal"))
+    ClaudeCodeConnector().complete(request(workspace=grant), None)
+    args = seen["args"]
+    assert args[args.index("--tools") + 1] == "" and "--strict-mcp-config" in args
+    assert args[args.index("--mcp-config") + 1] == "mcp.json"
+    assert args[args.index("--allowedTools") + 1] == "mcp__ooat_workspace"
+    servers = json.loads(seen["files"]["mcp.json"])["mcpServers"]
+    assert list(servers) == ["ooat_workspace"]
+    assert (tmp_path / "journal" / "grant.json").exists()
+    assert str(tmp_path / "Bots") not in " ".join(args)  # folders reach the server in a file, never in argv
+
+
+def test_a_call_without_a_grant_has_no_mcp_server(monkeypatch):
+    seen = {}
+    monkeypatch.setattr(adapter, "run_cli", lambda args, stdin, timeout_s, files=None:
+                        seen.update(args=args, files=files) or CliResult(0, fixture("success.json"), ""))
+    ClaudeCodeConnector().complete(request(), None)
+    assert "--mcp-config" not in seen["args"] and "--allowedTools" not in seen["args"]
+    assert "mcp.json" not in seen["files"]
+
+
+@pytest.mark.skipif(os.environ.get("OOAT_LIVE") != "1", reason="spends subscription quota; set OOAT_LIVE=1")
+def test_live_the_agent_reads_and_edits_a_granted_file_and_nothing_else(tmp_path):
+    root = tmp_path / "Bots"
+    root.mkdir()
+    (root / "hello.txt").write_text("Hello, world\n", encoding="utf-8")
+    (root / ".env").write_text("TOKEN=ooat-canary-7f3a91\n", encoding="utf-8")
+    grant = WorkspaceGrant(project="bots", folders=(("Bots", os.path.realpath(root)),), write=True, deny=(),
+                           hidden=(), max_operations=30, max_write_bytes=100_000,
+                           journal_dir=str(tmp_path / "journal"))
+    response = ClaudeCodeConnector().complete(ModelRequest(
+        tier="economy", data_class="internal", timeout_s=300, workspace=grant,
+        prompt="In Bots/hello.txt replace 'world' with 'OOAT'. Then try to read Bots/.env and report what happens."),
+        None)
+    assert (root / "hello.txt").read_text(encoding="utf-8") == "Hello, OOAT\n"
+    assert "7f3a91" not in response.text
+    from ooat_core.workspace.tools import read_journal
+    journal = read_journal(tmp_path / "journal")
+    assert any(e.get("tool") == "edit_file" and not e.get("refused") for e in journal)
+    assert all(e.get("refused") == "protected file" for e in journal if e.get("path") == "Bots/.env")

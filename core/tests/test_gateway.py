@@ -10,6 +10,7 @@ from ooat_core.connectors.registry import Registry
 from ooat_core.gateway import Gateway, GatewayError
 from ooat_core.ids import new_id
 from ooat_core.ledger import Ledger, new_event
+from ooat_core.workspace import WorkspaceGrant
 from ooat_core.routing import RoutingPolicy
 from ooat_core.credentials_env import SecretResolver
 
@@ -521,3 +522,37 @@ def test_without_an_approval_the_connector_gets_no_hook_fingerprints():
     setup = ready(API)
     setup.gateway.call(setup.request())
     assert setup.connectors[0].calls[-1].approved_hooks == ()
+
+
+GRANT = WorkspaceGrant(project="bots", folders=(("Bots", "/srv/bots"),), write=True, deny=(), hidden=(),
+                       max_operations=300, max_write_bytes=5 * 1024 * 1024, journal_dir="/srv/ooat/journal")
+
+
+def test_a_workspace_request_goes_only_to_a_connector_that_can_work_with_folders():
+    able = FakeConnector({**fake_manifest("prv.able.subscription_cli", "subscription_cli"),
+                          "features": {"workspace": True}})
+    unable = FakeConnector(API)
+    setup = Setup(able, unable)
+    setup.acknowledge(able)
+    setup.acknowledge(unable)
+    setup.gateway.call(setup.request(workspace=GRANT))
+    assert able.calls and not unable.calls
+    assert able.calls[0].workspace == GRANT
+
+
+def test_a_workspace_request_without_an_able_connector_is_not_permitted():
+    setup = Setup(FakeConnector(API))
+    setup.acknowledge(setup.connectors[0])
+    with pytest.raises(GatewayError) as info:
+        setup.gateway.call(setup.request(workspace=GRANT))
+    assert info.value.code == "NOT_PERMITTED"
+    assert info.value.message == "no enabled connector can work with project folders"
+    assert "prv.fake.api: cannot work with project folders" in info.value.trace
+
+
+def test_the_workspace_message_holds_when_the_pre_scan_raised_the_class():
+    setup = Setup(FakeConnector(API))
+    setup.acknowledge(setup.connectors[0])
+    with pytest.raises(GatewayError) as info:
+        setup.gateway.call(setup.request(prompt="Uprav smlouvu, kontakt jan.novak@example.cz.", workspace=GRANT))
+    assert info.value.message == "no enabled connector can work with project folders"

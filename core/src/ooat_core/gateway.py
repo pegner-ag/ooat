@@ -311,6 +311,10 @@ class Gateway:
                 code = "QUOTA_EXHAUSTED" if pin in cooling else "NOT_PERMITTED"
                 raise GatewayError(code, f"pinned connector {pin} cannot serve this request", trace)
             return pinned[0]
+        if not candidates and getattr(request, "workspace", None) is not None and all(
+                line.endswith("cannot work with project folders") or "not acknowledged" in line
+                for line in trace if not line.startswith("pre-scan")):
+            raise GatewayError("NOT_PERMITTED", "no enabled connector can work with project folders", trace)
         if not candidates:
             code = "QUOTA_EXHAUSTED" if cooling else "NOT_PERMITTED"
             raise GatewayError(code, f"no connector can serve tier {request.tier} for {request.data_class}", trace)
@@ -319,6 +323,8 @@ class Gateway:
 
     def _exclusion(self, connector, request, acknowledgement, cooldowns) -> str | None:
         manifest, connector_id, data_class = connector.manifest, connector.manifest["id"], request.data_class
+        if getattr(request, "workspace", None) is not None and not (manifest.get("features") or {}).get("workspace"):
+            return "cannot work with project folders"
         if request.tier not in manifest["tiers"] and request.tier not in self._models(connector_id):
             return f"does not serve tier {request.tier}"
         if not self._routing.allows(request.tier, connector_id):
