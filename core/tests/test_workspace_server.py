@@ -92,3 +92,11 @@ def test_the_module_serves_utf8_json_lines_over_stdio(root, tmp_path):
 def test_the_module_refuses_to_start_without_a_grant_file():
     done = subprocess.run([sys.executable, "-m", "ooat_core.workspace"], capture_output=True, timeout=60)
     assert done.returncode == 2 and b"usage" in done.stderr
+
+
+def test_a_malformed_call_is_an_error_answer_not_the_end_of_the_server(root, tmp_path):
+    ws = Workspace(grant(root, tmp_path))
+    for params in ("x", {"name": "list_dir", "arguments": "x"}):
+        answer = handle(ws, {"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": params})
+        assert answer["result"]["isError"] is True
+    assert handle(ws, {"jsonrpc": "2.0", "id": 2, "method": "initialize", "params": "x"})["result"]

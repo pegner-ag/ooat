@@ -177,3 +177,24 @@ def test_grant_for_hides_the_ledgers_sqlite_side_files(tmp_path, ooat_home, proj
     grant = grant_for(config, tmp_path / "ooat.toml", "bots", tmp_path / "journal")
     for suffix in ("-wal", "-shm", "-journal"):
         assert os.path.realpath(f"{ledger}{suffix}") in grant.hidden
+
+
+@pytest.mark.parametrize("path", ["Bots/.claude/.credentials.json", "Bots/.docker/config.json",
+                                  "Bots/.kube/config", "Bots/infra/prod.tfstate"])
+def test_cli_sessions_and_cluster_credentials_are_protected(project, path):
+    assert refused(guard(project[0]), path) == "protected file"
+
+
+def test_ooats_own_code_and_interpreter_are_never_writable(tmp_path, ooat_home, project):
+    import ooat_core
+    root, _ = project
+    config = parse_config({"projects": {"bots": {"folders": [str(root)], "write": True}}})
+    grant = grant_for(config, tmp_path / "ooat.toml", "bots", tmp_path / "journal")
+    assert os.path.realpath(os.path.dirname(ooat_core.__file__)) in grant.read_only
+    assert os.path.realpath(sys.prefix) in grant.read_only
+    assert WorkspaceGrant.from_json(grant.to_json()) == grant
+    g = Guard(WorkspaceGrant(**{**grant.__dict__, "read_only": (os.path.realpath(root / "src"),)}))
+    assert g.resolve("Bots/src/bot.py")[0] == "Bots/src/bot.py"
+    with pytest.raises(Refused) as info:
+        g.resolve("Bots/src/bot.py", writing=True)
+    assert info.value.reason == "read only: OOAT's own code"

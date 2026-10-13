@@ -15,7 +15,7 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     grant = WorkspaceGrant.from_json(Path(argv[0]).read_text(encoding="utf-8"))
     # A pipe's default is the ANSI code page and \r\n on Windows; MCP is UTF-8 with \n.
-    sys.stdin.reconfigure(encoding="utf-8")
+    sys.stdin.reconfigure(encoding="utf-8", errors="replace")  # a bad byte becomes a parse error, not the end
     sys.stdout.reconfigure(encoding="utf-8", newline="\n")
     serve(Workspace(grant), sys.stdin, sys.stdout)
     return 0

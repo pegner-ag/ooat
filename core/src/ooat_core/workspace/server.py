@@ -44,7 +44,8 @@ def handle(workspace: Workspace, message: dict) -> dict | None:
         return None
     method, ident = message.get("method"), message["id"]
     if method == "initialize":
-        asked = (message.get("params") or {}).get("protocolVersion")
+        params = message.get("params") if isinstance(message.get("params"), dict) else {}
+        asked = params.get("protocolVersion")
         result = {"protocolVersion": asked or PROTOCOL, "capabilities": {"tools": {}},
                   "serverInfo": {"name": SERVER_NAME, "version": "0.1.0"}, "instructions": INSTRUCTIONS}
     elif method == "ping":
@@ -53,7 +54,7 @@ def handle(workspace: Workspace, message: dict) -> dict | None:
         write = workspace.grant.write
         result = {"tools": [t for t in TOOLS if write or t["name"] not in WRITE_TOOLS]}
     elif method == "tools/call":
-        params = message.get("params") or {}
+        params = message.get("params") if isinstance(message.get("params"), dict) else {}
         try:
             text, error = workspace.call(params.get("name"), params.get("arguments") or {}), False
         except ToolError as answer:

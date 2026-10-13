@@ -174,3 +174,38 @@ def test_search_refuses_a_long_regular_expression_and_stops_at_its_deadline(root
         ws.call("search", {"query": "a" * 201, "regex": True})
     monkeypatch.setattr(tools, "SEARCH_SECONDS", 0)
     assert ws.call("search", {"query": "def main"}).endswith("(search stopped after 0 s; narrow the search)")
+
+
+def test_a_server_after_a_crash_mid_line_ends_the_cut_line_and_the_next_one_still_reads(root, tmp_path):
+    (tmp_path / "journal").mkdir()
+    (tmp_path / "journal" / "journal.jsonl").write_text('{"n": 1, "tool": "list_dir", "path": "Bots"}\n{"n": 2, "to',
+                                                        encoding="utf-8")
+    workspace(root, tmp_path).call("list_dir", {"path": "Bots"})
+    third = workspace(root, tmp_path)
+    assert [e["n"] for e in read_journal(tmp_path / "journal")] == [1, 2]
+    third.call("list_dir", {"path": "Bots"})
+    assert read_journal(tmp_path / "journal")[-1]["n"] == 3
+
+
+def test_a_tool_answer_that_is_not_a_refusal_is_journaled_too(root, tmp_path):
+    ws = workspace(root, tmp_path)
+    with pytest.raises(ToolError, match="no such file"):
+        ws.call("read_file", {"path": "Bots/missing.txt"})
+    (entry,) = read_journal(tmp_path / "journal")
+    assert entry["n"] == 1 and entry["path"] == "Bots/missing.txt" and "no such file" in entry["error"]
+    with pytest.raises(ToolError) as info:
+        workspace(root, tmp_path, operations=1).call("list_dir", {"path": "Bots"})
+    assert str(info.value) == STOP
+
+
+def test_search_skips_a_file_it_cannot_read(root, tmp_path, monkeypatch):
+    from pathlib import Path
+    real_read = Path.read_bytes
+
+    def locked(self):
+        if self.name == "README.md":
+            raise PermissionError(13, "locked by another process")
+        return real_read(self)
+
+    monkeypatch.setattr(Path, "read_bytes", locked)
+    assert workspace(root, tmp_path).call("search", {"query": "def main"}) == "Bots/src/bot.py:3: def main():"

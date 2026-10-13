@@ -21,7 +21,7 @@ code execution in a container (§9 point 3). Design: `tasks/f1-skeleton/task-07-
    resolved to its real path inside it, never a fixed protected name (`.env*`, keys, certificates and credential
    files, `.git`, OOAT's own config, ledger and blobs) nor a `deny` pattern, text files only. Files that
    development tools run (`CLAUDE.md`, `AGENTS.md`, `.mcp.json`, `.claude/`, `.vscode/`, `.github/`, `.idea/`) are
-   read only. No delete, rename or command.
+   read only, and so are OOAT's own code, its connectors and the interpreter. No delete, rename or command.
 4. A project with `write = true` makes the task R1, read only R0; the project's `data_class` is the task's
    minimum class. Routing by data class (ADR 0010, ADR 0012) is unchanged.
 5. The tools journal every operation; after each call `ooat-core` appends `WORKSPACE_USED` (paths, hashes,

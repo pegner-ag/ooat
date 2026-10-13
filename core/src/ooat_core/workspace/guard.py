@@ -100,3 +100,5 @@ class Guard:
             raise Refused("OOAT's own data", path)
         if writing and any(s in READ_ONLY_FOLDERS or s in READ_ONLY_NAMES for s in segments):
             raise Refused("read only: development tools run this file", path)
+        if writing and any(within(real, own) for own in self.grant.read_only):
+            raise Refused("read only: OOAT's own code", path)

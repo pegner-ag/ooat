@@ -93,6 +93,10 @@ class Workspace:
         self.guard = Guard(grant)
         self._dir = Path(grant.journal_dir)
         (self._dir / "originals").mkdir(parents=True, exist_ok=True)
+        journal = self._dir / JOURNAL
+        data = journal.read_bytes() if journal.exists() else b""
+        if data and not data.endswith(b"\n"):  # a line cut off by a crash: drop it, or the next line would join it
+            journal.write_bytes(data[:data.rfind(b"\n") + 1])
         earlier = read_journal(self._dir)
         self._operations = max((e["n"] for e in earlier), default=0)
         self._written = sum(e.get("bytes", 0) for e in earlier if not e.get("failed"))
@@ -124,6 +128,10 @@ class Workspace:
         except Refused as refusal:
             self._log(tool, refusal.path, refused=refusal.reason)
             raise ToolError(str(refusal)) from None
+        except ToolError as answer:  # every operation leaves a line, so a second server counts it (design 07 §5)
+            if str(answer) != STOP:  # the limit line is already written
+                self._log(tool, path, error=str(answer)[:200])
+            raise
         except OSError as error:
             self._log(tool, path, error=type(error).__name__)
             raise ToolError(f"could not access {path}: {error.strerror or type(error).__name__}") from None
@@ -197,9 +205,12 @@ class Workspace:
             if time.monotonic() - start >= SEARCH_SECONDS:
                 matches.append(f"(search stopped after {SEARCH_SECONDS} s; narrow the search)")
                 break
-            if real.stat().st_size > MAX_SEARCH_BYTES:
+            try:
+                if real.stat().st_size > MAX_SEARCH_BYTES:
+                    continue
+                data = real.read_bytes()
+            except OSError:  # locked by a running service, or gone during the walk
                 continue
-            data = real.read_bytes()
             if not is_text(data):
                 continue
             for number, line in enumerate(data.decode("utf-8").splitlines(), 1):
