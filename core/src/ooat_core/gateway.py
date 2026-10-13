@@ -22,7 +22,7 @@ from .connectors.registry import Registry
 from .decisions import (check_questions, checked_answers, fallback_prompt, merged_answers, parse_fallback,
                         with_reversed_choices)
 from .ledger import DATA_CLASSES, Ledger, new_event
-from .pii import raised_class
+from .pii import higher_class, raised_class
 from .routing import Price, RoutingPolicy
 from .credentials_env import SecretResolver
 
@@ -289,6 +289,10 @@ class Gateway:
         if effective != request.data_class:
             trace.append(f"pre-scan found personal data: {request.data_class} raised to {effective}")
             request = dataclasses.replace(request, data_class=effective)
+        grant = getattr(request, "workspace", None)
+        if grant is not None and higher_class(request.data_class, grant.data_class) != request.data_class:
+            trace.append(f"project {grant.project} holds {grant.data_class} data: {request.data_class} raised")
+            request = dataclasses.replace(request, data_class=grant.data_class)
         events = self._ledger.events(types=_STATE_EVENTS)
         acknowledged, cooldowns = acknowledgements(events), self._cooldowns(events)
         for connector_id in self._registry.ids(kind):
@@ -312,8 +316,8 @@ class Gateway:
                 raise GatewayError(code, f"pinned connector {pin} cannot serve this request", trace)
             return pinned[0]
         if not candidates and getattr(request, "workspace", None) is not None and all(
-                line.endswith("cannot work with project folders") or "not acknowledged" in line
-                for line in trace if not line.startswith("pre-scan")):
+                line.endswith(("cannot work with project folders", "not acknowledged by the operator (or disabled)"))
+                for line in trace if not line.startswith(("pre-scan", "project "))):
             raise GatewayError("NOT_PERMITTED", "no enabled connector can work with project folders", trace)
         if not candidates:
             code = "QUOTA_EXHAUSTED" if cooling else "NOT_PERMITTED"

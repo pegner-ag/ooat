@@ -198,3 +198,21 @@ def test_ooats_own_code_and_interpreter_are_never_writable(tmp_path, ooat_home, 
     with pytest.raises(Refused) as info:
         g.resolve("Bots/src/bot.py", writing=True)
     assert info.value.reason == "read only: OOAT's own code"
+
+
+@pytest.mark.parametrize("path", ["Bots/CLAUDE.local.md", "Bots/.envrc", "Bots/.cursor/rules.md",
+                                  "Bots/.gemini/settings.json", "Bots/.codex/config.toml",
+                                  "Bots/.devcontainer/devcontainer.json", "Bots/.husky/pre-commit"])
+def test_more_files_that_tools_run_or_obey_are_read_only(project, path):
+    g = guard(project[0])
+    assert g.resolve(path)[0] == path
+    with pytest.raises(Refused) as info:
+        g.resolve(path, writing=True)
+    assert info.value.reason == "read only: development tools run this file"
+
+
+def test_a_grant_carries_the_projects_data_class(tmp_path, ooat_home, project):
+    config = parse_config({"projects": {"bots": {"folders": [str(project[0])], "data_class": "client_confidential"}}})
+    grant = grant_for(config, None, "bots", tmp_path / "journal")
+    assert grant.data_class == "client_confidential"
+    assert WorkspaceGrant.from_json(grant.to_json()) == grant

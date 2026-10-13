@@ -16,8 +16,9 @@ PROTECTED_NAMES = (".env", ".env.*", "*.pem", "*.key", "*.pfx", "*.p12", "*.kdbx
 PROTECTED_FOLDERS = (".git", ".ssh", ".aws", ".azure", ".gnupg", ".docker", ".kube")
 # Readable but never writable: files a development tool runs or obeys the next time the operator opens the folder
 # (hooks, MCP servers, tasks, workflows, agent instructions), so a written one would be a command (ADR 0017 point 7).
-READ_ONLY_NAMES = ("claude.md", "agents.md", "gemini.md", ".mcp.json")
-READ_ONLY_FOLDERS = (".claude", ".vscode", ".github", ".idea")
+READ_ONLY_NAMES = ("claude.md", "claude.local.md", "agents.md", "gemini.md", ".mcp.json", ".envrc")
+READ_ONLY_FOLDERS = (".claude", ".vscode", ".github", ".idea", ".cursor", ".gemini", ".codex", ".devcontainer",
+                     ".husky")
 
 
 class WorkspaceUnavailable(ValueError):
@@ -35,6 +36,7 @@ class WorkspaceGrant:
     max_write_bytes: int
     journal_dir: str  # the runtime's folder for this task: the journal, the originals, the grant file
     read_only: tuple[str, ...] = ()  # real paths of OOAT's own code and interpreter: readable, never written
+    data_class: str = "internal"  # the project's class: the gateway routes the call at least this high (ADR 0017)
 
     def to_json(self) -> str:
         return json.dumps(dataclasses.asdict(self))
@@ -72,11 +74,12 @@ def grant_for(config, config_path, project: str, journal_dir) -> WorkspaceGrant:
             inside = False
         if inside:
             raise WorkspaceUnavailable(f"the journal folder {journal} is inside a folder of project {project}")
-    hidden = [os.path.realpath(p) for p in (config_path, data_folder(), *_ledger_paths(config))] + [journal]
+    hidden = [os.path.realpath(p) for p in (config_path, data_folder(), *_ledger_paths(config)) if p is not None]
+    hidden.append(journal)
     return WorkspaceGrant(project=project, folders=tuple(folders), write=settings.write, deny=settings.deny,
                           hidden=tuple(dict.fromkeys(hidden)), max_operations=settings.max_operations,
                           max_write_bytes=int(settings.max_write_mb * 1024 * 1024), journal_dir=journal,
-                          read_only=_own_code())
+                          read_only=_own_code(), data_class=settings.data_class)
 
 
 def _own_code() -> tuple[str, ...]:

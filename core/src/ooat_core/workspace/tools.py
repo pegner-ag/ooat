@@ -99,7 +99,8 @@ class Workspace:
             journal.write_bytes(data[:data.rfind(b"\n") + 1])
         earlier = read_journal(self._dir)
         self._operations = max((e["n"] for e in earlier), default=0)
-        self._written = sum(e.get("bytes", 0) for e in earlier if not e.get("failed"))
+        failed = {(e["n"], e["tool"]) for e in earlier if e.get("failed")}
+        self._written = sum(e.get("bytes", 0) for e in earlier if (e["n"], e["tool"]) not in failed)
         self._originals = {os.path.normcase(e["real"]): e["original"] for e in earlier if e.get("original")}
         self._stopped = False
 

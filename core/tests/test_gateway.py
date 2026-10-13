@@ -1,3 +1,4 @@
+import dataclasses
 import json
 from datetime import datetime, timedelta, timezone
 
@@ -556,3 +557,15 @@ def test_the_workspace_message_holds_when_the_pre_scan_raised_the_class():
     with pytest.raises(GatewayError) as info:
         setup.gateway.call(setup.request(prompt="Uprav smlouvu, kontakt jan.novak@example.cz.", workspace=GRANT))
     assert info.value.message == "no enabled connector can work with project folders"
+
+
+def test_a_data_class_refusal_on_a_workspace_request_is_not_called_a_folder_problem():
+    able = FakeConnector({**fake_manifest("prv.able.subscription_cli", "subscription_cli"),
+                          "features": {"workspace": True}})
+    setup = Setup(able)
+    setup.acknowledge(able, classes=("public", "internal"))
+    with pytest.raises(GatewayError) as info:
+        setup.gateway.call(setup.request(workspace=dataclasses.replace(GRANT, data_class="client_confidential")))
+    assert info.value.code == "NOT_PERMITTED"
+    assert info.value.message != "no enabled connector can work with project folders"
+    assert any(line.startswith("project bots holds client_confidential data") for line in info.value.trace)
