@@ -630,13 +630,15 @@ The example shows the language rule: keys, event types and reason codes are Engl
 | `HIL_RESPONSE` | Human | Answer, approval, scope change | Requester, orchestrator |
 | `BUDGET_WARNING` / `QUOTA_WARNING` | Gateway | Soft limit reached | Agent, orchestrator |
 | `TASK_CLOSED` | Orchestrator | Outcome, costs, final artifact | Dashboard, calibration |
+| `WORKSPACE_USED` | `ooat-core` (runtime) | What the calls of one role (worker or critic) did on a project's folders since the last such event: paths read, changed and created with hashes and line counts, refusals, the limit reached, and the role's totals (operations, bytes written); originals and a diff as artifacts; never contents (ADR 0017) | Dashboard, revert |
+| `WORKSPACE_REVERTED` | Human (named operator) | A task's changes reverted: restored, skipped (changed since) and kept (created) paths (ADR 0017) | Dashboard |
 | `TASK_RATED` / `DEFECT_FOUND` | Human | Acceptance rating, value class, the operator's verdict per decision record (`decisions`: event, question, verdict, value; ADR 0011); defect found after closing | Calibration, decision thresholds |
 | `ADAPTER_ACKNOWLEDGED` | Human (named operator) | Connector enabled: manifest version, allowed data classes, `automation_confirmed`, `jurisdiction_sha256` (ADR 0010), optional `responsibility` (ADR 0012) and `approved_hooks` (ADR 0015); `task: null` | Gateway, dashboard |
 | `ADAPTER_DISABLED` | Human (named operator) | Connector disabled: adapter, operator, reason (ADR 0010); `task: null` | Gateway, dashboard |
 | `OPERATOR_TOKEN_ISSUED` | Human (named operator) | An API token acting as the operator: token id, name, scopes, `max_data_class`, SHA-256 of the token (never the token), expiry; `task: null` (ADR 0016) | API, dashboard |
 | `OPERATOR_TOKEN_REVOKED` | Human (named operator) | Token revoked: token id, operator, reason; `task: null` (ADR 0016) | API, dashboard |
 
-Only agents emit `CLAIM`, `RESULT` and `OBJECTION`; only humans emit `HIL_RESPONSE`, `TASK_RATED`, `DEFECT_FOUND`, `ADAPTER_ACKNOWLEDGED`, `ADAPTER_DISABLED`, `OPERATOR_TOKEN_ISSUED` and `OPERATOR_TOKEN_REVOKED`; their actor is the operator bound to the session or token, never a name from a request, and they record the `channel` (`cli`, `web`, `token:<id>`) they came from (ADR 0016). The one exception: a default applied on silence is a `HIL_RESPONSE` written by the runtime under the reserved actor id `default-on-silence` (section 9, HIL rule 5).
+Only agents emit `CLAIM`, `RESULT` and `OBJECTION`; only humans emit `HIL_RESPONSE`, `TASK_RATED`, `DEFECT_FOUND`, `ADAPTER_ACKNOWLEDGED`, `ADAPTER_DISABLED`, `OPERATOR_TOKEN_ISSUED`, `OPERATOR_TOKEN_REVOKED` and `WORKSPACE_REVERTED`; their actor is the operator bound to the session or token, never a name from a request, and they record the `channel` (`cli`, `web`, `token:<id>`) they came from (ADR 0016). The one exception: a default applied on silence is a `HIL_RESPONSE` written by the runtime under the reserved actor id `default-on-silence` (section 9, HIL rule 5).
 
 ### Debate rules
 
@@ -791,7 +793,7 @@ A named approver is an operator identity bound to something the operator holds, 
 }
 ```
 
-Rules: 2 to 3 options, always a recommendation, always a default on silence, a cost per option. An option may carry `acts`; an R3 request must offer an option with `acts: false` and its default on silence must be that option, so silence never acts (ADR 0003). Non-blocking questions are collected into a digest twice a day; blocking ones go out immediately through the configured notifier with one-tap answers.
+Rules: 2 to 3 options (the workspace limit question has 4, ADR 0017), always a recommendation, always a default on silence, a cost per option. An option may carry `acts`; an R3 request must offer an option with `acts: false` and its default on silence must be that option, so silence never acts (ADR 0003). Non-blocking questions are collected into a digest twice a day; blocking ones go out immediately through the configured notifier with one-tap answers.
 
 The ledger enforces the cross-field rules a schema cannot express, and refuses an event that breaks them:
 
@@ -813,13 +815,23 @@ Budget is never raised automatically; it is a blocking HIL question with the sta
 
 Stopping keeps a usable document as `PARTIAL`. Narrowing the scope halves the output prior of the Gate's next estimate, so narrowing can bring a task under its budget; the Gate asks at most 3 budget questions per task.
 
+### Workspace limit question (ADR 0017)
+
+When the worker reaches a task's workspace limit (operations or bytes written), the call ends with its summary and the task asks:
+
+| Options | Recommended | Default on silence |
+| --- | --- | --- |
+| raise the limit for this task and continue (`raise_limit`: both limits doubled for this task, one more attempt, `ooat.toml` unchanged), continue in a follow-up task (`follow_up`, linked by `follows`), keep the changes as they are (`keep`, `acts: false`), revert them (`revert`) | `raise_limit` | `keep` |
+
+A limited document is not checked. A raised attempt that reaches the limit again asks again; nothing is raised automatically.
+
 ### Defined HIL entry points
 
 Besides risk-based gates, fixed checkpoints can be switched on per task: before start (topology and budget), after planning (contract DAG), at phase end and before closing. The human can pause a Task, change scope or add a `DECISION` at any time; every intervention is an event.
 
 ### Security
 
-1. **Least privilege:** permissions live in the role card and are enforced by the runtime, not the prompt. Default: no network, writes only to the contract workspace. **Project workspace (ADR 0017):** the operator maps a project to folders in `ooat.toml`. A task on that project gets OOAT's six file tools over MCP — list, find, search, read, edit, write — confined to those folders; no delete, rename or command. Every path is checked as written and on its real path; `.env*`, keys, certificates and credential files, `.git` and OOAT's own data are never visible, and files that development tools run (`CLAUDE.md`, `.mcp.json`, `.claude/`, `.vscode/`, `.github/`) are never written. Every operation is journaled.
+1. **Least privilege:** permissions live in the role card and are enforced by the runtime, not the prompt. Default: no network, writes only to the contract workspace. **Project workspace (ADR 0017):** the operator maps a project to folders in `ooat.toml`. A task on that project gets OOAT's six file tools over MCP — list, find, search, read, edit, write — confined to those folders; no delete, rename or command. Every path is checked as written and on its real path; `.env*`, keys, certificates and credential files, `.git` and OOAT's own data are never visible, and files that development tools run (`CLAUDE.md`, `.mcp.json`, `.claude/`, `.vscode/`, `.github/`) are never written. Every operation is journaled. After every call the runtime records the journal as `WORKSPACE_USED`, stores each original before its first change, and lets the operator revert a closed task: a file changed since is skipped, a created file is never deleted.
 2. **Untrusted content:** artifacts from the web, e-mail and client documents carry an `untrusted` flag, recorded in the ledger's `artifact` table (section 7, ADR 0008). A contract that reads an `untrusted` artifact may not hold R2 or R3 permissions; a separate contract acts on a structured extract. A “met” acceptance answer on a task with `untrusted` input is also confirmed by the critic (ADR 0011).
 3. **Sandbox:** `code_exec` capabilities run in an isolated container. Static checks and deny-lists are not a containment boundary; NOOA's documentation says so explicitly. Without a container runtime these capabilities are disabled.
 4. **Secrets:** API keys and subscription sessions live only in the gateway and tools; agents receive tool handles, never credentials.
