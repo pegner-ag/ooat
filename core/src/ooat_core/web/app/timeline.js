@@ -36,6 +36,13 @@ export function describe(event) {
     case "TASK_RATED":
       return {tone: "info", text: t("timeline.rated", {who, value: body.value_class,
         verdict: body.accepted ? t("common.yes") : t("common.no")})};
+    case "WORKSPACE_USED":
+      return {tone: body.limit ? "ask" : "info", text: t("timeline.workspace", {by: body.by,
+        changed: body.changed.length, created: body.created.length, read: body.read.length,
+        refused: body.refused.length})};
+    case "WORKSPACE_REVERTED":
+      return {tone: "info", text: t("timeline.reverted", {who, restored: body.restored.length,
+        skipped: body.skipped.length, kept: body.kept.length})};
     default:
       return {tone: "info", text: event.type};
   }

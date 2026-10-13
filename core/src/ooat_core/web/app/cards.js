@@ -23,7 +23,10 @@ export function questionCard(request, ctx, onDone) {
   const note = h("input", {type: "text", maxlength: "20000", placeholder: t("hil.note"), "aria-label": t("hil.note")});
   const buttons = request.options.map((/** @type {any} */ option) => h("button", {
     type: "button", class: option.id === request.recommended ? "recommended" : undefined,
-    onclick: () => answer(option.id),
+    onclick: () => {
+      if (option.id === "revert" && !confirm(t("hil.revertConfirm"))) return;  // the second confirmation
+      answer(option.id);
+    },
   }, label(option) + (option.id === request.recommended ? " ★" : "")
     + (option.cost_usd ? ` · ${money(option.cost_usd)}` : "")));
 
