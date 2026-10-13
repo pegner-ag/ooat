@@ -70,6 +70,37 @@ def task_summary(task: str, events: list[dict], data_class: str, cap: str | None
     }
 
 
+def workspace_view(events: list[dict], visible: bool) -> dict | None:
+    """What a task on a project's folders did there, for the web app and the chat bridge (design 07 §7). Above the
+    reader's class every task gets the stub, so the reader cannot even tell whether it worked on files; otherwise
+    None for a text-only task."""
+    submitted = next(e for e in events if e["type"] == "TASK_SUBMITTED")
+    if not visible:
+        return stub(submitted["task"])
+    workspace = submitted["body"].get("workspace")
+    if workspace is None:
+        return None
+    used = [e["body"] for e in events if e["type"] == "WORKSPACE_USED" and e["body"]["by"] == "worker"]
+    files: dict[str, dict] = {}
+    for body in used:
+        for item in body["created"]:
+            entry = files.setdefault(item["path"], {"path": item["path"], "kind": "created", "added": 0, "removed": 0})
+            entry["added"] += item["added"]
+        for item in body["changed"]:
+            entry = files.setdefault(item["path"], {"path": item["path"], "kind": "changed", "added": 0, "removed": 0})
+            entry["added"], entry["removed"] = entry["added"] + item["added"], entry["removed"] + item["removed"]
+    diffs = [body["diff"] for body in used if body.get("diff")]
+    reverted = _latest(events, "WORKSPACE_REVERTED")
+    return {"write": workspace["write"], "folders": workspace["folders"], "files": list(files.values()),
+            "refused": sum(len(body["refused"]) for body in used),
+            "limit": any(body["limit"] is not None for body in used), "diff": diffs[-1] if diffs else None,
+            "reverted": None if reverted is None else {
+                "restored": [i["path"] for i in reverted["body"]["restored"]],
+                "skipped": reverted["body"]["skipped"], "kept": reverted["body"]["kept"],
+                "by": reverted["actor"]["id"], "ts": reverted["ts"]},
+            "revertable": task_state(events) in CLOSED and bool(files) and reverted is None}
+
+
 def task_detail(task: str, events: list[dict], data_class: str, cap: str | None,
                 artifact_record: Callable[[str], dict], open_requests: list[dict]) -> dict:
     visible = within(data_class, cap)
@@ -88,6 +119,7 @@ def task_detail(task: str, events: list[dict], data_class: str, cap: str | None,
         "acceptance": submitted["body"].get("acceptance", []) if visible else stub(task),
         "result": None, "artifacts": artifacts,
         "questions": [hil_view(r, data_class, cap) for r in open_requests if r["task"] == task],
+        "workspace": workspace_view(events, visible),
     }
     if closed is not None:
         body = closed["body"]

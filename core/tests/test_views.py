@@ -118,3 +118,48 @@ def test_a_choice_decision_in_the_rating_queue_lists_what_it_may_be_corrected_to
     assert decisions["a5"]["options"] == sorted(CHOICE_OPTIONS["a5"])
     assert decisions["a10"]["options"] == sorted(CHOICE_OPTIONS["a10"])
     assert decisions["a1.1"]["options"] is None  # yes/no: corrected to the other answer
+
+
+# The workspace (plan 07c) ----------------------------------------------------------------------------------------
+
+from runtime_fakes import WorkspaceModel  # noqa: E402
+from test_runtime_workspace import EDIT, READ, Setup as ProjectSetup  # noqa: E402
+
+from ooat_core.views import stub, workspace_view  # noqa: E402
+
+
+def test_the_workspace_view_lists_what_the_worker_changed_and_whether_it_can_be_reverted(tmp_path):
+    setup = ProjectSetup(tmp_path)
+    task = setup.submit()
+    setup.runtime.run(task)
+    view = workspace_view(setup.ledger.events(task=task), visible=True)
+    assert view["write"] is True and view["folders"] == ["Bots"]
+    assert view["files"] == [{"path": "Bots/src/bot.py", "kind": "changed", "added": 1, "removed": 1}]
+    assert view["diff"] and view["revertable"] is True and view["reverted"] is None and view["limit"] is False
+    setup.runtime.revert(task, operator="Martin", channel="web")
+    view = workspace_view(setup.ledger.events(task=task), visible=True)
+    assert view["revertable"] is False and view["reverted"]["restored"] == ["Bots/src/bot.py"]
+    assert view["reverted"]["by"] == "Martin"
+
+
+def test_above_the_cap_any_task_is_a_stub_and_a_text_task_has_no_workspace(tmp_path):
+    setup = ProjectSetup(tmp_path)
+    task = setup.submit()
+    setup.runtime.run(task)
+    text_task = setup.runtime.submit(operator="Martin", goal="Shrň smlouvu.", acceptance=["Má 3 věty."], project="docs")
+    assert workspace_view(setup.ledger.events(task=task), visible=False) == stub(task)
+    assert workspace_view(setup.ledger.events(task=text_task), visible=False) == stub(text_task)  # tells nothing
+    assert workspace_view(setup.ledger.events(task=text_task), visible=True) is None
+
+
+def test_a_task_that_only_read_or_waits_at_its_limit_cannot_be_reverted(tmp_path):
+    setup = ProjectSetup(tmp_path, model=WorkspaceModel([[READ]]))
+    task = setup.submit()
+    setup.runtime.run(task)
+    view = workspace_view(setup.ledger.events(task=task), visible=True)
+    assert view["files"] == [] and view["diff"] is None and view["revertable"] is False
+    waiting = ProjectSetup(tmp_path / "limit", model=WorkspaceModel([EDIT + [READ]]), max_operations=2)
+    task = waiting.submit()
+    assert waiting.runtime.run(task).state == "HIL_WAIT"
+    view = workspace_view(waiting.ledger.events(task=task), visible=True)
+    assert view["limit"] is True and view["files"] and view["revertable"] is False  # revert goes via its question

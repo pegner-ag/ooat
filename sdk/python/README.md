@@ -13,6 +13,7 @@ for event in client.follow(task):                     # the task's timeline, unt
 ```
 
 `client.revert(task)` writes back the originals of the project files a closed task changed (design 07); ask the
-operator to confirm before calling it.
+operator to confirm before calling it. `Bridge` posts a task's diff with its result and offers revert with a
+second tap.
 
 The chat bridge contract and `ooat_client.Bridge`: [`docs/chat-bridge.md`](../../docs/chat-bridge.md).

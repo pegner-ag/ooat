@@ -23,6 +23,7 @@ token at once, also for a timeline the bot is following.
 | Progress | `watch(task)` | follows `GET /tasks/{id}/events` (Server-Sent Events) and posts one line for the Gate's topology, each attempt and each answer |
 | A question | posted by `watch`; `on_button(data)`, `on_reply(message_id, text)` | `GET /hil`: one button per option (★ the recommended one, its cost when it has one), the default on silence and the deadline (UTC) in the text; a button calls `POST /hil/{evt}/answer`; the options answered with text (clarify, narrow the scope) ask for a reply, and a reply to the question answers with its text; an R3 question has no buttons |
 | Result | posted by `watch` | the final document as text in up to 3 messages (`limit`, default 4096 characters), else as a file `<task>.md` (`<task>` when it is not text); a footer: state, topology, cost, tokens in/out, time |
+| Project files | posted by `watch` | for a task on a project's folders (ADR 0017): the diff as `<task>.diff` after the document; a "Revert the changes" row in the footer while a revert is possible; a tap asks "Yes, revert", and only that second tap calls `POST /tasks/{id}/revert`; skipped files are listed with their reason. A limit question is preceded by the task's latest document and its diff, and its `revert` button asks for a second tap too. Nothing of this is posted above the token's data class |
 | Rate | the footer's buttons, `on_button(data)` | `POST /tasks/{id}/rating`: `Accepted A/B/C` or `Not accepted A/B/C`; the decisions stay for the web app's rating card |
 | `/cancel` | `cancel(task)` | `POST /tasks/{id}/cancel` |
 | `/stats` | `stats(period="7d")` | `GET /stats?period=…&project=…`, by role and by connector |
@@ -33,7 +34,9 @@ so the bot replies with the error's text. `watch` posts on its own and returns w
 posting the reason when the server refuses (a revoked token, say), or when its `stop` event is set; a busy or
 vanished server is waited out, and the event it was posting is posted once the server is back; when the
 chat itself fails to send, `watch` raises `ChatFailed` (the bot's error, never retried). Button data is at
-most 64 bytes (Telegram's callback-data limit): `a:<request>:<option>` and `r:<task>:<A|B|C>:<y|n>`.
+most 64 bytes (Telegram's callback-data limit): `a:<request>:<option>`, `r:<task>:<A|B|C>:<y|n>`, and for
+revert `v:<task>` (asks), `V:<task>` (confirmed) and `c:<request>` (a confirmed `revert` answer). A project
+without folders in OOAT gets a notice once, after its first task.
 The bridge writes English or Czech (`language="cs"`); option labels, states and the server's error messages come as
 the API gives them.
 
@@ -74,7 +77,8 @@ answer those with the buttons or in the web app.
 
 ## What changes for a bot that ran a coding CLI
 
-An OOAT task in F1 turns text into a document. It has no tools (no file edits, no commands) and no conversation
+An OOAT task in F1 turns text into a document; for a project mapped in `ooat.toml` it also reads and edits the
+project's files through OOAT's own tools (ADR 0017), but it runs no commands. It has no conversation
 memory (each message is its own task, with clarifications inside the task), and every task pays for the Gate and
 the acceptance checks. Add the bridge as one more engine a chat can switch to (`/engine ooat`), next to the direct
 CLI, until tool capabilities and sessions exist (owner decision).

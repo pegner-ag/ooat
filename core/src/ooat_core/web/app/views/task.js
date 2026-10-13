@@ -6,6 +6,7 @@ import { clock, money, text, title } from "../format.js";
 import { t } from "../i18n.js";
 import { showMarkdown } from "../markdown.js";
 import { describe } from "../timeline.js";
+import { documents, fileLine, hasWork, revertReport } from "../workspace.js";
 
 const CLOSED = ["CLOSED_DONE", "CLOSED_PARTIAL", "CLOSED_ABSTAINED", "CANCELLED"];
 const REDRAW_ON = ["RESULT", "HIL_REQUEST", "HIL_RESPONSE", "TASK_CLOSED"];
@@ -110,22 +111,67 @@ async function drawActions(element, ctx, detail, again) {
  * @param {{mode: string, shown: string}} viewing what the viewer shows, kept across redraws
  */
 function drawResult(element, ctx, detail, viewing) {
-  const shown = JSON.stringify([detail.result, detail.artifacts]);
+  const shown = JSON.stringify([detail.result, detail.artifacts, detail.workspace]);
   if (shown === viewing.shown) return;  // nothing new: keep the chosen document and mode, fetch nothing again
   viewing.shown = shown;
-  const documents = detail.artifacts.filter((/** @type {any} */ a) => a.type !== "attachment");
+  const docs = documents(detail.artifacts);  // never an original or a diff of the project's files
   const attachments = detail.artifacts.filter((/** @type {any} */ a) => a.type === "attachment");
   /** @type {HTMLElement[]} */
   const parts = [];
   if (detail.result) parts.push(h("p", {}, text(detail.result.summary)));
-  if (documents.length) parts.push(...viewer(ctx, documents, viewing));
+  if (docs.length) parts.push(...viewer(ctx, docs, viewing));
   if (attachments.length) {
     parts.push(h("p", {}, t("task.attachments"), ...attachments.map((/** @type {any} */ a) => h("span", {}, " ",
       h("button", {type: "button", class: "link", disabled: !a.readable, onclick: () =>
         download(ctx, a).catch((error) => report(element, error))},
       `${a.name ?? a.ref}${a.untrusted ? ` (${t("task.untrusted")})` : ""}`)))));
   }
+  if (detail.workspace && !detail.workspace.redacted && hasWork(detail.workspace)) {
+    parts.push(...workspaceParts(ctx, detail));
+  }
   element.replaceChildren(...parts);
+}
+
+/**
+ * The files a task changed, its diff and revert (design 07 §7): drawn from OOAT's records, never the agent's words.
+ * @param {import("../api.js").Context} ctx @param {any} detail
+ */
+function workspaceParts(ctx, detail) {
+  const ws = detail.workspace;
+  /** @type {HTMLElement[]} */
+  const parts = [h("h3", {}, t("task.files"))];
+  if (!ws.write) parts.push(h("p", {class: "muted"}, t("task.readOnly")));
+  if (ws.files.length) parts.push(h("ul", {}, ...ws.files.map((/** @type {any} */ f) => h("li", {}, fileLine(f)))));
+  if (ws.refused) parts.push(h("p", {class: "muted"}, t("task.refusedOps", {n: ws.refused})));
+  if (ws.limit) parts.push(h("p", {class: "warning"}, t("task.limitReached")));
+  if (ws.diff) {
+    const diff = h("div", {class: "viewer"});
+    fetchText(ctx, `/artifacts/${encodeURIComponent(ws.diff)}`).then((body) => diff.replaceChildren(
+      body === null ? h("p", {class: "muted"}, t("common.redacted")) : diffView(body)))
+      .catch((error) => report(diff, error));
+    parts.push(diff);
+  }
+  if (ws.reverted) {
+    parts.push(h("p", {class: "muted"}, t("task.revertedBy", {by: ws.reverted.by, time: clock(ws.reverted.ts)})),
+      ...revertReport(ws.reverted).map((row) => h("p", {}, row)));
+  }
+  if (ws.revertable) {
+    const status = h("span", {class: "status", role: "status"});
+    const button = h("button", {type: "button", class: "danger", onclick: async () => {
+      if (!confirm(t("task.revertConfirm"))) return;  // the second confirmation (design 07 §12)
+      button.disabled = true;  // one request at a time
+      try {
+        const result = await ctx.api.json(`/tasks/${encodeURIComponent(detail.task)}/revert`,
+          {method: "POST", body: {}});
+        status.replaceChildren(...revertReport(result).map((row) => h("span", {}, row, h("br"))));
+      } catch (error) {
+        report(status, error);
+        button.disabled = false;
+      }
+    }}, t("task.revert"));
+    parts.push(h("p", {}, button, " ", status));
+  }
+  return parts;
 }
 
 /**

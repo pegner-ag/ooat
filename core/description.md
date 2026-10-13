@@ -90,14 +90,16 @@ API with web sessions and operator tokens, and the task runner (design 05a). Tea
   decision; typing the answer the decision gave counts as confirmed, a choice correction must be one of its options
 - `operator_cli.py` — the `ooat` command: `ooat connectors list | show | enable | disable`
 - `task_cli.py` — `ooat task submit | run [--all] | show | rate | revert` and `ooat hil list | answer`; while another
-  process holds the runner lock (`ooat serve`), `run` refuses and `submit` / `hil answer` only record
+  process holds the runner lock (`ooat serve`), `run` refuses and `submit` / `hil answer` only record;
+  `hil answer --choice revert` and `task revert` ask for `y` first (a script pipes it in)
 - `hil.py` — `answer()`: the operator's HIL_RESPONSE from every channel; refuses R3 (ADR 0016), a late or second
   answer and a closed task's question; `open_requests()`
 - `tokens.py` — `issue()`, `revoke()`, `authenticate()`: operator API tokens as `OPERATOR_TOKEN_*` events, the
   SHA-256 only, scopes and a data-class cap (ADR 0016)
 - `stats.py` — `usage()`: calls, tokens, metered and shadow cost by role, connector, tier or project; tasks by
   outcome, cost per accepted task, estimate vs. actual; HIL waiting time (design 05 §8)
-- `views.py` — the API's task, timeline, HIL and rating views with a reader's data-class cap (stubs above it)
+- `views.py` — the API's task, timeline, HIL and rating views with a reader's data-class cap (stubs above it);
+  `workspace_view()`: a task's files changed, latest diff, revert state and whether it can be reverted
 - `runner_lock.py`, `runner.py` — the OS file lock beside the ledger; the runner thread with its FIFO queue rebuilt
   from the ledger, a 60 s tick (defaults on silence, runnable tasks) and a growing pause for paused tasks
 - `sessions.py` — one-time sign-in codes (hash-named files in `ooat-login/` beside the ledger) and web sessions

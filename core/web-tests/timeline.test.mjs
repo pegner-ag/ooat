@@ -25,3 +25,14 @@ test("a redacted body and an unknown type still make a line", () => {
     {tone: "info", text: "RESULT · Above this session's data class: not shown."});
   assert.deepEqual(describe(event("QUOTA_WARNING", {})), {tone: "info", text: "QUOTA_WARNING"});
 });
+
+test("a workspace call and a revert read as what happened to the files", () => {
+  setLanguage("en");
+  assert.deepEqual(describe(event("WORKSPACE_USED", {by: "worker", read: [{path: "a", times: 2}],
+    changed: [{path: "a"}], created: [], refused: [{path: ".env"}], limit: null}, "ooat-runtime")),
+  {tone: "info", text: "Files (worker): 1 changed, 0 created, 1 read, 1 refused"});
+  assert.equal(describe(event("WORKSPACE_USED", {by: "worker", read: [], changed: [], created: [],
+    refused: [], limit: {kind: "operations"}}, "ooat-runtime")).tone, "ask");
+  assert.deepEqual(describe(event("WORKSPACE_REVERTED", {restored: [{path: "a"}], skipped: [], kept: ["b"]})),
+    {tone: "info", text: "Reverted by operator: 1 restored, 0 skipped, 1 created kept"});
+});

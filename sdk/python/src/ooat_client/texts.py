@@ -29,6 +29,16 @@ TEXTS = {
         "hil": "Questions: {questions} · median wait {wait} · defaults applied {defaults}",
         "minutes": "{n} min",
         "under_a_minute": "under 1 min",
+        "revert": "Revert the changes",
+        "revert_confirm": "Revert the files this task changed? A file changed since is skipped; created files "
+                          "stay.",
+        "revert_yes": "Yes, revert",
+        "confirm_below": "Confirm below.",
+        "revert_done": "Reverted: the details are below.",
+        "reverted": "Restored {restored}, skipped {skipped}, kept {kept} created.",
+        "skipped": "Skipped {path}: {reason}",
+        "diff": "The changes in the project's files.",
+        "no_folders": "Project {project} has no folders in OOAT: its tasks work with text only.",
     },
     "cs": {
         "gate": "Gate: {topology}",
@@ -57,5 +67,15 @@ TEXTS = {
         "hil": "Otázky: {questions} · medián čekání {wait} · použitých výchozích {defaults}",
         "minutes": "{n} min",
         "under_a_minute": "méně než 1 min",
+        "revert": "Vrátit změny",
+        "revert_confirm": "Vrátit soubory, které tato úloha změnila? Soubor změněný mezitím se přeskočí; vytvořené "
+                          "soubory zůstanou.",
+        "revert_yes": "Ano, vrátit",
+        "confirm_below": "Potvrďte níže.",
+        "revert_done": "Vráceno: podrobnosti jsou níže.",
+        "reverted": "Vráceno {restored}, přeskočeno {skipped}, ponecháno {kept} vytvořených.",
+        "skipped": "Přeskočeno {path}: {reason}",
+        "diff": "Změny v souborech projektu.",
+        "no_folders": "Projekt {project} nemá v OOAT složky: jeho úlohy pracují jen s textem.",
     },
 }

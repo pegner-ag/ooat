@@ -517,15 +517,19 @@ class Runtime:
             try:
                 if self.workspaces is None:
                     raise WorkspaceUnavailable("this process has no project folders configured")
-                self.workspaces.revert(self.ledger, self.artifacts, task, operator=response["actor"]["id"],
-                                       channel=response["body"].get("channel"))
+                reverted = self.workspaces.revert(self.ledger, self.artifacts, task, operator=response["actor"]["id"],
+                                                  channel=response["body"].get("channel"))["body"]
             except WorkspaceBusy as busy:  # another revert holds the project: the answer stands, the task runs on
                 return RunOutcome("RUNNING", f"Waiting: {busy}")
             except ValueError as error:  # nothing changed, reverted already, or the project left ooat.toml
                 return self._close(task, "CLOSED_ABSTAINED", "Stopped at the workspace limit; nothing was reverted.",
                                    str(error)[:300], artifacts=[document])
-            return self._close(task, "CLOSED_ABSTAINED", "Stopped at the workspace limit; the changes are reverted.",
-                               "the work; its changes were reverted", artifacts=[document])
+            skipped = reverted["skipped"]  # a skipped file is never reported as reverted (plan 07c final review)
+            note = f"; skipped {len(skipped)}: " + ", ".join(f"{s['path']} ({s['reason']})" for s in skipped) \
+                if skipped else ""
+            summary = f"Stopped at the workspace limit; reverted {len(reverted['restored'])} files{note}."
+            return self._close(task, "CLOSED_ABSTAINED", summary[:2000], "the work; its changes were reverted",
+                               artifacts=[document])
         return self._close(task, "CLOSED_PARTIAL", "Stopped at the workspace limit; the changes are kept as they are.",
                            "the work after the workspace limit", artifacts=[document])
 
