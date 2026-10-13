@@ -45,6 +45,7 @@ WAITING = frozenset({"CLARIFYING", "HIL_WAIT"})
 ABSTAIN_FOR = {"NOT_PERMITTED": "ABSTAIN_NOT_PERMITTED"}
 CANCEL = "cancel the task"  # the operator's DECISION that stops a task (owner, 2026-10-09)
 RISK_ORDER = ("R0", "R1", "R2", "R3")
+LIMIT_OPTION = "raise_limit"  # the workspace limit question (design 07 §8)
 
 
 class UnknownTask(ValueError):
@@ -85,6 +86,10 @@ def attachment_text(content: bytes) -> str:
 
 def _utc(text: str) -> datetime:
     return datetime.fromisoformat(text.replace("Z", "+00:00"))
+
+
+def _offers(event: dict, option: str) -> bool:
+    return event["type"] == "HIL_REQUEST" and any(o["id"] == option for o in event["body"]["options"])
 
 
 def _cancel(events: list[dict]) -> dict | None:
@@ -284,14 +289,19 @@ class Runtime:
                 remaining = last["body"]["remaining"]
                 return self._close(task, "CLOSED_PARTIAL", "Delivered in part.", f"Unmet criteria: {remaining}",
                                    artifacts=last["body"]["artifacts"])
-            if resumed and last is not None and (last["body"]["outcome"] == "DONE" or (
+            limited = self._limit_request(task, last) if resumed and last is not None else None
+            if limited is not None:  # a document delivered at the workspace limit is never checked; it is asked about
+                answered = self._limit_answer(task, limited, last)
+                if answered is not None:
+                    return answered  # waiting, or closed by follow_up, keep or revert; raise_limit runs on below
+            if limited is None and resumed and last is not None and (last["body"]["outcome"] == "DONE" or (
                     last["body"]["outcome"] == "FAILED" and last["refs"])):
                 # A document was delivered, but its check was paused or interrupted: check it again; never write
                 # a new one for it, so an interruption cannot cost an extra attempt.
                 artifact = last["refs"][0]
                 text = self.artifacts.read(artifact).decode("utf-8")
             else:
-                if self._attempts(task, contract) >= MAX_ATTEMPTS:
+                if self._attempts(task, contract) >= self._max_attempts(task):
                     return self._unable(task, contract, worker)
                 feedback = self._feedback(task, results, facts.criteria)
                 try:
@@ -308,7 +318,7 @@ class Runtime:
                 if output.invalid:
                     self._event("RESULT", task, contract, worker, {"outcome": "FAILED", "error": {
                         "code": "INVALID_OUTPUT", "message": output.invalid}}, output.cost)
-                    if self._attempts(task, contract) >= MAX_ATTEMPTS:
+                    if self._attempts(task, contract) >= self._max_attempts(task):
                         return self._unable(task, contract, worker)
                     continue
                 if output.abstention:
@@ -326,6 +336,8 @@ class Runtime:
                 artifact = staged.ref
                 delivered = self._event("RESULT", task, contract, worker, {"outcome": "DONE", "artifacts": [artifact]},
                                         output.cost, refs=[artifact], staged=[staged])
+                if used is not None and used["body"]["limit"] is not None:
+                    return self._ask_limit(task, contract, delivered, used, grant, output.cost)
             resumed = False
             stopped = self._stopped(task, artifacts=[artifact])  # cancelled during the worker call: keep its document
             if stopped is not None:
@@ -348,7 +360,7 @@ class Runtime:
             if result.usable and not result.unmet:
                 return self._close(task, "CLOSED_DONE", "Delivered; every acceptance criterion is met.",
                                    artifacts=[artifact])
-            if self._attempts(task, contract) >= MAX_ATTEMPTS:
+            if self._attempts(task, contract) >= self._max_attempts(task):
                 if not result.usable:
                     return self._unable(task, contract, worker)
                 remaining = "; ".join(result.unmet)
@@ -406,8 +418,94 @@ class Runtime:
         return self._close(task, "CLOSED_ABSTAINED", "Not done: the project's folders could not be used.",
                            str(problem)[:300])
 
+    # The workspace limit question (design 07 §8) -------------------------------------------------------------------
+
+    def _limit_request(self, task: str, result: dict) -> dict | None:
+        """The limit question asked about this delivered document, if any."""
+        return next((e for e in self.ledger.events(task=task, types=["HIL_REQUEST"])
+                     if _offers(e, LIMIT_OPTION) and result["id"] in e["body"]["evidence"]), None)
+
     def _raises(self, task: str) -> int:
-        return 0  # the limit question (plan 07b Task 6)
+        """How often the operator raised the workspace limit of this task: each doubles both limits."""
+        events = self.ledger.events(task=task, types=["HIL_REQUEST", "HIL_RESPONSE"])
+        asked = {e["id"] for e in events if _offers(e, LIMIT_OPTION)}
+        return sum(1 for e in events if e["type"] == "HIL_RESPONSE" and e["body"]["request"] in asked
+                   and e["body"].get("choice") == LIMIT_OPTION)
+
+    def _max_attempts(self, task: str) -> int:
+        """The contract's attempts, plus one for each raised workspace limit: the limited attempt is not counted."""
+        return MAX_ATTEMPTS + self._raises(task)
+
+    def _ask_limit(self, task, contract, delivered, used, grant, cost) -> RunOutcome:
+        """The worker reached a workspace limit: pause and ask what next (design 07 §8)."""
+        limit = used["body"]["limit"]
+        worker_used = [e["body"] for e in self.ledger.events(task=task, types=["WORKSPACE_USED"])
+                       if e["body"]["by"] == "worker"]
+        created = {i["path"] for body in worker_used for i in body["created"]}
+        changed = {i["path"] for body in worker_used for i in body["changed"]} - created
+        reached = (f"{grant.max_operations} operations" if limit["kind"] == "operations"
+                   else f"{grant.max_write_bytes / 1048576:g} MB written")
+        where = f"{limit['tool']} on {limit['path']}" if limit["path"] else limit["tool"]
+        summary = self.artifacts.read(delivered["body"]["artifacts"][0]).decode("utf-8")
+        question = (f"Limit reached: {reached}, at operation {limit['operation']} ({where}). Files: {len(changed)} "
+                    f"changed, {len(created)} created. The agent's summary: {summary[:500].strip()} What next?")
+        doubled = f"{grant.max_operations * 2} operations and {grant.max_write_bytes * 2 / 1048576:g} MB"
+        deadline = (self.clock() + timedelta(hours=self.settings.hil_deadline_hours)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        request = self.ledger.append(new_event("HIL_REQUEST", task=task, contract=contract, actor=ACTOR,
+                                               refs=[delivered["id"], used["id"]], body={
+            "question": question, "options": [
+                {"id": LIMIT_OPTION, "label": f"Raise the limit to {doubled} for this task and continue",
+                 "cost_usd": round((cost or {}).get("usd", 0.0), 4), "impact": "one more attempt; ooat.toml stays"},
+                {"id": "follow_up", "label": "Continue in a follow-up task", "cost_usd": 0.0},
+                {"id": "keep", "label": "Keep the changes as they are", "cost_usd": 0.0, "acts": False},
+                {"id": "revert", "label": "Revert the changes", "cost_usd": 0.0}],
+            "recommended": LIMIT_OPTION, "default_on_silence": "keep", "deadline": deadline, "blocking": True,
+            "evidence": [delivered["id"], used["id"]]}))
+        return RunOutcome("HIL_WAIT", "Waiting for the operator: the workspace limit is reached.",
+                          request=request["id"])
+
+    def _limit_answer(self, task: str, request: dict, delivered: dict) -> RunOutcome | None:
+        """Apply the answer to a limit question; None when the operator raised the limit (the loop runs on)."""
+        response = next((e for e in self.ledger.events(task=task, types=["HIL_RESPONSE"])
+                         if e["body"]["request"] == request["id"]), None)
+        if response is None:
+            return RunOutcome("HIL_WAIT", "Waiting for the operator's answer.", request=request["id"])
+        choice, document = response["body"].get("choice"), delivered["body"]["artifacts"][0]
+        if choice == LIMIT_OPTION:
+            return None
+        if choice == "follow_up":
+            follow = self._follow_up(task, response, document)
+            return self._close(task, "CLOSED_PARTIAL", f"Continued in task {follow}.",
+                               f"the rest of the work, continued in task {follow}", artifacts=[document])
+        if choice == "revert":
+            try:
+                if self.workspaces is None:
+                    raise WorkspaceUnavailable("this process has no project folders configured")
+                self.workspaces.revert(self.ledger, self.artifacts, task, operator=response["actor"]["id"],
+                                       channel=response["body"].get("channel"))
+            except WorkspaceBusy as busy:  # another revert holds the project: the answer stands, the task runs on
+                return RunOutcome("RUNNING", f"Waiting: {busy}")
+            except ValueError as error:  # nothing changed, reverted already, or the project left ooat.toml
+                return self._close(task, "CLOSED_ABSTAINED", "Stopped at the workspace limit; nothing was reverted.",
+                                   str(error)[:300], artifacts=[document])
+            return self._close(task, "CLOSED_ABSTAINED", "Stopped at the workspace limit; the changes are reverted.",
+                               "the work; its changes were reverted", artifacts=[document])
+        return self._close(task, "CLOSED_PARTIAL", "Stopped at the workspace limit; the changes are kept as they are.",
+                           "the work after the workspace limit", artifacts=[document])
+
+    def _follow_up(self, task: str, response: dict, document: str) -> str:
+        """A new task on the same project with the original goal; the limited document is its untrusted
+        attachment (design 07 §8). Its intake key makes a repeated run return the same task."""
+        body = self.ledger.events(task=task, types=["TASK_SUBMITTED"])[0]["body"]
+        goal = (f"{body['goal']}\n\nThis continues task {task}, stopped at its workspace limit: the attachment "
+                "previous-task.md is its summary and the files OOAT saw change.")
+        return self.submit(operator=response["actor"]["id"], goal=goal, acceptance=body.get("acceptance", []),
+                           project=body.get("project"), expected_output=body.get("expected_output"),
+                           value=body.get("value"), budget_usd=body.get("budget_usd"),
+                           data_class=body.get("data_class"), risk_class=body.get("risk_class"),
+                           files=[self.artifacts.read(document)], file_names=["previous-task.md"],
+                           channel=response["body"].get("channel") or "cli", intake_key=f"follow-up:{task}",
+                           follows=task)
 
     def _contract(self, task, events, submitted, facts) -> tuple[str, dict]:
         """The task's contract and its worker: the one already issued, or a new one with its claim."""
@@ -452,6 +550,10 @@ class Runtime:
             return []
         if used[-1]["body"]["outcome"] == "FAILED":
             return ["Reply with the deliverable, or with a complete abstention in the JSON form."]
+        if self._limit_request(task, used[-1]) is not None:  # the raised attempt continues the limited one
+            text = self.artifacts.read(used[-1]["body"]["artifacts"][0]).decode("utf-8")
+            return ["You stopped at the project's workspace limit before finishing; the limit is now raised. Continue "
+                    f"the work. Your previous summary and the files OOAT saw change:\n{text[:4000]}"]
         verdict = self._verdict(task, used[-1]["body"]["artifacts"][0], criteria)
         if verdict is not None and not verdict[0]:
             return ["The output was empty or longer than allowed."]
@@ -510,7 +612,7 @@ class Runtime:
         """Apply the operator's answer to the latest budget question of this contract, once."""
         events = self.ledger.events(task=task)
         asked = [e for e in events if e["type"] == "HIL_REQUEST" and e["actor"] == ACTOR
-                 and e.get("contract") == contract]
+                 and e.get("contract") == contract and _offers(e, "raise_budget")]
         if not asked:
             return None
         response = next((e for e in events if e["type"] == "HIL_RESPONSE"

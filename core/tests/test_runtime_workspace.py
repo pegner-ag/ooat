@@ -155,3 +155,79 @@ def test_a_project_without_a_mapping_runs_as_text_only(tmp_path):
     assert setup.runtime.run(task).state == "CLOSED_DONE"
     assert "workspace" not in setup.bodies(task, "TASK_SUBMITTED")[0]
     assert all(grant is None for grant in setup.model.grants)
+
+
+from datetime import timedelta  # noqa: E402
+
+
+def limited(tmp_path, tools=None):
+    """A task whose worker reaches its operations limit (2) at its third call."""
+    setup = Setup(tmp_path, model=WorkspaceModel(tools or [EDIT + [READ]]), max_operations=2)
+    task = setup.submit()
+    outcome = setup.runtime.run(task)
+    request = setup.ledger.events(task=task, types=["HIL_REQUEST"])[-1]
+    return setup, task, outcome, request
+
+
+def test_a_reached_limit_asks_what_next_with_four_options(tmp_path):
+    setup, task, outcome, request = limited(tmp_path)
+    assert outcome.state == "HIL_WAIT" and outcome.request == request["id"]
+    body = request["body"]
+    assert [o["id"] for o in body["options"]] == ["raise_limit", "follow_up", "keep", "revert"]
+    assert (body["recommended"], body["default_on_silence"]) == ("raise_limit", "keep")
+    assert body["question"].startswith("Limit reached: 2 operations, at operation 3 (read_file on Bots/src/bot.py).")
+    assert "Files: 1 changed, 0 created." in body["question"]
+    assert setup.model.attempts["critic"] == 0  # a limited document is not checked
+    assert setup.bot() == EDITED
+
+
+def test_keep_closes_partial_with_the_changes_as_they_are(tmp_path):
+    setup, task, _, request = limited(tmp_path)
+    setup.answer(task, request["id"], choice="keep")
+    assert setup.runtime.run(task).state == "CLOSED_PARTIAL" and setup.bot() == EDITED
+
+
+def test_silence_keeps_the_changes_after_48_hours(tmp_path):
+    setup, task, _, request = limited(tmp_path)
+    setup.now += timedelta(hours=49)
+    assert setup.runtime.run(task).state == "CLOSED_PARTIAL"
+    (response,) = setup.bodies(task, "HIL_RESPONSE")
+    assert response["choice"] == "keep" and response["default_applied"] is True
+
+
+def test_revert_restores_the_files_and_closes_abstained(tmp_path):
+    setup, task, _, request = limited(tmp_path)
+    setup.answer(task, request["id"], choice="revert")
+    assert setup.runtime.run(task).state == "CLOSED_ABSTAINED" and setup.bot() == ORIGINAL
+    (reverted,) = setup.ledger.events(task=task, types=["WORKSPACE_REVERTED"])
+    assert reverted["actor"] == HIL and reverted["body"]["restored"][0]["path"] == "Bots/src/bot.py"
+
+
+def test_revert_of_a_task_that_only_read_still_closes_it(tmp_path):
+    setup, task, _, request = limited(tmp_path, tools=[[READ, READ, READ]])
+    setup.answer(task, request["id"], choice="revert")
+    assert setup.runtime.run(task).state == "CLOSED_ABSTAINED"
+    assert "changed no project files" in setup.bodies(task, "TASK_CLOSED")[0]["missing"]
+
+
+def test_follow_up_closes_partial_and_submits_one_linked_task_with_the_summary(tmp_path):
+    setup, task, _, request = limited(tmp_path)
+    setup.answer(task, request["id"], choice="follow_up")
+    outcome = setup.runtime.run(task)
+    assert outcome.state == "CLOSED_PARTIAL"
+    follow = next(e for e in setup.ledger.events(types=["TASK_SUBMITTED"]) if e["body"].get("follows") == task)
+    assert follow["body"]["project"] == "bots" and follow["body"]["workspace"]["write"] is True
+    assert follow["body"]["attachment_names"] == ["previous-task.md"]
+    assert "Files changed (recorded by OOAT)" in setup.artifacts.read(follow["refs"][0]).decode("utf-8")
+    assert follow["task"] in setup.bodies(task, "TASK_CLOSED")[0]["summary"]
+    assert setup.runtime._follow_up(task, setup.ledger.events(task=task, types=["HIL_RESPONSE"])[0],
+                                    follow["refs"][0]) == follow["task"]  # a repeated run submits no second task
+
+
+def test_raise_gives_one_more_attempt_with_doubled_limits_and_the_summary_as_feedback(tmp_path):
+    setup, task, _, request = limited(tmp_path, tools=[EDIT + [READ], [READ]])
+    setup.answer(task, request["id"], choice="raise_limit")
+    assert setup.runtime.run(task).state == "CLOSED_DONE"
+    assert setup.model.grants[1].max_operations == 4  # grants[0] is the limited call, [1] the raised one
+    assert "workspace limit" in setup.model.worker_prompts[1]
+    assert setup.workspaces.config.projects["bots"].max_operations == 2  # ooat.toml's limit is unchanged
