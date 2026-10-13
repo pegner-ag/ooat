@@ -17,6 +17,7 @@ from pathlib import Path
 from .acceptance import GATE_OUTPUT, check_output
 from .catalog import load_card
 from .artifacts import ArtifactStore
+from .config import folder_name
 from .connector_admin import checked_operator
 from .gate import ACTOR as GATE_ACTOR
 from .gate import Gate, GateSettings, gated_data_class, task_facts
@@ -27,6 +28,8 @@ from .pii import higher_class, raised_class
 from .state import task_state
 from .validation import SpecValidationError
 from .worker import ROLE_ID, Attachment, run_worker
+from .workspace.grant import WorkspaceUnavailable
+from .workspace.runs import LOCK_WAIT_S, WORKSPACE_PROBLEMS, WorkspaceBusy, Workspaces, change_section
 
 ACTOR = {"kind": "system", "id": "ooat-runtime"}
 # Applies a request's declared default, nothing else (the ledger checks it); no operator may use this name.
@@ -41,6 +44,7 @@ WAITING = frozenset({"CLARIFYING", "HIL_WAIT"})
 # BUDGET is asked about instead (owner, 2026-10-03).
 ABSTAIN_FOR = {"NOT_PERMITTED": "ABSTAIN_NOT_PERMITTED"}
 CANCEL = "cancel the task"  # the operator's DECISION that stops a task (owner, 2026-10-09)
+RISK_ORDER = ("R0", "R1", "R2", "R3")
 
 
 class UnknownTask(ValueError):
@@ -92,11 +96,13 @@ def _cancel(events: list[dict]) -> dict | None:
 class Runtime:
     def __init__(self, ledger: Ledger, gateway: Gateway, artifacts: ArtifactStore,
                  settings: GateSettings = GateSettings(),
-                 clock: Callable[[], datetime] = lambda: datetime.now(timezone.utc)):
+                 clock: Callable[[], datetime] = lambda: datetime.now(timezone.utc),
+                 workspaces: Workspaces | None = None):
         self.ledger, self.gateway, self.artifacts = ledger, gateway, artifacts
-        self.settings, self.clock = settings, clock
+        self.settings, self.clock, self.workspaces = settings, clock, workspaces
         self.gate = Gate(ledger, gateway, settings, clock, attachment_chars=lambda refs: sum(
-            len(self.artifacts.read(ref).decode("utf-8", errors="replace")) for ref in refs))
+            len(self.artifacts.read(ref).decode("utf-8", errors="replace")) for ref in refs),
+            workspace=self._estimate_grant)
         self.role_budget_usd = load_card("roles", ROLE_ID)["budget"]["max_usd_per_contract"]
 
     # Intake -------------------------------------------------------------------------------------------------------
@@ -105,7 +111,7 @@ class Runtime:
                expected_output: str | None = None, value: dict | None = None, budget_usd: float | None = None,
                data_class: str | None = None, risk_class: str | None = None,
                files: list[bytes] = (), file_names: list[str] = (), channel: str | None = None,
-               intake_key: str | None = None) -> str:
+               intake_key: str | None = None, follows: str | None = None) -> str:
         """TASK_SUBMITTED by the named operator; files become untrusted artifacts of the task, stored under the
         declared class raised by the personal-data pre-scan of their text. A repeated `intake_key` on the same
         channel returns the task it created instead of a new one (ADR 0016)."""
@@ -116,6 +122,18 @@ class Runtime:
         if acceptance:
             body["acceptance"] = [criterion.strip() for criterion in acceptance]
         declared = data_class or "internal"
+        settings = self.workspaces.project(project) if self.workspaces is not None else None
+        if settings is not None:  # a mapped project: its folders, its class and its risk (design 07 §3)
+            declared = higher_class(declared, settings.data_class)
+            body["data_class"] = declared
+            needed = "R1" if settings.write else "R0"
+            if risk_class is not None and RISK_ORDER.index(risk_class) < RISK_ORDER.index(needed):
+                body["risk_class"] = needed
+            elif risk_class is None and needed == "R1":
+                body["risk_class"] = needed
+            body["workspace"] = {"write": settings.write, "folders": [folder_name(f) for f in settings.folders]}
+        if follows is not None:
+            body["follows"] = follows
         if file_names and len(file_names) != len(files):
             raise ValueError("give one file name per attachment")
         for name in file_names:
@@ -252,6 +270,9 @@ class Runtime:
                        for ref, name in zip(submitted["refs"], names)]
         for attachment in attachments:  # the Gate never saw them; the worker sends them, so they count here
             data_class = higher_class(data_class, self.ledger.artifact(attachment.ref)["data_class"])
+        project, timeout_s = self._project(submitted), 600.0
+        if project is not None and self.workspaces is not None:
+            timeout_s = self.workspaces.timeout_s(project)
         resumed = True  # only the first pass of a run picks up a document delivered before an interruption
         while True:
             stopped = self._stopped(task)
@@ -274,11 +295,16 @@ class Runtime:
                     return self._unable(task, contract, worker)
                 feedback = self._feedback(task, results, facts.criteria)
                 try:
-                    output = run_worker(self.gateway, task=task, contract=contract, data_class=data_class,
-                                        state=facts.state, attachments=attachments, feedback=feedback,
-                                        expected_output_tokens=self.settings.expected_output_tokens)
+                    grant = self._grant(task, project, "worker")
+                    output, used = self._in_workspace(task, contract, "worker", grant, data_class, lambda: run_worker(
+                        self.gateway, task=task, contract=contract, data_class=data_class, state=facts.state,
+                        attachments=attachments, feedback=feedback,
+                        expected_output_tokens=self.settings.expected_output_tokens, workspace=grant,
+                        timeout_s=timeout_s))
                 except GatewayError as error:
                     return self._gateway_failure(task, contract, worker, error)
+                except WORKSPACE_PROBLEMS as problem:
+                    return self._workspace_problem(task, problem)
                 if output.invalid:
                     self._event("RESULT", task, contract, worker, {"outcome": "FAILED", "error": {
                         "code": "INVALID_OUTPUT", "message": output.invalid}}, output.cost)
@@ -291,19 +317,27 @@ class Runtime:
                     return kept or self._close(task, "CLOSED_ABSTAINED",
                                                f"The worker abstained: {output.abstention['reason']}",
                                                output.abstention["missing"])
-                staged = self.artifacts.stage(output.text.encode("utf-8"), artifact_type="markdown_document",
-                                              data_class=raised_class(data_class, output.text))
-                artifact, text = staged.ref, output.text
-                self._event("RESULT", task, contract, worker, {"outcome": "DONE", "artifacts": [artifact]},
-                            output.cost, refs=[artifact], staged=[staged])
+                text = output.text
+                if grant is not None:  # OOAT's own list, never the agent's (design 07 §7)
+                    listed = change_section(self.ledger.events(task=task, types=["WORKSPACE_USED"]))
+                    text = f"{text.rstrip()}\n\n{listed}\n"
+                staged = self.artifacts.stage(text.encode("utf-8"), artifact_type="markdown_document",
+                                              data_class=raised_class(data_class, text))
+                artifact = staged.ref
+                delivered = self._event("RESULT", task, contract, worker, {"outcome": "DONE", "artifacts": [artifact]},
+                                        output.cost, refs=[artifact], staged=[staged])
             resumed = False
             stopped = self._stopped(task, artifacts=[artifact])  # cancelled during the worker call: keep its document
             if stopped is not None:
                 return stopped
             try:
-                result = check_output(self.ledger, self.gateway, task=task, contract=contract, artifact=artifact,
-                                      output=text, criteria=facts.criteria, data_class=data_class,
-                                      risk_class=facts.risk_class, untrusted=bool(attachments))
+                critic = self._grant(task, project, "critic")
+                result, _ = self._in_workspace(task, contract, "critic", critic, data_class, lambda: check_output(
+                    self.ledger, self.gateway, task=task, contract=contract, artifact=artifact, output=text,
+                    criteria=facts.criteria, data_class=data_class, risk_class=facts.risk_class,
+                    untrusted=bool(attachments) or project is not None, workspace=critic, timeout_s=timeout_s))
+            except WORKSPACE_PROBLEMS as problem:
+                return self._workspace_problem(task, problem)
             except GatewayError as error:  # no verdict: pause, or ask for budget; the document is checked later
                 # The worker delivered; the paused check is the runtime's, so the worker's RESULT stays DONE.
                 self._event("DECISION", task, contract, ACTOR, {
@@ -322,6 +356,58 @@ class Runtime:
                                                                "remaining": remaining}, None, refs=[artifact])
                 return self._close(task, "CLOSED_PARTIAL", "Delivered in part.", f"Unmet criteria: {remaining}",
                                    artifacts=[artifact])
+
+    # The project's folders (design 07 §6) ------------------------------------------------------------------------
+
+    @staticmethod
+    def _project(submitted: dict) -> str | None:
+        """The project whose folders the task works on; None for a text-only task."""
+        return submitted["body"].get("project") if "workspace" in submitted["body"] else None
+
+    def _grant(self, task: str, project: str | None, role: str):
+        if project is None:
+            return None
+        if self.workspaces is None:
+            raise WorkspaceUnavailable("this process has no project folders configured")
+        return self.workspaces.grant(task, project, role, factor=2 ** self._raises(task) if role == "worker" else 1)
+
+    def _estimate_grant(self, task: str):
+        """The worker's grant for the Gate's estimate, so it routes as the call will; None when unavailable."""
+        submitted = self.ledger.events(task=task, types=["TASK_SUBMITTED"])[0]
+        try:
+            return self._grant(task, self._project(submitted), "worker")
+        except WorkspaceUnavailable:
+            return None  # the call itself closes the task with the reason
+
+    def _in_workspace(self, task, contract, role, grant, data_class, call):
+        """Run one model call with the project's folders: under the project's lock when it may write, and with the
+        journal recorded afterwards, also when the call failed or timed out (design 07 §7). The lock is released
+        only after the record, so a revert never runs between the call and its event. Returns (result, the
+        WORKSPACE_USED event or None)."""
+        if grant is None:
+            return call(), None
+        lock = self.workspaces.lock(grant.project) if grant.write else None
+        if lock is not None and not lock.acquire(LOCK_WAIT_S):
+            raise WorkspaceBusy(f"project {grant.project} is being reverted; the task runs on later")
+        try:
+            try:
+                result = call()
+            finally:
+                used = self.workspaces.record(self.ledger, self.artifacts, task=task, contract=contract, role=role,
+                                              grant=grant, data_class=data_class)
+        finally:
+            if lock is not None:
+                lock.release()
+        return result, used
+
+    def _workspace_problem(self, task: str, problem: Exception) -> RunOutcome:
+        if isinstance(problem, WorkspaceBusy):
+            return RunOutcome("RUNNING", f"Waiting: {problem}")
+        return self._close(task, "CLOSED_ABSTAINED", "Not done: the project's folders could not be used.",
+                           str(problem)[:300])
+
+    def _raises(self, task: str) -> int:
+        return 0  # the limit question (plan 07b Task 6)
 
     def _contract(self, task, events, submitted, facts) -> tuple[str, dict]:
         """The task's contract and its worker: the one already issued, or a new one with its claim."""
@@ -466,8 +552,8 @@ class Runtime:
         return RunOutcome("RUNNING", f"Paused: the provider failed ({error.code}: {error.message[:200]}). "
                                      f"It runs on with `ooat task run {task}` once the provider is back.")
 
-    def _event(self, kind, task, contract, actor, body, cost, refs=(), staged=()) -> None:
-        self.ledger.append(new_event(kind, task=task, contract=contract, actor=actor, refs=list(refs), body=body,
+    def _event(self, kind, task, contract, actor, body, cost, refs=(), staged=()) -> dict:
+        return self.ledger.append(new_event(kind, task=task, contract=contract, actor=actor, refs=list(refs), body=body,
                                      cost=cost), list(staged))
 
     def _close(self, task: str, state: str, summary: str, missing: str | None = None,

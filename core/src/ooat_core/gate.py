@@ -211,8 +211,11 @@ def gate_questions(criteria: list[str], ask_a1: bool = True) -> dict[str, Decisi
 class Gate:
     def __init__(self, ledger: Ledger, gateway: Gateway, settings: GateSettings = GateSettings(),
                  clock: Callable[[], datetime] = lambda: datetime.now(timezone.utc),
-                 attachment_chars: Callable[[list[str]], int] | None = None):
+                 attachment_chars: Callable[[list[str]], int] | None = None,
+                 workspace: Callable[[str], object] | None = None):
         self._ledger, self._gateway, self._settings, self._clock = ledger, gateway, settings, clock
+        # The task's workspace grant, so the estimate routes as the call will (design 07 §4); None for text only.
+        self._workspace = workspace or (lambda task: None)
         self._attachment_chars = attachment_chars or (lambda refs: 0)
 
     def run(self, task: str) -> GateOutcome:
@@ -338,7 +341,7 @@ class Gate:
         chars = sum(min(self._attachment_chars([ref]), PREVIEW_CHARS) for ref in refs)  # what the worker receives
         worker = self._gateway.estimate(ModelRequest(
             tier=WORKER_TIER, prompt=state + "x" * chars, system=worker_system(), data_class=data_class,
-            expected_output_tokens=tokens, task=task))
+            expected_output_tokens=tokens, task=task, workspace=self._workspace(task)))
         observed = contract_costs(self._ledger.events(types=["RESULT", "ABSTAIN", "GATE_PASSED", "GATE_FAILED",
                                                              "DECISION", "TASK_CLOSED"]),
                                   worker.connector, WORKER_TIER)
@@ -359,7 +362,7 @@ class Gate:
             critic = self._gateway.estimate(ModelRequest(
                 tier=CRITIC_TIER, prompt="x" * (4 * tokens) + " ".join(criteria), system=CRITIC_SYSTEM,
                 data_class=data_class, expected_output_tokens=s.critic_output_tokens + 100 * len(criteria),
-                task=task)).usd
+                task=task, workspace=self._workspace(task))).usd
         priors = Priors(tokens, s.critic_output_tokens, s.fallback_tokens_per_question, s.retry_prior, s.critic_prior)
         usd = prior_usd(worker.usd, checks, critic, priors, critic_certain=bool(refs) or not routed)
         return usd, usd
