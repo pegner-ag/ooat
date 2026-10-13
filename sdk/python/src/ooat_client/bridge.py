@@ -82,6 +82,7 @@ class Bridge:
         self.texts = TEXTS[language]
         self._questions: dict[str, str] = {}  # a question message's id → its request, for answers by reply
         self.last_event: dict[str, str] = {}  # task → the last event `watch` handled: keep it for a restart
+        self._told_text_only = False  # the notice for a project without folders goes out once
 
     def _t(self, name: str, **values) -> str:
         return self.texts[name].format(**values)
@@ -110,12 +111,35 @@ class Bridge:
         goal, acceptance = parse_message(text)
         if not goal:
             raise ValueError(self._t("no_goal"))
-        return self.client.submit(project=self.project, goal=goal, acceptance=acceptance, attachments=files,
+        task = self.client.submit(project=self.project, goal=goal, acceptance=acceptance, attachments=files,
                                   key=f"{self.chat.id}:{message_id}")
+        if not self._told_text_only:
+            try:
+                plain = self.client.task(task).get("workspace") is None
+            except OoatError:
+                plain = False  # say nothing rather than something wrong
+            if plain:
+                self._told_text_only = True
+                self._send(self._t("no_folders", project=self.project))
+        return task
 
     def on_button(self, data: str) -> str:
         kind, _, rest = data.partition(":")
         try:
+            if kind == "a" and rest.endswith(":revert"):  # writing files back takes a second tap (design 07 §12)
+                self._send(self._t("revert_confirm"), [[Button(self._t("revert_yes"), f"c:{rest[:-len(':revert')]}")]])
+                return self._t("confirm_below")
+            if kind == "c":
+                self.client.answer(rest, choice="revert")
+                return self._t("recorded")
+            if kind == "v":
+                self._send(self._t("revert_confirm"), [[Button(self._t("revert_yes"), f"V:{rest}")]])
+                return self._t("confirm_below")
+            if kind == "V":
+                result = self.client.revert(rest)
+                return "\n".join([self._t("reverted", restored=len(result["restored"]),
+                                          skipped=len(result["skipped"]), kept=len(result["kept"]))]
+                                 + [self._t("skipped", path=s["path"], reason=s["reason"]) for s in result["skipped"]])
             if kind == "a":
                 request, _, choice = rest.partition(":")
                 if choice in TEXT_OPTIONS:
@@ -220,6 +244,8 @@ class Bridge:
         default = labels.get(request["default_on_silence"], request["default_on_silence"])
         deadline = _utc(request["deadline"]).strftime("%Y-%m-%d %H:%M UTC")
         asked, footer = f"? {self._shown(request['question'])}", self._t("default", deadline=deadline, option=default)
+        if any(o["id"] == "raise_limit" for o in request["options"]):  # the question quotes none of the work
+            self._limited_work(request["task"])
         if request["risk_class"] == "R3":  # never answered by a token (ADR 0016): no buttons
             self._send("\n".join([asked, self._t("r3"), footer]))
             return
@@ -244,8 +270,34 @@ class Bridge:
             self._send(self._t("redacted"))
         else:
             self._document(task, document.content)
-        self._send(footer, [[Button(self._t("accepted", value=v), f"r:{task}:{v}:y") for v in VALUES],
-                                [Button(self._t("rejected", value=v), f"r:{task}:{v}:n") for v in VALUES]])
+        self._diff(task, detail)
+        rows = [[Button(self._t("accepted", value=v), f"r:{task}:{v}:y") for v in VALUES],
+                [Button(self._t("rejected", value=v), f"r:{task}:{v}:n") for v in VALUES]]
+        workspace = detail.get("workspace")
+        if isinstance(workspace, dict) and workspace.get("revertable"):  # next to "not accepted" (design 07 §7)
+            rows.append([Button(self._t("revert"), f"v:{task}")])
+        self._send(footer, rows)
+
+    def _limited_work(self, task: str) -> None:
+        """What the agent did before its limit, as OOAT recorded it: the document and the diff, each only within the
+        token's data class."""
+        detail = self.client.task(task)
+        docs = [a for a in detail["artifacts"] if a["type"] == "markdown_document"]
+        if docs:
+            document = self.client.artifact(docs[-1]["ref"])
+            if document.content is None:
+                self._send(self._t("redacted"))
+            else:
+                self._document(task, document.content)
+        self._diff(task, detail)
+
+    def _diff(self, task: str, detail: dict) -> None:
+        workspace = detail.get("workspace")
+        if not isinstance(workspace, dict) or "redacted" in workspace or not workspace.get("diff"):
+            return
+        diff = self.client.artifact(workspace["diff"])
+        if diff.content is not None:
+            self._send_file(f"{task}.diff", diff.content, self._t("diff"))
 
     def _document(self, task: str, content: bytes) -> None:
         try:

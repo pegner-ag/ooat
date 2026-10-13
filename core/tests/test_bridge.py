@@ -125,3 +125,78 @@ def test_cancel_from_the_chat_closes_a_waiting_task_in_czech(tmp_path):
         assert chat.find("r:")["text"].startswith("CANCELLED")
         assert button(chat.find("r:"), "Přijato A").data == f"r:{task}:A:y"
         assert bridge.cancel(task) not in ("Zrušení vyžádáno.", "Zrušení už bylo vyžádáno.")  # closed now
+
+
+# The project workspace in the chat (plan 07c) --------------------------------------------------------------------
+
+from runtime_fakes import WorkspaceModel  # noqa: E402
+
+from ooat_core.config import parse_config  # noqa: E402
+
+ORIGINAL = b"def main():\n    return 1\n"
+EDIT = [("read_file", {"path": "Bots/src/bot.py"}),
+        ("edit_file", {"path": "Bots/src/bot.py", "old": "return 1", "new": "return 2"})]
+TASK_TEXT = f"Oprav bot.\nDone when:\n{CRITERIA[0]}"
+
+
+def project(tmp_path, tools, classes=("public", "internal"), **settings):
+    root = tmp_path / "Bots"
+    (root / "src").mkdir(parents=True)
+    (root / "src" / "bot.py").write_bytes(ORIGINAL)
+    config = parse_config({"projects": {"bots": {"folders": [str(root)], "write": True, **settings}}})
+    return root, Served(tmp_path, model=WorkspaceModel(tools), config=config, runner=True, classes=classes)
+
+
+def test_a_result_brings_the_diff_and_a_revert_that_needs_a_second_tap(tmp_path):
+    root, served = project(tmp_path, [EDIT])
+    chat = FakeChat()
+    with listening(served) as url:
+        bridge = Bridge(OoatClient(url, secret(served.token())), chat, "bots")
+        task = bridge.on_message(TASK_TEXT, "1")
+        assert finished(watching(bridge, task))
+        (diff,) = [m for m in chat.sent if m.get("file") == f"{task}.diff"]
+        assert b"+    return 2" in diff["content"]
+        footer = chat.find("v:")
+        assert bridge.on_button(button(footer, "Revert").data) == "Confirm below."
+        assert root.joinpath("src", "bot.py").read_bytes() != ORIGINAL  # one tap writes nothing
+        confirm = chat.find("V:")
+        assert bridge.on_button(button(confirm, "Yes, revert").data).startswith("Restored 1, skipped 0")
+        assert root.joinpath("src", "bot.py").read_bytes() == ORIGINAL
+
+
+def test_the_limit_question_comes_with_the_document_and_its_revert_asks_again(tmp_path):
+    root, served = project(tmp_path, [EDIT + [("read_file", {"path": "Bots/src/bot.py"})]], max_operations=2)
+    chat = FakeChat()
+    with listening(served) as url:
+        bridge = Bridge(OoatClient(url, secret(served.token())), chat, "bots")
+        task = bridge.on_message(TASK_TEXT, "1")
+        watcher = watching(bridge, task)
+        question = wait_for(lambda: chat.find("a:"))
+        assert any("Files changed (recorded by OOAT)" in m["text"] for m in chat.sent)  # the limited document first
+        assert [m for m in chat.sent if m.get("file") == f"{task}.diff"]
+        assert len(question["buttons"]) == 4
+        assert bridge.on_button(button(question, "Revert").data) == "Confirm below."
+        assert root.joinpath("src", "bot.py").read_bytes() != ORIGINAL
+        assert bridge.on_button(button(chat.find("c:"), "Yes, revert").data) == "Answer recorded."
+        assert finished(watcher)
+        assert root.joinpath("src", "bot.py").read_bytes() == ORIGINAL
+
+
+def test_a_project_without_folders_is_told_once(tmp_path):
+    served, chat = Served(tmp_path, runner=True), FakeChat()
+    with listening(served) as url:
+        bridge = Bridge(OoatClient(url, secret(served.token())), chat, "docs")
+        bridge.on_message(f"{GOAL}\nDone when:\n{CRITERIA[0]}", "1")
+        bridge.on_message(f"{GOAL}\nDone when:\n{CRITERIA[0]}", "2")
+    assert len([m for m in chat.sent if "no folders in OOAT" in m["text"]]) == 1
+
+
+def test_a_workspace_above_the_tokens_class_posts_no_diff_and_no_revert(tmp_path):
+    root, served = project(tmp_path, [EDIT])  # an internal project, watched with a token capped at public
+    chat = FakeChat()
+    with listening(served) as url:
+        session = served.login()  # the web session submits it; the chat only watches
+        task = served.submit(session, project="bots", acceptance=CRITERIA)["task"]
+        bridge = Bridge(OoatClient(url, secret(served.token(cap="public"))), chat, "bots")
+        assert finished(watching(bridge, task))
+    assert not [m for m in chat.sent if m.get("file", "").endswith(".diff")] and not chat.find("v:")
