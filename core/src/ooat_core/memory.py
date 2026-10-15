@@ -214,6 +214,12 @@ def forget(ledger: Ledger, store: MemoryStore, mem_id: str, *, operator: str, ch
     return ledger.append(new_event("MEMORY_FORGOTTEN", task=None, actor={"kind": "hil", "id": operator}, body=body))
 
 
+def item_class(events: list[dict], mem_id: str) -> str | None:
+    """The class of an item that is not forgotten, raised by its edits; None for an unknown or forgotten one."""
+    noted = find(events, mem_id)
+    return _data_class(events, noted) if noted is not None else None
+
+
 def _data_class(events: list[dict], noted: dict) -> str:
     data_class = noted["body"]["data_class"]
     for event in events:

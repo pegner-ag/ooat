@@ -167,3 +167,40 @@ def rating_queue(tasks: dict[str, list[dict]], classes: dict[str, str], cap: str
                               for d in task_decisions(events)]
         queue.append(entry)
     return queue
+
+
+# Conversations and memory (ADR 0018) ------------------------------------------------------------------------------
+
+_SAID = ("text", "tap_text", "reply", "interpretation", "options", "pending", "attachment_names")
+
+
+def conversation_stub(conversation: str) -> dict:
+    return {"redacted": STUB_TEXT, "link": f"/conversations/{conversation}"}
+
+
+def conversation_event(event: dict, cap: str | None) -> dict:
+    """A conversation event for a reader: what was said is stubbed above the reader's cap; ids, decisions, buttons,
+    tasks and costs stay visible."""
+    body = dict(event["body"])
+    if not within(body.get("data_class", "internal"), cap):
+        stub_body = conversation_stub(body["conversation"])
+        for key in _SAID:
+            if key in body:
+                body[key] = stub_body
+    return {"id": event["id"], "ts": event["ts"], "type": event["type"],
+            "actor": {"kind": event["actor"]["kind"], "id": event["actor"]["id"]}, "refs": event["refs"],
+            "cost": event.get("cost"), "body": body}
+
+
+def conversation_view(conversation, own: list[dict], tasks: list[str], cap: str | None) -> dict:
+    return {"conversation": conversation.id, "project": conversation.project, "channel": conversation.channel,
+            "operator": conversation.operator, "started": conversation.started,
+            "last_message": conversation.last_message, "closed": conversation.closed, "tasks": tasks,
+            "events": [conversation_event(e, cap) for e in own]}
+
+
+def memory_view(item) -> dict:
+    """A memory item the reader may see (the caller has applied the cap)."""
+    return {"memory": item.id, "scope": item.scope, "kind": item.kind, "data_class": item.data_class,
+            "text": item.text, "pinned": item.pinned, "done": item.done, "noted": item.noted, "source": item.source,
+            "conversation": item.conversation}

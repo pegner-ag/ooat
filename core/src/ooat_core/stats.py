@@ -16,6 +16,7 @@ PERIODS = {"1d": 1, "7d": 7, "30d": 30, "90d": 90, "all": None}
 GROUPS = ("role", "connector", "tier", "project")
 OTHER = "(other)"  # projects the reader may not see by name, and tasks without a project
 COST_PARTS = ("contracts_usd", "gate_usd", "orchestrator_usd", "critic_usd")  # TASK_CLOSED.cost in USD
+RECEPTION_ACTOR_ID = "ooat-reception"
 
 
 def _utc(text: str) -> datetime:
@@ -29,6 +30,8 @@ def role_of(event: dict) -> str:
         return actor["role"].split("@", 1)[0]
     if actor == GATE_ACTOR:
         return "gate"
+    if actor["id"] == RECEPTION_ACTOR_ID:  # its own line in Usage (ADR 0018)
+        return "reception"
     return "critic" if event["body"].get("gate") == GATE_CRITIC else "acceptance"
 
 
@@ -44,15 +47,19 @@ def usage(events: list[dict], *, now: datetime, period: str = "7d", project: str
     since = now - timedelta(days=days) if days else None
     projects = {e["task"]: e["body"].get("project") for e in events if e["type"] == "TASK_SUBMITTED"}
     named = {p for task, p in projects.items() if p and task not in above_cap}
+
+    def project_of(event: dict) -> str | None:  # a reception call has no task; its event names the project
+        return projects.get(event["task"]) if event["task"] is not None else event["body"].get("project")
+
     selected = [e for e in events if (since is None or _utc(e["ts"]) >= since)
-                and (project is None or projects.get(e["task"]) == project)]
+                and (project is None or project_of(e) == project)]
 
     def key(event: dict) -> str:
         if group == "role":
             return role_of(event)
         if group in ("connector", "tier"):
             return event["cost"].get("adapter" if group == "connector" else "tier") or OTHER
-        name = projects.get(event["task"])
+        name = project_of(event)
         return name if name in named else OTHER
 
     groups: dict[str, dict] = {}
