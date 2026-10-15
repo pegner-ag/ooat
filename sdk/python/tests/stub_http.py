@@ -35,7 +35,7 @@ class Stub:
                 self.end_headers()
                 self.wfile.write(data)
 
-            do_GET = do_POST = serve
+            do_GET = do_POST = do_PATCH = do_DELETE = serve
 
         self.server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
         threading.Thread(target=self.server.serve_forever, daemon=True).start()
