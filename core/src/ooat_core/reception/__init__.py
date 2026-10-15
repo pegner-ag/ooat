@@ -58,7 +58,8 @@ def say(text: str, cs: str, en: str) -> str:
 
 
 class Reception:
-    def __init__(self, runtime: Runtime, store: memory.MemoryStore | None, settings: ReceptionSettings = ReceptionSettings(),
+    def __init__(self, runtime: Runtime, store: memory.MemoryStore | None,
+                 settings: ReceptionSettings = ReceptionSettings(),
                  projects: dict[str, Project] | None = None,
                  clock: Callable[[], datetime] = lambda: datetime.now(timezone.utc),
                  on_task: Callable[[str], None] = lambda task: None):
@@ -112,14 +113,16 @@ class Reception:
         if files:
             body["attachment_names"] = names
         try:
-            return self.ledger.append(new_event("CONVERSATION_MESSAGE", task=None, actor={"kind": "hil", "id": operator},
+            return self.ledger.append(new_event("CONVERSATION_MESSAGE", task=None,
+                                                actor={"kind": "hil", "id": operator},
                                                 refs=[s.ref for s in staged], body=body), staged)
         except DuplicateIntake as repeated:
             return repeated.earlier
 
     def tap(self, conversation: str, tap: str, *, operator: str, channel: str, text: str | None = None) -> dict:
         """A button pressed in the conversation; returns the tap's CONVERSATION_MESSAGE and the decision it caused
-        ({"message": …, "decision": … or None}). A Differently with a correction is decided like a message, later."""
+        ({"message": …, "decision": … or None}). A Differently with a correction is decided like a message,
+        later."""
         operator = checked_operator(operator)
         events = self.ledger.events()
         found = conversations.conversations(events).get(conversation)
@@ -457,7 +460,8 @@ class Reception:
                     continue
             result |= {"cancelled": cancelled} if cancelled else {
                 "reply": say(said, "Nic neběží, není co zastavit.", "Nothing is running; there is nothing to stop.")}
-        elif kind == "answer" and decision.get("needs_files") and self.runtime.workspaces is not None                 and self.runtime.workspaces.project(found.project) is not None:
+        elif (kind == "answer" and decision.get("needs_files") and self.runtime.workspaces is not None
+              and self.runtime.workspaces.project(found.project) is not None):
             result["read_files"] = True  # a second call reads the project's files (design 08 §4)
         elif kind == "command":
             result["buttons"] = ["todo"]

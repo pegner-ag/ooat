@@ -25,7 +25,8 @@ def _utc(text: str) -> datetime:
 class Desk:
     def __init__(self, make_reception: Callable[[], object], *, clock: Callable[[], datetime], batch_seconds: float,
                  tick_seconds: float = 60.0):
-        self._make, self.clock, self.batch_seconds, self.tick_seconds = make_reception, clock, batch_seconds, tick_seconds
+        self._make, self.clock = make_reception, clock
+        self.batch_seconds, self.tick_seconds = batch_seconds, tick_seconds
         self._reception = None
         self._conversations: list[str] = []
         self._reports: list[str] = []

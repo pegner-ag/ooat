@@ -149,9 +149,9 @@ def decide_call(gateway: Gateway, *, tier: str, context: str, messages: str, con
 
 def answer_estimate(gateway: Gateway, *, context: str, question: str, grant, conversation: str,
                     data_class: str) -> float:
-    return gateway.estimate(ModelRequest(tier=DECISION_TIER, prompt=answer_prompt(context, question), system=ANSWER_SYSTEM,
-                                         data_class=data_class, max_output_tokens=2500, expected_output_tokens=1200,
-                                         conversation=conversation, workspace=grant)).usd
+    return gateway.estimate(ModelRequest(
+        tier=DECISION_TIER, prompt=answer_prompt(context, question), system=ANSWER_SYSTEM, data_class=data_class,
+        max_output_tokens=2500, expected_output_tokens=1200, conversation=conversation, workspace=grant)).usd
 
 
 def answer_prompt(context: str, question: str) -> str:

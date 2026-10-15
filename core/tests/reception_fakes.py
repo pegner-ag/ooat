@@ -43,7 +43,7 @@ class ReceptionModel(FakeConnector):
         super().__init__(manifest)
         self.replies = list(replies) or [decision()]
         self.answered = 0
-        self.tools = list(tools)  # tool calls a call with a grant runs through OOAT's own tools, as the MCP server would
+        self.tools = list(tools)  # run through OOAT's own tools on a call with a grant, as the MCP server would
 
     def complete(self, request, secrets):
         self.calls.append(request)

@@ -25,7 +25,7 @@ INTAKE_KEY = re.compile(r"^[!-~]{1,128}$")
 SSE_POLL_S, SSE_MAX_S = 1.0, 900.0
 CONVERSATION = r"^cnv_[0-7][0-9A-HJKMNP-TV-Z]{25}$"
 MEMORY = r"^mem_[0-7][0-9A-HJKMNP-TV-Z]{25}$"
-TAP = r"^(yes|differently|new_thing|make_task|todo|forget:mem_[0-7][0-9A-HJKMNP-TV-Z]{25}|done:mem_[0-7][0-9A-HJKMNP-TV-Z]{25})$"
+TAP = r"^(yes|differently|new_thing|make_task|todo|(forget|done):mem_[0-7][0-9A-HJKMNP-TV-Z]{25})$"
 
 
 class _Body(BaseModel):

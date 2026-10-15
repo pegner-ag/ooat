@@ -35,7 +35,8 @@ def test_a_question_is_answered_without_a_task(tmp_path):
 
 
 def test_a_vague_request_asks_one_question_with_options(tmp_path):
-    desk = Desk(tmp_path, [decision("ask", "Který web myslíte?", confidence=0.4, options=["testdna.cz", "eurogeen.com"])])
+    desk = Desk(tmp_path, [decision("ask", "Který web myslíte?", confidence=0.4,
+                                    options=["testdna.cz", "eurogeen.com"])])
     body = desk.ask("Oprav to.")["body"]
     assert body["decision"] == "ask" and body["options"] == ["testdna.cz", "eurogeen.com"] and desk.submitted() == []
 

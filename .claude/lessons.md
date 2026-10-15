@@ -63,3 +63,7 @@
 - Claude Code headless (2.1.287): `--tools ""` with `--strict-mcp-config` and `--mcp-config <file>` leaves only that
   MCP server's tools; `--allowedTools mcp__<server>` allows all of them, without it every call is denied
   (`permission_denials`) and the tool never runs. OOAT's workspace server is `mcp__ooat_workspace`.
+- The API's guard wants a Content-Length on every unsafe request; httpx (the test client) and urllib send none for a
+  DELETE without a body, so a DELETE without `Transfer-Encoding` passes as length 0 (plan 08a).
+- A task the reception starts is declared at the class of the messages it came from: the model's goal may rephrase
+  away the e-mail that raised the class, and the Gate would then route it lower (plan 08a, `Reception._start`).

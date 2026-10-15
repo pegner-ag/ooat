@@ -128,7 +128,9 @@ def reception_verdicts(events: Iterable[dict]) -> list[RatedDecision]:
                 verdicts[confirm["id"]] = (confirm, body["tap"] == "yes")
         elif event["type"] == "TASK_SUBMITTED":
             submitted[event["task"]] = event["ts"]
-        elif event["type"] == "DECISION" and event["actor"]["kind"] == "hil" and event["task"] in started                 and body["decision"] == "cancel the task" and event["task"] in submitted                 and (_utc(event["ts"]) - _utc(submitted[event["task"]])).total_seconds() <= QUICK_CANCEL_S:
+        elif (event["type"] == "DECISION" and event["actor"]["kind"] == "hil" and event["task"] in started
+              and body["decision"] == "cancel the task" and event["task"] in submitted
+              and (_utc(event["ts"]) - _utc(submitted[event["task"]])).total_seconds() <= QUICK_CANCEL_S):
             decision = started[event["task"]]
             verdicts[decision["id"]] = (decision, False)
         elif event["type"] == "TASK_RATED" and event["task"] in started and body["accepted"]:

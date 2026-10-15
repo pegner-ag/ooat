@@ -153,7 +153,7 @@ def test_a_token_cannot_edit_or_pin_but_can_mark_done_and_forget(tmp_path):
         response = s.client.patch(f"/api/v1/memory/docs/{item.id}", headers=bot, json=change)
         assert response.status_code == 403 and response.json()["error"]["code"] == "SCOPE"
     assert s.client.patch(f"/api/v1/memory/docs/{todo.id}", headers=bot, json={"done": True}).status_code == 200
-    assert s.client.request("DELETE", f"/api/v1/memory/docs/{item.id}", headers=bot, content=b"").json()["forgotten"] is True
+    assert s.client.delete(f"/api/v1/memory/docs/{item.id}", headers=bot).json()["forgotten"] is True
     assert s.server.memory.read(item.id) is None
     web = s.login()
     other = noted(s)
@@ -164,9 +164,9 @@ def test_forgetting_through_another_scope_or_above_the_cap_is_refused(tmp_path):
     s = served(tmp_path, classes=PERSONAL_ROUTE)
     bot = s.token(cap="internal")
     elsewhere = noted(s, scope="shop")
-    assert s.client.request("DELETE", f"/api/v1/memory/docs/{elsewhere.id}", headers=bot, content=b"").status_code == 404
+    assert s.client.delete(f"/api/v1/memory/docs/{elsewhere.id}", headers=bot).status_code == 404
     secret = noted(s, text="Důvěrná cena.", data_class="client_confidential")
-    response = s.client.request("DELETE", f"/api/v1/memory/docs/{secret.id}", headers=bot, content=b"")
+    response = s.client.delete(f"/api/v1/memory/docs/{secret.id}", headers=bot)
     assert response.status_code == 403 and s.server.memory.read(secret.id) is not None
 
 

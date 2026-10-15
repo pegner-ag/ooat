@@ -1,0 +1,15 @@
+[
+  {"text": "Jsou ceny na webu uvedené s DPH?", "expected": "answer"},
+  {"text": "Změň titulek domovské stránky na „Genetické testy pro celou rodinu“.", "expected": "task"},
+  {"text": "Oprav to.", "expected": "ask"},
+  {"text": "A ještě tlačítko v patičce.", "expected": "continue_task",
+   "context": [{"person": "Změň text tlačítka v hlavičce na Objednat.", "reception": "Dělám na tom: změním text tlačítka v hlavičce."}]},
+  {"text": "Už je to hotové?", "expected": "status",
+   "context": [{"person": "Projdi stránky a najdi všechna místa s cenou.", "reception": "Dělám na tom."}]},
+  {"text": "Pardon, nic nedělej.", "expected": "cancel",
+   "context": [{"person": "Přepiš všechny nadpisy na webu.", "reception": "Dělám na tom."}]},
+  {"text": "Commitni to a pushni na server.", "expected": "command"},
+  {"text": "2", "expected": "continue_task",
+   "context": [{"person": "Co dál s odkazy?", "reception": "Mohu: 1. jen je vypsat, 2. rovnou je opravit.",
+                "options": ["Jen je vypsat", "Rovnou je opravit"]}]}
+]

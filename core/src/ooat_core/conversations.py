@@ -122,4 +122,5 @@ def last_decision(own: list[dict]) -> dict | None:
 
 def tasks_of(events: list[dict], conversation: str) -> list[str]:
     """Tasks the conversation's reception started, in the order they were submitted."""
-    return [e["task"] for e in events if e["type"] == "TASK_SUBMITTED" and e["body"].get("conversation") == conversation]
+    return [e["task"] for e in events
+            if e["type"] == "TASK_SUBMITTED" and e["body"].get("conversation") == conversation]
