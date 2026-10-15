@@ -22,6 +22,7 @@ v0.2 folds the accepted decision records (`docs/adr/`) into the text, so the spe
 - Design 03f: Google's subscription CLI is Antigravity CLI (`agy`), not Gemini CLI (§6).
 - Rule A3 aligned with the implemented Gate: it is recorded and skips step B, but the Gate may still close or clarify (§4).
 - Ledger-enforced HIL rules: options named by `recommended` / `default_on_silence`, one response per request, `default_applied` responses choose the default (§9).
+- ADR 0018 (proposed): a reception in `ooat-core` turns messages into direct read-only answers, questions or tasks; conversations above tasks; project memory and operator preferences with deletable texts outside the ledger (§3, §6, §7, §10).
 
 ## 1. Purpose, goals and principles
 
@@ -114,7 +115,7 @@ Every `<ulid>` is a full 26-character ULID; IDs shortened in this text (e.g. `ev
 - A Contract references exactly one Capability and is assigned to exactly one Agent instance.
 - An Agent instance is created from a Role; a Role inherits from a Role family (single inheritance, max. depth 3).
 - An Agent instance calls models only through Provider adapters selected by the routing policy.
-- Every state change of a Task or Contract is an Event; state is never overwritten without one. Every event belongs to a Task except the connector events `ADAPTER_ACKNOWLEDGED` and `ADAPTER_DISABLED` and the operator token events `OPERATOR_TOKEN_ISSUED` and `OPERATOR_TOKEN_REVOKED`, which have `task: null` (ADR 0003, ADR 0010, ADR 0016).
+- Every state change of a Task or Contract is an Event; state is never overwritten without one. Every event belongs to a Task except the connector events `ADAPTER_ACKNOWLEDGED` and `ADAPTER_DISABLED` and the operator token events `OPERATOR_TOKEN_ISSUED` and `OPERATOR_TOKEN_REVOKED`, which have `task: null` (ADR 0003, ADR 0010, ADR 0016), and the conversation and memory events, which have `task: null` and carry `body.conversation` or `body.memory` (ADR 0018).
 - An Artifact is created only as a Contract output or as HIL input; it never has anonymous provenance.
 
 ### Contract outcomes
@@ -161,7 +162,8 @@ Python for the core because most provider and agent SDKs ship there first; TypeS
 
 | Component | Responsibility | Default | Alternatives |
 | --- | --- | --- | --- |
-| Intake | Accept tasks | REST API + CLI | Notifier bots, webhooks, workflow tools (n8n, Make) |
+| Intake | Accept tasks and messages | REST API + CLI | Notifier bots, webhooks, workflow tools (n8n, Make) |
+| Reception | Turns a message into a direct read-only answer, one question or a task with goal and acceptance; keeps conversations and project memory (ADR 0018) | part of `ooat-core`, `economy` tier through the gateway | none: tasks can still be submitted directly |
 | `ooat-core` | Gate, dispatcher, contracts, budget enforcement, state machine | Python, FastAPI, Pydantic v2 | none: single write path by design |
 | Orchestrator (LLM) | Decomposition, contract drafting, synthesis | `frontier` tier worker | any provider meeting the tier |
 | Agent workers | Run agent instances against contracts | Process per instance; Claude Agent SDK runtime in F1 | OpenAI Agents SDK, subscription CLI runner, NOOA (F4 pilot) |
@@ -523,6 +525,7 @@ The `decision` tier is used wherever the runtime needs a judgement among known o
 | HIL routing | Is the declared default safe to apply? How urgent is this? | Noul, Score | risk class ≤ R1 and P(default acceptable) ≥ θ | ask the human |
 | Rating prediction | Would the operator accept this output? | Noul | stored as a provisional rating | rating queue, least certain first |
 | Stall detection | Is this agent repeating itself without progress? | Noul | never acts alone | stop contract and escalate |
+| Reception (ADR 0018) | Answer, task, confirm, ask, or continue a task? Does the message continue the open conversation? | Choice, Noul | confidence ≥ θ and risk class R0 or R1; never lowers a risk class | `workhorse` tier decides again; below θ there too, one question to the person |
 
 ### Confidence-gated autonomy
 
@@ -610,7 +613,7 @@ Agents never talk in free text. Every message is a typed event in an append-only
 }
 ```
 
-The example shows the language rule: keys, event types and reason codes are English, free-text fields follow the task language (`lang`). `body` is validated against the schema for its `type`; an event that fails is not written and the agent receives the error. `usd` is filled in by the gateway, next to the optional `estimated_usd` it made before the call (ADR 0010). IDs in the example are shortened; real IDs carry full 26-character ULIDs (ADR 0003). `task` is required on every event except `ADAPTER_ACKNOWLEDGED`, `ADAPTER_DISABLED`, `OPERATOR_TOKEN_ISSUED` and `OPERATOR_TOKEN_REVOKED`, which have `task: null` (ADR 0003, ADR 0010, ADR 0016).
+The example shows the language rule: keys, event types and reason codes are English, free-text fields follow the task language (`lang`). `body` is validated against the schema for its `type`; an event that fails is not written and the agent receives the error. `usd` is filled in by the gateway, next to the optional `estimated_usd` it made before the call (ADR 0010). IDs in the example are shortened; real IDs carry full 26-character ULIDs (ADR 0003). `task` is required on every event except `ADAPTER_ACKNOWLEDGED`, `ADAPTER_DISABLED`, `OPERATOR_TOKEN_ISSUED` and `OPERATOR_TOKEN_REVOKED`, which have `task: null` (ADR 0003, ADR 0010, ADR 0016), and the conversation and memory events, which have `task: null` and carry `body.conversation` or `body.memory` (ADR 0018).
 
 ### Event types
 
@@ -637,8 +640,12 @@ The example shows the language rule: keys, event types and reason codes are Engl
 | `ADAPTER_DISABLED` | Human (named operator) | Connector disabled: adapter, operator, reason (ADR 0010); `task: null` | Gateway, dashboard |
 | `OPERATOR_TOKEN_ISSUED` | Human (named operator) | An API token acting as the operator: token id, name, scopes, `max_data_class`, SHA-256 of the token (never the token), expiry; `task: null` (ADR 0016) | API, dashboard |
 | `OPERATOR_TOKEN_REVOKED` | Human (named operator) | Token revoked: token id, operator, reason; `task: null` (ADR 0016) | API, dashboard |
+| `CONVERSATION_MESSAGE` | Human (bound operator) | Conversation id, project, text, attachment refs, `reply_to`; `task: null` (ADR 0018) | Reception |
+| `RECEPTION_DECIDED` | `ooat-core` (reception) | The validated decision and the escalated one if any, the ids of the context items used, the reply; `task: null` (ADR 0018) | Surfaces, calibration |
+| `CONVERSATION_CLOSED` | `ooat-core` | Conversation id, reason (`silence`, `new_conversation`, `operator`), summary memory id; `task: null` (ADR 0018) | Memory |
+| `MEMORY_NOTED` / `MEMORY_EDITED` / `MEMORY_FORGOTTEN` | `ooat-core` (reception) or Human; edits and forgetting only Human | Memory id, scope (project or `operator`), kind, data class, source, SHA-256 of the text, never the text; `task: null` (ADR 0018) | Reception, dashboard |
 
-Only agents emit `CLAIM`, `RESULT` and `OBJECTION`; only humans emit `HIL_RESPONSE`, `TASK_RATED`, `DEFECT_FOUND`, `ADAPTER_ACKNOWLEDGED`, `ADAPTER_DISABLED`, `OPERATOR_TOKEN_ISSUED`, `OPERATOR_TOKEN_REVOKED` and `WORKSPACE_REVERTED`; their actor is the operator bound to the session or token, never a name from a request, and they record the `channel` (`cli`, `web`, `token:<id>`) they came from (ADR 0016). The one exception: a default applied on silence is a `HIL_RESPONSE` written by the runtime under the reserved actor id `default-on-silence` (section 9, HIL rule 5).
+Only agents emit `CLAIM`, `RESULT` and `OBJECTION`; only humans emit `HIL_RESPONSE`, `TASK_RATED`, `DEFECT_FOUND`, `ADAPTER_ACKNOWLEDGED`, `ADAPTER_DISABLED`, `OPERATOR_TOKEN_ISSUED`, `OPERATOR_TOKEN_REVOKED`, `WORKSPACE_REVERTED`, `CONVERSATION_MESSAGE`, `MEMORY_EDITED` and `MEMORY_FORGOTTEN`; their actor is the operator bound to the session or token, never a name from a request, and they record the `channel` (`cli`, `web`, `token:<id>`) they came from (ADR 0016). The one exception: a default applied on silence is a `HIL_RESPONSE` written by the runtime under the reserved actor id `default-on-silence` (section 9, HIL rule 5).
 
 ### Debate rules
 
@@ -899,6 +906,8 @@ The dashboard shows exceptions and economics, not the flow of conversation. The 
 | HIL queue | Blocking requests with deadline and default, then the digest; one-click actions | `HIL_REQUEST` without `HIL_RESPONSE` | F1 |
 | Rating queue | Closed tasks awaiting a 1-click acceptance rating and value class | `TASK_CLOSED` without `TASK_RATED` | F1 |
 | Usage | Calls, tokens and cost by role, connector, tier and project; metered vs. subscription shadow cost; tasks by outcome, cost per accepted task, estimate vs. actual; HIL waiting time | ledger | F1 (ADR 0016) |
+| Conversation | One input field with a project picker; the reception's replies and the tasks they started (ADR 0018) | ledger | F1 |
+| Memory | A project's memory items and the operator's preferences: edit, pin, forget, with their source (ADR 0018) | ledger, memory store | F1 |
 | Exceptions | `GATE_FAILED`, objections unresolved after round 2, budget and quota warnings, abstentions, stuck contracts (no event > 15 min) | ledger | F1 |
 | Tasks | List with topology, state, cost vs. budget, orchestrator profile | views | F1 |
 | Task detail | Contract DAG with states, event timeline, artifact versions, `TOPOLOGY_DECIDED` with all candidates and EU | ledger, artifacts | F1 (no DAG), F3 (DAG) |
@@ -906,7 +915,7 @@ The dashboard shows exceptions and economics, not the flow of conversation. The 
 | Calibration | Predicted vs. realised EU, p\_accept and cost; abstention justification; share of correct topologies | ledger + eval results | F2 |
 | Catalog | Capabilities and roles with state, version, cost card, acceptance trend, backlog from `INCAPABLE` | catalog + ledger | F3 |
 
-Debate detail (objections and their resolution) opens from an artifact, not as a feed. A live stream of agent conversation is not built in F1 to F3: it costs attention and produces no decisions. UI strings are localisable; the reference UI ships in English and Czech.
+Debate detail (objections and their resolution) opens from an artifact, not as a feed. A live stream of agent conversation is not built in F1 to F3: it costs attention and produces no decisions. The Conversation view is the operator's dialogue with the reception, not agents talking to each other (ADR 0018). UI strings are localisable; the reference UI ships in English and Czech.
 
 ### Observability for development
 
