@@ -22,7 +22,7 @@ v0.2 folds the accepted decision records (`docs/adr/`) into the text, so the spe
 - Design 03f: Google's subscription CLI is Antigravity CLI (`agy`), not Gemini CLI (§6).
 - Rule A3 aligned with the implemented Gate: it is recorded and skips step B, but the Gate may still close or clarify (§4).
 - Ledger-enforced HIL rules: options named by `recommended` / `default_on_silence`, one response per request, `default_applied` responses choose the default (§9).
-- ADR 0018: a reception in `ooat-core` turns messages into direct read-only answers, questions or tasks; conversations above tasks; project memory and operator preferences with deletable texts outside the ledger (§3, §6, §7, §10).
+- ADR 0018: a reception in `ooat-core` turns messages into direct read-only answers, questions or tasks; conversations above tasks; project memory and operator preferences with deletable texts outside the ledger (§3, §6, §7, §10); amended the same day after a reading of the chat log: decisions `status`, `cancel`, `command` and `switch`, a report when a conversation's task closes (`CONVERSATION_REPORTED`), open points (`todo`) in memory, bursts decided together, replies on the conversation's event stream, and `QUOTA_WARNING` of a reception call with `task: null`.
 
 ## 1. Purpose, goals and principles
 
@@ -115,7 +115,7 @@ Every `<ulid>` is a full 26-character ULID; IDs shortened in this text (e.g. `ev
 - A Contract references exactly one Capability and is assigned to exactly one Agent instance.
 - An Agent instance is created from a Role; a Role inherits from a Role family (single inheritance, max. depth 3).
 - An Agent instance calls models only through Provider adapters selected by the routing policy.
-- Every state change of a Task or Contract is an Event; state is never overwritten without one. Every event belongs to a Task except the connector events `ADAPTER_ACKNOWLEDGED` and `ADAPTER_DISABLED` and the operator token events `OPERATOR_TOKEN_ISSUED` and `OPERATOR_TOKEN_REVOKED`, which have `task: null` (ADR 0003, ADR 0010, ADR 0016), and the conversation and memory events, which have `task: null` and carry `body.conversation` or `body.memory` (ADR 0018).
+- Every state change of a Task or Contract is an Event; state is never overwritten without one. Every event belongs to a Task except the connector events `ADAPTER_ACKNOWLEDGED` and `ADAPTER_DISABLED` and the operator token events `OPERATOR_TOKEN_ISSUED` and `OPERATOR_TOKEN_REVOKED`, which have `task: null` (ADR 0003, ADR 0010, ADR 0016), and the conversation and memory events, which have `task: null` and carry `body.conversation` or `body.memory` (ADR 0018); so do the `WORKSPACE_USED` of a direct answer, with `body.conversation`, and a `QUOTA_WARNING` caused by a reception call.
 - An Artifact is created only as a Contract output or as HIL input; it never has anonymous provenance.
 
 ### Contract outcomes
@@ -525,7 +525,7 @@ The `decision` tier is used wherever the runtime needs a judgement among known o
 | HIL routing | Is the declared default safe to apply? How urgent is this? | Noul, Score | risk class ≤ R1 and P(default acceptable) ≥ θ | ask the human |
 | Rating prediction | Would the operator accept this output? | Noul | stored as a provisional rating | rating queue, least certain first |
 | Stall detection | Is this agent repeating itself without progress? | Noul | never acts alone | stop contract and escalate |
-| Reception (ADR 0018) | Answer, task, confirm, ask, or continue a task? Does the message continue the open conversation? | Choice, Noul | confidence ≥ θ and risk class R0 or R1; never lowers a risk class | `workhorse` tier decides again; below θ there too, one question to the person |
+| Reception (ADR 0018) | Answer, task, confirm, ask, continue a task, status, cancel, command or switch project? Does the message continue the open conversation? | Choice, Noul | confidence ≥ θ and risk class R0 or R1; never lowers a risk class | `workhorse` tier decides again; below θ there too, one question to the person |
 
 ### Confidence-gated autonomy
 
@@ -613,7 +613,7 @@ Agents never talk in free text. Every message is a typed event in an append-only
 }
 ```
 
-The example shows the language rule: keys, event types and reason codes are English, free-text fields follow the task language (`lang`). `body` is validated against the schema for its `type`; an event that fails is not written and the agent receives the error. `usd` is filled in by the gateway, next to the optional `estimated_usd` it made before the call (ADR 0010). IDs in the example are shortened; real IDs carry full 26-character ULIDs (ADR 0003). `task` is required on every event except `ADAPTER_ACKNOWLEDGED`, `ADAPTER_DISABLED`, `OPERATOR_TOKEN_ISSUED` and `OPERATOR_TOKEN_REVOKED`, which have `task: null` (ADR 0003, ADR 0010, ADR 0016), and the conversation and memory events, which have `task: null` and carry `body.conversation` or `body.memory` (ADR 0018).
+The example shows the language rule: keys, event types and reason codes are English, free-text fields follow the task language (`lang`). `body` is validated against the schema for its `type`; an event that fails is not written and the agent receives the error. `usd` is filled in by the gateway, next to the optional `estimated_usd` it made before the call (ADR 0010). IDs in the example are shortened; real IDs carry full 26-character ULIDs (ADR 0003). `task` is required on every event except `ADAPTER_ACKNOWLEDGED`, `ADAPTER_DISABLED`, `OPERATOR_TOKEN_ISSUED` and `OPERATOR_TOKEN_REVOKED`, which have `task: null` (ADR 0003, ADR 0010, ADR 0016), and the conversation and memory events, which have `task: null` and carry `body.conversation` or `body.memory` (ADR 0018); so do the `WORKSPACE_USED` of a direct answer, with `body.conversation`, and a `QUOTA_WARNING` caused by a reception call.
 
 ### Event types
 
@@ -642,8 +642,9 @@ The example shows the language rule: keys, event types and reason codes are Engl
 | `OPERATOR_TOKEN_REVOKED` | Human (named operator) | Token revoked: token id, operator, reason; `task: null` (ADR 0016) | API, dashboard |
 | `CONVERSATION_MESSAGE` | Human (bound operator) | Conversation id, project, text, attachment refs, `reply_to`; `task: null` (ADR 0018) | Reception |
 | `RECEPTION_DECIDED` | `ooat-core` (reception) | The validated decision and the escalated one if any, the ids of the context items used, the reply; `task: null` (ADR 0018) | Surfaces, calibration |
-| `CONVERSATION_CLOSED` | `ooat-core` | Conversation id, reason (`silence`, `new_conversation`, `operator`), summary memory id; `task: null` (ADR 0018) | Memory |
-| `MEMORY_NOTED` / `MEMORY_EDITED` / `MEMORY_FORGOTTEN` | `ooat-core` (reception) or Human; edits and forgetting only Human | Memory id, scope (project or `operator`), kind, data class, source, SHA-256 of the text, never the text; `task: null` (ADR 0018) | Reception, dashboard |
+| `CONVERSATION_REPORTED` | `ooat-core` (reception) | A task started from the conversation closed: the task, the report (asked, how solved, state, next) and its numbered options; `task: null` (ADR 0018) | Surfaces |
+| `CONVERSATION_CLOSED` | `ooat-core` | Conversation id, reason (`silence`, `new_conversation`, `switched`, `operator`), summary memory id; `task: null` (ADR 0018) | Memory |
+| `MEMORY_NOTED` / `MEMORY_EDITED` / `MEMORY_FORGOTTEN` | `ooat-core` (reception) or Human; edits and forgetting only Human | Memory id, scope (project or `operator`), kind (`preference`, `fact`, `glossary`, `summary`, `todo`), data class, source, SHA-256 of the text, never the text; `task: null` (ADR 0018) | Reception, dashboard |
 
 Only agents emit `CLAIM`, `RESULT` and `OBJECTION`; only humans emit `HIL_RESPONSE`, `TASK_RATED`, `DEFECT_FOUND`, `ADAPTER_ACKNOWLEDGED`, `ADAPTER_DISABLED`, `OPERATOR_TOKEN_ISSUED`, `OPERATOR_TOKEN_REVOKED`, `WORKSPACE_REVERTED`, `CONVERSATION_MESSAGE`, `MEMORY_EDITED` and `MEMORY_FORGOTTEN`; their actor is the operator bound to the session or token, never a name from a request, and they record the `channel` (`cli`, `web`, `token:<id>`) they came from (ADR 0016). The one exception: a default applied on silence is a `HIL_RESPONSE` written by the runtime under the reserved actor id `default-on-silence` (section 9, HIL rule 5).
 

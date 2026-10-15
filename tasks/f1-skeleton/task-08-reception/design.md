@@ -1,7 +1,7 @@
 # Reception, conversations and project memory: asking OOAT like a search box — design
 
 **Epic:** f1-skeleton · **Sub-project:** 08 · **Status:** approved by the owner 2026-10-15 (sections 1–4 in chat, the
-PR with ADR 0018 and the spec amendment)
+PR with ADR 0018 and the spec amendment); addendum §14 approved 2026-10-15, after a reading of the bot's log
 **Spec:** `spec/ooat-specification.md` §3 (components), §4 (Gate, rule A1), §6 (decision points, confidence-gated
 autonomy), §7 (ledger), §9 (risk classes, data protection), §10 (dashboard); ADR 0009, ADR 0010, ADR 0011,
 ADR 0012, ADR 0016, ADR 0017, ADR 0018 (new); workspace design (`../task-07-project-workspace/design.md`),
@@ -62,8 +62,14 @@ message (web, Telegram, CLI) ──► reception ──┬─► answer   (read 
                                               ├─► confirm  ("I understand it as …") → HIL-like question, one tap
                                               ├─► ask      (one concrete question)  → question, reply as text or tap
                                               ├─► task     (goal + acceptance)      → TASK_SUBMITTED ─► Gate ─► …
-                                              └─► continue_task                     → answer to the open question,
-                                                                                      or TASK_SUBMITTED (follows)
+                                              ├─► continue_task                     → answer to the open question,
+                                              │                                       or TASK_SUBMITTED (follows)
+                                              ├─► status   (from the ledger)          → what runs, what is done, open points
+                                              ├─► cancel                              → the running task stops
+                                              ├─► command  (commit, push, deploy …)   → says OOAT cannot run it yet, offers
+                                              │                                       to keep it as an open point
+                                              └─► switch   (another project)          → the chat moves to that project
+                     a task of the conversation closes ──► report: asked, how solved, state, numbered next options
            project memory ◄── up to 3 notes after a task or answer; a summary when the conversation closes
 ```
 
@@ -103,6 +109,10 @@ One call per message on the `economy` tier, structured output validated against 
 | `confirm` | the goal is probable but uncertain | "I understand it as: … Shall I start?" with **Yes** and **Differently** (a free-text correction) |
 | `ask` | the goal cannot be guessed | one concrete question, with 2 or 3 answers as buttons where possible |
 | `continue_task` | the message adds to a running or the last task | the answer goes to that task's open question, or a follow-up task (`body.follows`) starts |
+| `status` | a question about the state of work ("Is it done?", "Where did you stop?") | what runs, what finished and how, open questions and open points, from the ledger only |
+| `cancel` | "Stop", "Don't do anything" about a task of the conversation | the task stops; after it closes its file changes can be reverted |
+| `command` | a request to run something OOAT cannot run yet (commit, push, deploy, restart a service) | says so plainly; offers **Keep as an open point**; the chat bridge may offer its other engine (08c) |
+| `switch` | "switch to project …" naming a project of `ooat.toml` | the chat continues in that project (applied by the surface, 08c) |
 
 Rules (each pinned by a test in 08a):
 
@@ -134,6 +144,14 @@ Rules (each pinned by a test in 08a):
    "not what I meant" are the operator's verdicts on the reception's decision (`TASK_RATED.decisions`, ADR 0011).
    θ for the reception is calibrated per engine and model version like every other decision point; until there is
    history it uses the default θ of a new decision point.
+8. **Numbered next steps (§14).** A reply that offers more than one way on, and every report of a finished task,
+   ends with numbered options. The reception keeps the last ones in the conversation's context, so "Yes", "2" or
+   "1/ yes 2/ no, push" is understood as the choice it answers.
+9. **Commands are not run (§14).** OOAT runs no commands (ADR 0017); the reception never turns "commit and push" or
+   "restart n8n" into a task that pretends to. It says what it can do instead (prepare the change, check the
+   files) and offers to keep the command as an open point.
+10. **Bursts are one message (§14).** Messages of one conversation that arrive within a short quiet window of each
+    other are decided together, as one request.
 
 ### Direct answers (`answer`)
 
@@ -172,9 +190,9 @@ ADR 0012).
 
 ## 6. Memory
 
-Item kinds: `preference`, `fact`, `glossary`, `summary`. Each item has an id (`mem_` + ULID), a scope (the project
-slug, or `operator` for the operator's preferences), a data class (at least the project's `data_class`), its
-source (a message or a task), `pinned`, and dates.
+Item kinds: `preference`, `fact`, `glossary`, `summary`, `todo` (an open point, §14). Each item has an id
+(`mem_` + ULID), a scope (the project slug, or `operator` for the operator's preferences), a data class (at least
+the project's `data_class`), its source (a message or a task), `pinned`, and dates.
 
 - **Written automatically, visibly.** After a finished task or a direct answer the reception may note at most 3
   items (`memory_notes`). The reply carries one line, e.g. "🧠 Remembered: prices are quoted with VAT." and a
@@ -198,7 +216,8 @@ New event types (all `task: null`, with `body.conversation` or `body.memory`):
 | --- | --- | --- |
 | `CONVERSATION_MESSAGE` | Human (bound operator, `channel`) | conversation id, project, text, attachments as `art_` refs, `reply_to` |
 | `RECEPTION_DECIDED` | `ooat-core` (reception) | the validated decision, the escalated decision if any, context items used (ids only), reply text, `cost` |
-| `CONVERSATION_CLOSED` | `ooat-core` | conversation id, reason (`silence`, `new_conversation`, `operator`), summary memory id |
+| `CONVERSATION_REPORTED` | `ooat-core` (reception) | conversation id, the task, the report (asked, how, state, next) and its numbered options, `cost` |
+| `CONVERSATION_CLOSED` | `ooat-core` | conversation id, reason (`silence`, `new_conversation`, `switched`, `operator`), summary memory id |
 | `MEMORY_NOTED` | `ooat-core` (reception) or Human | memory id, scope, kind, data class, source, SHA-256 of the text — never the text |
 | `MEMORY_EDITED` | Human | memory id, SHA-256 of the new text, `pinned` |
 | `MEMORY_FORGOTTEN` | Human | memory id, reason |
@@ -216,8 +235,10 @@ New event types (all `task: null`, with `body.conversation` or `body.memory`):
 ## 8. API and client
 
 - `POST /api/v1/conversations/messages` — `{project, text, reply_to?, conversation?, attachments?, intake_key}`;
-  returns `{conversation, decision, reply, buttons, task?}`. `intake_key` makes a resent message idempotent, as for
-  tasks (ADR 0016). Scope `submit`.
+  returns `{conversation, message}` at once. The decision follows after the quiet window of §4 rule 10 and comes as
+  `RECEPTION_DECIDED` on `GET /api/v1/conversations/{id}/events` (JSON, or Server-Sent Events as for tasks), with
+  the reply, its buttons and the task it started. `intake_key` makes a resent message idempotent, as for tasks
+  (ADR 0016). Scope `submit`.
 - `POST /api/v1/conversations/{id}/taps` — `{tap: "yes" | "differently" | "new_thing" | "make_task" | "forget:<mem>",
   text?}`. Scope `answer`.
 - `GET /api/v1/conversations/{id}` — messages, decisions, linked tasks. Scope `read`.
@@ -237,9 +258,11 @@ New event types (all `task: null`, with `body.conversation` or `body.memory`):
   page and an **Operator preferences** page.
 - **Chat bridge and Telegram (08c).** The bridge sends each message to the conversation resource instead of
   creating a task; the reply, its buttons and the task's later progress come back as today. New button data:
-  `y:<cnv>` (yes), `d:<cnv>` (differently), `n:<cnv>` (new thing), `t:<cnv>` (make it a task), `f:<mem>` (forget).
-  `/setdir` and `/engine ooat` stay; `/pamet` shows pinned items and the last summary. The bot's own changes are its
-  task-04, planned after 08a.
+  `y:<cnv>` (yes), `d:<cnv>` (differently), `n:<cnv>` (new thing), `t:<cnv>` (make it a task), `f:<mem>` (forget),
+  `o:<cnv>` (keep as an open point), `x:<mem>` (an open point is done). A `switch` decision changes the chat's
+  project as `/setdir` would; a `command` decision may offer to hand the message to the chat's other engine.
+  `/setdir` and `/engine ooat` stay; `/pamet` shows pinned items, open points and the last summary. The bot's own
+  changes are its task-04, planned after 08a.
 
 ## 10. Errors and limits
 
@@ -269,9 +292,10 @@ New event types (all `task: null`, with `body.conversation` or `body.memory`):
 
 ## 12. Wishlist (not in this design)
 
-1. Task results in chat in the shape of §4 rule 4 (asked, solved how, state, next), the diff behind a button;
-   progress as one message edited in place.
-2. The project guessed from the text ("on testdna …") without `/setdir`.
+1. Progress in chat as one message edited in place; the diff behind a button. (The report of a finished task in the
+   shape of §4 rule 4 is in this design since §14.)
+2. The project guessed from the text without naming it ("the price on the Russian site"); naming it is `switch`
+   (§14).
 3. A proactive, read-only heartbeat (for example a morning summary of errors in logs).
 4. The Claude Code connector started with Anthropic's `--advisor` for its own tasks.
 5. Search over memory once it grows (SQLite FTS5, as the role index).
@@ -283,3 +307,50 @@ New event types (all `task: null`, with `body.conversation` or `body.memory`):
   for this design; a spec question if the owner wants it.
 - The default caps (USD 0.02 average target, USD 0.05 per read-only answer, 40 operations, 3 000 tokens of context)
   are first guesses to be checked against the owner's message set before 08a ships.
+
+## 14. Addendum after the bot's log (owner, 2026-10-15)
+
+The owner's 293 messages to the Telegram bot (07–10/2026, three bots, cut at about 90 characters in the log) and the
+first three OOAT tasks from Telegram (2026-10-13) were read before planning. What they show, and what the owner
+approved in reply:
+
+| Pattern in the log | Share | What the design does |
+| --- | --- | --- |
+| A reaction to the bot's last proposal ("Yes", "Option 1", "Subagent driven") | about 31 % | rule 8: the last options are in context |
+| Answers to numbered questions ("1/ commit 2/ ok, push", "6-A, 7-…, 8-yes") | about 16 % | rule 8 |
+| Questions about the state of work ("Is n8n running?", "Where did you stop?") | about 14 % | decision `status` |
+| Commands (commit, push, deploy, restart a service) | about 9 % | decision `command`, rule 9 |
+| Preferences about how to work ("save tokens", "use subagents") | about 7 % | operator preferences (§6) |
+| Bursts (codes sent one by one, an article then a question) | several | rule 10 |
+| Stop and correct ("Sorry. Do nothing.", "No. I mean this one…") | several | decision `cancel`; `continue_task` for a correction |
+| Reminders ("Remind me at the end of the project", "Add it to unfinished tasks") | several | memory kind `todo` |
+| Switching the project by text | 5 | decision `switch`, from the wishlist |
+
+The three OOAT tasks of 2026-10-13 each stopped at rule A1's question that the task had no acceptance criteria; the
+answer, sent as a new message, became a separate task, and the next message ("pick only the goals not met yet")
+became a third task without the previous result. Their documents were good; the interaction was not. §4 rule 3 (the
+reception writes the criteria) and `continue_task` cover this; the three messages are cases of the message set
+(§11).
+
+Approved (owner, 2026-10-15, points 1–6):
+
+1. Decisions `status` and `cancel`. `status` answers from the ledger only: the conversation's tasks, open tasks of
+   the project with their questions, and open points; no model reads files for it. `cancel` stops the running
+   task of the conversation through the existing cancel (a DECISION by the operator) and says that its file changes
+   can be reverted once it closes.
+2. Numbered next steps (rule 8). When a task started from a conversation closes, the reception writes its report
+   (`CONVERSATION_REPORTED`): what was asked, how it was solved, the state now, and numbered options for what next,
+   in the message's language and sized to the work (§4 rule 4).
+3. Commands (rule 9): decision `command` with **Keep as an open point**; handing the message to another engine of
+   the chat is the bridge's (08c). Running commands comes with containers (part 2).
+4. Bursts (rule 10): a quiet window per conversation, default 8 s (`[reception] batch_seconds`). Because every
+   reply waits for the window, it is shorter than the 20 s first proposed; a message that arrives later is still
+   understood through `continue_task`.
+5. Memory kind `todo`: an open point noted from a request ("remind me", "add it to unfinished") or from a
+   `command`; it stays in the project's status and on the Memory page until it is marked done.
+6. Switching the project by text (`switch`), moved from the wishlist: the reception sees the slugs of
+   `ooat.toml`'s projects and decides `switch` only for one of them; the surface applies it (08c).
+
+The reply comes asynchronously (§8): a decision may read files for a minute, and a burst must be waited for, so the
+API records a message at once and the decision follows on the conversation's event stream, as a task's progress
+does.

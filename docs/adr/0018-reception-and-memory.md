@@ -51,3 +51,21 @@ unclear goals, with memory and context (owner, 2026-10-15). Design:
 - `POST /api/v1/tasks` stays for scripts and workflow tools; the chat bridge and the web move to conversations.
 - Spec §10's rule against a live stream of agent conversation stands: a conversation is the operator's dialogue
   with the reception, not agents talking to each other.
+
+## Amendment (owner, 2026-10-15, after a reading of the chat log)
+
+The owner's 293 messages to the Telegram bot showed reactions to the bot's last proposal, numbered answers,
+questions about the state of work, commands, bursts, cancels and reminders (design 08 §14). Added to the decision:
+
+9. The reception's decisions also include `status` (answered from the ledger only), `cancel` (the running task of
+   the conversation stops through the operator's cancel), `command` (a request to run something OOAT runs no
+   commands for, ADR 0017: said plainly, offered as an open point, never turned into a task that pretends to run
+   it) and `switch` (to another project of `ooat.toml`, applied by the surface).
+10. When a task started from a conversation closes, the reception writes a report, `CONVERSATION_REPORTED`
+    (`task: null`): what was asked, how it was solved, the state now, and numbered options for what next. The last
+    options stay in the context, so a numbered answer is understood.
+11. Messages of one conversation within a quiet window (default 8 s) are decided together. The API records a
+    message at once; the decision comes as `RECEPTION_DECIDED` on the conversation's event stream.
+12. Memory gains the kind `todo`, an open point, shown with the project's status until it is marked done.
+13. A reception call belongs to a conversation, not a task: the gateway accepts it, and a `QUOTA_WARNING` it causes
+    has `task: null`.
