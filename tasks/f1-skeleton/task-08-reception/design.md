@@ -1,7 +1,7 @@
 # Reception, conversations and project memory: asking OOAT like a search box — design
 
-**Epic:** f1-skeleton · **Sub-project:** 08 · **Status:** design approved by the owner 2026-10-15 (sections 1–4 in
-chat); ADR 0018 and the spec amendment proposed, awaiting the owner
+**Epic:** f1-skeleton · **Sub-project:** 08 · **Status:** approved by the owner 2026-10-15 (sections 1–4 in chat, the
+PR with ADR 0018 and the spec amendment)
 **Spec:** `spec/ooat-specification.md` §3 (components), §4 (Gate, rule A1), §6 (decision points, confidence-gated
 autonomy), §7 (ledger), §9 (risk classes, data protection), §10 (dashboard); ADR 0009, ADR 0010, ADR 0011,
 ADR 0012, ADR 0016, ADR 0017, ADR 0018 (new); workspace design (`../task-07-project-workspace/design.md`),
@@ -37,7 +37,9 @@ approver (ADR 0011). The reception only turns a person's words into what those a
 Success, measured on a set of the owner's real messages (§11):
 
 - At least 80 % of messages are handled with no question or exactly one.
-- A direct answer is at most 5 sentences, in the language of the message, with no task ids, phases or T levels.
+- A reply is as long as the request needs, neither one sentence nor 40 pages (owner, 2026-10-15): it covers what
+  was asked, and for work it keeps the author in context — what was asked, how it was solved, the state now, and
+  what is next. It is in the language of the message, with no task ids, phases or T levels.
 - The reception costs at most USD 0.02 per message on average (its own line in Usage and `/stats`).
 - The next day, a message such as "and the button too" in the same project is understood from memory and the
   last conversation, without repeating the context.
@@ -96,7 +98,7 @@ One call per message on the `economy` tier, structured output validated against 
 
 | Decision | When | What the person sees |
 | --- | --- | --- |
-| `answer` | a question that memory and reading the project's files can answer | the answer, 1 to 5 sentences, naming the files it read |
+| `answer` | a question that memory and reading the project's files can answer | the answer, sized to the question, naming the files it read |
 | `task` | a request for change or work whose goal is clear | "On it: I will change the home page title." and the task runs |
 | `confirm` | the goal is probable but uncertain | "I understand it as: … Shall I start?" with **Yes** and **Differently** (a free-text correction) |
 | `ask` | the goal cannot be guessed | one concrete question, with 2 or 3 answers as buttons where possible |
@@ -114,7 +116,9 @@ Rules (each pinned by a test in 08a):
    wins and is used as written. The Gate still checks the criteria (rule A1); when it would ask a clarifying
    question, the reception asks it once, in plain words, inside the conversation, and the answer goes back as the
    `HIL_RESPONSE` (ADR 0009 is unchanged).
-4. **The person's language and no jargon.** Replies follow the message's language; task ids, states, phases and
+4. **The person's language, the right length, no jargon.** A reply covers the request reasonably: a short question
+   gets a short answer, a task's reply and result say what was asked, how it was solved, the state now and what is
+   next. Replies follow the message's language; task ids, states, phases and
    topology levels appear only in the task detail on the web.
 5. **Continuation.** A reply to one of the bot's messages always continues that conversation. Otherwise the
    reception sees the last open conversation of the operator, project and channel and decides `continues`; when its
@@ -265,7 +269,8 @@ New event types (all `task: null`, with `body.conversation` or `body.memory`):
 
 ## 12. Wishlist (not in this design)
 
-1. Task results in chat: one sentence first, details behind a button; progress as one message edited in place.
+1. Task results in chat in the shape of §4 rule 4 (asked, solved how, state, next), the diff behind a button;
+   progress as one message edited in place.
 2. The project guessed from the text ("on testdna …") without `/setdir`.
 3. A proactive, read-only heartbeat (for example a morning summary of errors in logs).
 4. The Claude Code connector started with Anthropic's `--advisor` for its own tasks.

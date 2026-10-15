@@ -22,7 +22,7 @@ v0.2 folds the accepted decision records (`docs/adr/`) into the text, so the spe
 - Design 03f: Google's subscription CLI is Antigravity CLI (`agy`), not Gemini CLI (§6).
 - Rule A3 aligned with the implemented Gate: it is recorded and skips step B, but the Gate may still close or clarify (§4).
 - Ledger-enforced HIL rules: options named by `recommended` / `default_on_silence`, one response per request, `default_applied` responses choose the default (§9).
-- ADR 0018 (proposed): a reception in `ooat-core` turns messages into direct read-only answers, questions or tasks; conversations above tasks; project memory and operator preferences with deletable texts outside the ledger (§3, §6, §7, §10).
+- ADR 0018: a reception in `ooat-core` turns messages into direct read-only answers, questions or tasks; conversations above tasks; project memory and operator preferences with deletable texts outside the ledger (§3, §6, §7, §10).
 
 ## 1. Purpose, goals and principles
 

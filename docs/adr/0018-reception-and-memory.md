@@ -1,6 +1,6 @@
 # ADR 0018 — A reception turns messages into answers or tasks, with conversations and project memory
 
-**Status:** proposed · **Date:** 2026-10-15 · **Context:** OOAT accepts work only as tasks with a goal and
+**Status:** accepted · **Date:** 2026-10-15 · **Context:** OOAT accepts work only as tasks with a goal and
 acceptance criteria (spec §4 rule A1, §7 `TASK_SUBMITTED`); the chat bridge reads the criteria from a `Done when:`
 line, every message is a new task without memory of the previous one, and the Gate's clarifying questions arrive
 as formal questions. The owner finds this clumsy and wants OOAT to be used "almost like a Google query", coping with
