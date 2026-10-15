@@ -21,6 +21,7 @@ from ..ledger import DuplicateIntake, new_event
 from ..pii import higher_class, raised_class
 from ..runtime import CLOSED, Runtime, TaskClosed, attachment_text
 from ..state import task_state
+from ..workspace.runs import WORKSPACE_PROBLEMS
 from . import context as reception_context
 from . import model
 
@@ -245,6 +246,8 @@ class Reception:
                     called, decision = stronger, stronger.data
                     theta = self.theta(called.engine, called.model)
             final = self._act(found, own, waiting, said, decision, theta, data_class)
+            if final.pop("read_files", False):
+                return self._read_files(found, said, context.text, base, final, called, theta)
             event = self._record(base | final, called, theta)
             for task in final.get("cancelled", []):  # a started or answered task was queued when it was
                 self.on_task(task)
@@ -367,6 +370,8 @@ class Reception:
                     continue
             result |= {"cancelled": cancelled} if cancelled else {
                 "reply": say(said, "Nic neběží, není co zastavit.", "Nothing is running; there is nothing to stop.")}
+        elif kind == "answer" and decision.get("needs_files") and self.runtime.workspaces is not None                 and self.runtime.workspaces.project(found.project) is not None:
+            result["read_files"] = True  # a second call reads the project's files (design 08 §4)
         elif kind == "command":
             result["buttons"] = ["todo"]
         elif kind == "forget":
@@ -384,6 +389,56 @@ class Reception:
                 result["memory"] = kept
                 result["buttons"] = [*result["buttons"], *(f"forget:{m}" for m in kept)][:12]
         return result
+
+    def _read_files(self, found, said, context, base, final, called, theta) -> dict:
+        """A direct answer that reads the project's files: read only, at most `max_answer_operations`, its estimate
+        within `max_answer_usd`; the journal becomes WORKSPACE_USED of the conversation (ADR 0018). The decision is
+        recorded first, as a 'reading' notice a surface can show at once; the answer follows as the next decision."""
+        offer = {"decision": "answer", "options": [], "buttons": ["make_task"]}
+        step = f"answer-{base['messages'][0]}"
+        try:
+            grant = self.runtime.workspaces.answer_grant(found.id, step, found.project,
+                                                         self.settings.max_answer_operations)
+            estimate = model.answer_estimate(self.gateway, context=context, question=said, grant=grant,
+                                             conversation=found.id, data_class=base["data_class"])
+        except (WORKSPACE_PROBLEMS + (GatewayError,)) as problem:
+            reason = getattr(problem, "message", None) or str(problem)
+            return self._record(base | offer | {"reply": say(
+                said, f"Soubory projektu teď přečíst nemohu ({reason[:200]}). Mám z toho udělat úkol?",
+                f"I cannot read the project's files now ({reason[:200]}). Shall I make it a task?")}, called, theta)
+        if estimate > self.settings.max_answer_usd:
+            return self._record(base | offer | {"reply": say(
+                said, f"Odpověď by stála asi {estimate:.2f} USD, víc než limit {self.settings.max_answer_usd:.2f} USD "
+                      "pro rychlou odpověď. Mám z toho udělat úkol?",
+                f"The answer would cost about {estimate:.2f} USD, above the {self.settings.max_answer_usd:.2f} USD "
+                "limit for a quick answer. Shall I make it a task?")}, called, theta)
+        self._record(base | final | {"reading": True}, called, theta)
+        answered, failure, used = None, None, None
+        try:
+            answered = model.answer_call(self.gateway, context=context, question=said, grant=grant,
+                                         conversation=found.id, data_class=base["data_class"])
+        except GatewayError as error:
+            failure = error
+        finally:
+            try:
+                used = self.runtime.workspaces.record(self.ledger, self.runtime.artifacts, task=None, contract=None,
+                                                      role="reception", grant=grant, data_class=base["data_class"],
+                                                      conversation=found.id)
+            except WORKSPACE_PROBLEMS:
+                used = None  # the answer only read; a lost journal hides no change
+        if failure is not None:
+            return self._record(base | offer | {"reply": say(
+                said, "Soubory se teď nepodařilo přečíst. Mám z toho udělat úkol?",
+                "Reading the files failed just now. Shall I make it a task?")}, None, None, cost=failure.cost)
+        text = answered.data or say(said, "Nenašel jsem odpověď.", "I found no answer.")
+        buttons = []
+        if used is not None and used["body"]["limit"] is not None:
+            text += "\n\n" + say(said, "Odpověď je neúplná: narazil jsem na limit čtení. Mám z toho udělat úkol?",
+                                   "The answer is partial: I reached the reading limit. Shall I make it a task?")
+            buttons = ["make_task"]
+        data_class = higher_class(raised_class(base["data_class"], text), grant.data_class)
+        return self._record(base | {"decision": "answer", "reply": text[:20000], "options": [], "buttons": buttons,
+                                    "data_class": data_class}, None, None, cost=answered.cost)
 
     def _notes(self, found, waiting, notes, data_class) -> tuple[list[str], list[str]] | None:
         if not notes or self.store is None:

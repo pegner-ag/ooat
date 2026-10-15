@@ -19,6 +19,7 @@ from ooat_core.reception import Reception
 from ooat_core.routing import RoutingPolicy
 from ooat_core.runtime import Runtime
 from ooat_core.workspace.runs import Workspaces
+from ooat_core.workspace.tools import ToolError, Workspace
 
 NOW = datetime(2026, 10, 16, 12, 0, tzinfo=timezone.utc)
 
@@ -35,16 +36,24 @@ class ReceptionModel(FakeConnector):
     """Answers each call with the next scripted reply (a dict goes as JSON, a str as it is); the last one repeats.
     `requests` holds every ModelRequest."""
 
-    def __init__(self, replies=(), workspace=False):
+    def __init__(self, replies=(), workspace=False, tools=()):
         manifest = fake_manifest("prv.fake.api", "api", tiers={"workhorse": "fake-model", "economy": "fake-economy"})
-        if workspace:
+        if workspace or tools:
             manifest["features"] = {"workspace": True}
         super().__init__(manifest)
         self.replies = list(replies) or [decision()]
         self.answered = 0
+        self.tools = list(tools)  # tool calls a call with a grant runs through OOAT's own tools, as the MCP server would
 
     def complete(self, request, secrets):
         self.calls.append(request)
+        if request.workspace is not None and self.tools:
+            workspace = Workspace(request.workspace)
+            for tool, arguments in self.tools:
+                try:
+                    workspace.call(tool, arguments)
+                except ToolError:
+                    pass  # the agent reads the refusal and carries on
         reply = self.replies[min(self.answered, len(self.replies) - 1)]
         self.answered += 1
         if isinstance(reply, Exception):
