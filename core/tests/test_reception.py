@@ -370,3 +370,36 @@ def test_a_task_from_a_personal_message_is_declared_personal(tmp_path):
     desk = Desk(tmp_path, [decision("task", goal="Odpovědět dodavateli ohledně smlouvy.")])
     desk.ask("Odpověz panu Novákovi na jan.novak@example.cz ohledně smlouvy.")
     assert desk.submitted()[0]["data_class"] == "personal"
+
+
+def test_an_unsure_task_after_two_questions_starts_on_the_best_reading(tmp_path):
+    desk = Desk(tmp_path, [decision("task", confidence=0.5)])
+    first = desk.ask("Uprav to.")["body"]
+    desk.ask("Tu stránku.", conversation=first["conversation"])
+    body = desk.ask("No tu hlavní.", conversation=first["conversation"])["body"]
+    finals = [e["body"]["decision"] for e in desk.events("RECEPTION_DECIDED") if e["body"]["decision"] != "escalated"]
+    assert finals == ["confirm", "confirm", "task"] and body["reply"].startswith("Začínám podle toho")
+    assert len(desk.submitted()) == 1
+
+
+def test_continue_task_never_reaches_another_conversations_task(tmp_path):
+    desk = Desk(tmp_path, [decision("task")])
+    elsewhere = desk.ask("Změň titulek.", channel="cli")["body"]
+    desk.model.replies, desk.model.answered = [decision("continue_task", "Doplním.", task=elsewhere["task"],
+                                                        goal="Doplnit patičku.")], 0
+    body = desk.ask("A ještě patičku.")["body"]
+    assert body["decision"] == "task" and "follows" not in desk.submitted()[-1]
+
+
+def test_a_tokens_message_never_raises_memory_above_its_cap(tmp_path):
+    from ooat_core import tokens
+    from reception_fakes import NOW
+    desk = Desk(tmp_path, [decision("answer", "Rozumím.", memory_notes=[
+        {"kind": "fact", "text": "Kontakt na dodavatele je jan.novak@example.cz."},
+        {"kind": "fact", "text": "Ceny jsou s DPH."}])])
+    _, issued = tokens.issue(desk.ledger, operator="operator", name="telegram", scopes=["submit"],
+                             max_data_class="internal", now=NOW)
+    body = desk.ask("Zapamatuj si kontakt na dodavatele a že ceny jsou s DPH.",
+                    channel=f"token:{issued['body']['token']}")["body"]
+    kept = memory.items(desk.ledger.events(), desk.store, scope="docs")
+    assert [i.text for i in kept] == ["Ceny jsou s DPH."] and len(body["memory"]) == 1

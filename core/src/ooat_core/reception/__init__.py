@@ -18,7 +18,7 @@ from ..connector_admin import checked_operator
 from ..gateway import GatewayError
 from ..ids import new_id
 from ..ledger import DuplicateIntake, new_event
-from ..pii import higher_class, raised_class
+from ..pii import ORDER, higher_class, raised_class
 from ..runtime import CLOSED, Runtime, TaskClosed, attachment_text
 from ..state import task_state
 from ..workspace.runs import WORKSPACE_PROBLEMS
@@ -423,7 +423,9 @@ class Reception:
         if kind == "continue_task" and not self._task_of(found, target):
             kind = "task" if decision.get("goal") else "ask"
             result["decision"] = kind
-        if kind in ("task", "continue_task") and (raises or decision["confidence"] < theta):
+        exhausted = conversations.questions_in_a_row(own) >= 2  # rule 1: two questions asked in a row already
+        unsure = kind in ("task", "continue_task") and decision["confidence"] < theta
+        if kind in ("task", "continue_task") and (raises or (unsure and not exhausted)):
             pending = {"goal": goal, "acceptance": acceptance} | ({"risk_class": raises} if raises else {})
             if kind == "continue_task":
                 pending["follows"] = target
@@ -433,11 +435,11 @@ class Reception:
             buttons = ["yes", "differently"] + (["new_thing"] if kind == "continue_task" else [])
             return result | {"decision": "confirm", "pending": pending, "buttons": buttons,
                              "reply": reply if reply.endswith("?") else question}
-        if kind in ("ask", "confirm") and conversations.questions_in_a_row(own) >= 2 and not raises:
+        if (kind in ("ask", "confirm") or unsure) and exhausted and not raises:
             # Rule 1: after two questions in a row the reception starts on its best reading.
             interpretation = result.get("interpretation") or goal
-            task = self._start(found, {"goal": goal, "acceptance": acceptance}, operator, channel, key, None,
-                               files_from=waiting)
+            started = {"goal": goal, "acceptance": acceptance} | ({"follows": target} if kind == "continue_task" else {})
+            task = self._start(found, started, operator, channel, key, None, files_from=waiting)
             return result | {"decision": "task", "task": task, "options": [], "reply": say(
                 said, f"Začínám podle toho, jak tomu rozumím: {interpretation[:500]}",
                 f"Starting on how I understand it: {interpretation[:500]}")}
@@ -535,9 +537,12 @@ class Reception:
         if not notes or self.store is None:
             return None
         lines, kept = [], []
+        cap = self._channel_cap(waiting[-1]["body"]["channel"])
         for item in notes[:3]:
             scope = memory.OPERATOR_SCOPE if item.get("scope") == "operator" and item["kind"] == "preference" \
                 else found.project
+            if cap is not None and ORDER.index(raised_class(data_class, item["text"])) > ORDER.index(cap):
+                continue  # a token's message never raises the project's memory above the token's cap (design 08 §8)
             try:
                 noted = memory.note(self.ledger, self.store, scope=scope, kind=item["kind"], text=item["text"],
                                     data_class=data_class, source=waiting[0]["id"], actor=ACTOR,
@@ -551,12 +556,19 @@ class Reception:
             lines.append(f"🧠 {noted.text}")
         return lines, kept
 
+    def _channel_cap(self, channel: str) -> str | None:
+        """The data-class cap of the token a message came through; None for the web on loopback and the CLI."""
+        if not channel.startswith("token:"):
+            return None
+        from ..tokens import EVENTS, tokens
+        token = tokens(self.ledger.events(types=EVENTS)).get(channel.removeprefix("token:"))
+        return token.max_data_class if token is not None else "public"
+
     def _task_of(self, found, task: str | None) -> bool:
         if not task:
             return False
         submitted = self.ledger.events(task=task, types=["TASK_SUBMITTED"])
-        return bool(submitted) and (submitted[0]["body"].get("conversation") == found.id
-                                    or submitted[0]["body"].get("project") == found.project)
+        return bool(submitted) and submitted[0]["body"].get("conversation") == found.id  # never another's task
 
     def _continue(self, found, target, said, goal, acceptance, operator, channel, key, waiting) -> dict:
         """An answer to the task's open question when it takes text; else a follow-up task (plan 08a decision 6)."""
