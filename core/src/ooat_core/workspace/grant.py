@@ -53,7 +53,8 @@ def _ledger_paths(config) -> list[str]:
     if location == config.ledger_url or location == ":memory:":
         return [config.blobs_dir] if config.blobs_dir else []
     sidecars = [location + suffix for suffix in ("-wal", "-shm", "-journal")]  # SQLite's own files beside it
-    return [location, *sidecars, config.blobs_dir or str(Path(location).parent / "ooat-blobs")]
+    memory = str(Path(location).parent / "ooat-memory")  # memory texts (ADR 0018)
+    return [location, *sidecars, config.blobs_dir or str(Path(location).parent / "ooat-blobs"), memory]
 
 
 def grant_for(config, config_path, project: str, journal_dir) -> WorkspaceGrant:

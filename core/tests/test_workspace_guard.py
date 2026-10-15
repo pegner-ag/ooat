@@ -136,7 +136,7 @@ def test_grant_for_resolves_folders_and_hides_ooats_own_data(tmp_path, ooat_home
     assert grant.folders == (("Bots", os.path.realpath(root)),) and grant.write is True
     assert grant.deny == ("logs/**",) and grant.max_write_bytes == 2 * 1024 * 1024
     for hidden in (tmp_path / "ooat.toml", tmp_path / "data" / "ooat-ledger.sqlite", tmp_path / "data" / "ooat-blobs",
-                   ooat_home, tmp_path / "journal"):
+                   tmp_path / "data" / "ooat-memory", ooat_home, tmp_path / "journal"):
         assert os.path.realpath(hidden) in grant.hidden
     assert grant.journal_dir == os.path.realpath(tmp_path / "journal")
 
