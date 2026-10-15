@@ -485,3 +485,13 @@ def test_expire_skips_a_request_answered_since_it_read_the_ledger(tmp_path):
     stale_first_read(setup.ledger, "HIL_RESPONSE")  # the operator's answer lands just after expire read
     assert setup.runtime.expire() == []
     assert setup.last(task, "HIL_RESPONSE")["actor"] == HIL
+
+
+def test_a_task_from_a_conversation_names_it(tmp_path):
+    from ooat_core import conversations
+    from ooat_core.ids import new_id
+    setup = Setup(tmp_path)
+    cnv = new_id("cnv")
+    task = setup.submit(conversation=cnv)
+    assert setup.last(task, "TASK_SUBMITTED")["body"]["conversation"] == cnv
+    assert conversations.tasks_of(setup.ledger.events(), cnv) == [task]

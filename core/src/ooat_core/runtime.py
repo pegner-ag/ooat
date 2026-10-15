@@ -120,7 +120,7 @@ class Runtime:
                expected_output: str | None = None, value: dict | None = None, budget_usd: float | None = None,
                data_class: str | None = None, risk_class: str | None = None,
                files: list[bytes] = (), file_names: list[str] = (), channel: str | None = None,
-               intake_key: str | None = None, follows: str | None = None) -> str:
+               intake_key: str | None = None, follows: str | None = None, conversation: str | None = None) -> str:
         """TASK_SUBMITTED by the named operator; files become untrusted artifacts of the task, stored under the
         declared class raised by the personal-data pre-scan of their text. A repeated `intake_key` on the same
         channel returns the task it created instead of a new one (ADR 0016)."""
@@ -143,6 +143,8 @@ class Runtime:
             body["workspace"] = {"write": settings.write, "folders": [folder_name(f) for f in settings.folders]}
         if follows is not None:
             body["follows"] = follows
+        if conversation is not None:  # started by the conversation's reception (ADR 0018)
+            body["conversation"] = conversation
         if file_names and len(file_names) != len(files):
             raise ValueError("give one file name per attachment")
         for name in file_names:
