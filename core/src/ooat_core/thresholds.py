@@ -97,6 +97,53 @@ def threshold(events: Iterable[dict], point: str, engine: str, model: str, risk_
     return computed if len(rated) >= FULL_HISTORY else max(FLOOR, computed)
 
 
+RECEPTION_POINT = "reception"
+QUICK_CANCEL_S = 120  # a task cancelled this soon after the reception started it was not what the person meant
+
+
+def _utc(text: str):
+    from datetime import datetime
+    return datetime.fromisoformat(text.replace("Z", "+00:00"))
+
+
+def reception_verdicts(events: Iterable[dict]) -> list[RatedDecision]:
+    """The operator's verdicts on reception decisions, read from the conversation (plan 08a decision 3): Yes after
+    a confirm confirms it and Differently corrects it; a task the reception started is corrected by a cancel within
+    two minutes and confirmed by an accepted rating. `task` holds the conversation, so one conversation alone never
+    leaves the interim threshold."""
+    events = list(events)
+    awaiting: dict[str, dict] = {}  # conversation -> the confirm waiting for its tap
+    started: dict[str, dict] = {}  # task -> the decision that started it
+    submitted, verdicts = {}, {}
+    for event in events:
+        body = event["body"]
+        if event["type"] == "RECEPTION_DECIDED" and "record" in body:
+            if body["decision"] == "confirm":
+                awaiting[body["conversation"]] = event
+            elif body["decision"] in ("task", "continue_task") and body.get("task"):
+                started[body["task"]] = event
+        elif event["type"] == "CONVERSATION_MESSAGE" and body.get("tap") in ("yes", "differently"):
+            confirm = awaiting.pop(body["conversation"], None)
+            if confirm is not None:
+                verdicts[confirm["id"]] = (confirm, body["tap"] == "yes")
+        elif event["type"] == "TASK_SUBMITTED":
+            submitted[event["task"]] = event["ts"]
+        elif event["type"] == "DECISION" and event["actor"]["kind"] == "hil" and event["task"] in started                 and body["decision"] == "cancel the task" and event["task"] in submitted                 and (_utc(event["ts"]) - _utc(submitted[event["task"]])).total_seconds() <= QUICK_CANCEL_S:
+            decision = started[event["task"]]
+            verdicts[decision["id"]] = (decision, False)
+        elif event["type"] == "TASK_RATED" and event["task"] in started and body["accepted"]:
+            decision = started[event["task"]]
+            verdicts.setdefault(decision["id"], (decision, True))
+    return [RatedDecision(RECEPTION_POINT, d["body"]["record"]["engine"], d["body"]["record"]["model"],
+                          d["body"]["record"]["confidence"], correct, d["body"]["conversation"])
+            for d, correct in verdicts.values()]
+
+
 def reception_threshold(events: Iterable[dict], engine: str, model: str, interim: float) -> float:
-    """θ of the reception's decisions for one engine and model version (plan 08a decision 2)."""
-    return interim
+    """θ of the reception's decisions for one engine and model version (plan 08a decision 2): `interim` until 5
+    verdicts from at least 2 conversations, then at least `interim` until 20, then the computed θ at ε of R1."""
+    rated = [r for r in reception_verdicts(events) if (r.engine, r.model) == (engine, model)]
+    if len(rated) < MIN_RATED or len({r.task for r in rated}) < MIN_TASKS:
+        return interim
+    computed = computed_threshold(rated, EPSILON["R1"])
+    return computed if len(rated) >= FULL_HISTORY else max(interim, computed)
