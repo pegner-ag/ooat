@@ -42,6 +42,17 @@ class Project:
     timeout_min: float = 30
 
 
+@dataclass(frozen=True)
+class ReceptionSettings:
+    """[reception]: the reception in front of tasks (design 08, plan 08a)."""
+    batch_seconds: float = 8  # messages of a conversation this close together are decided as one (design 08 §14)
+    silence_hours: float = 24  # a conversation without a message this long is closed
+    context_tokens: int = 3000  # what the reception may see of memory and history
+    max_answer_usd: float = 0.05  # the estimate a direct answer that reads files may have
+    max_answer_operations: int = 40  # tool operations of such an answer
+    theta: float = 0.7  # the reception's threshold until the operator's verdicts calibrate it (plan 08a decision 2)
+
+
 def _absolute(path: str) -> bool:
     return PurePosixPath(path).is_absolute() or PureWindowsPath(path).is_absolute()
 
@@ -66,6 +77,7 @@ class Config:
     gate: dict = field(default_factory=dict)  # [gate] overrides of GateSettings
     serve: dict = field(default_factory=dict)  # [serve]: operator, host, port, hosts, tls_cert, tls_key (design 05)
     projects: dict[str, Project] = field(default_factory=dict)  # [projects.<slug>] (design 07 §3)
+    reception: ReceptionSettings = ReceptionSettings()  # [reception] (design 08)
 
 
 def _table(data: dict, key: str, allowed: set[str]) -> dict:
@@ -80,7 +92,7 @@ def _table(data: dict, key: str, allowed: set[str]) -> dict:
 
 
 def parse_config(data: dict) -> Config:
-    unknown = set(data) - {"ledger", "routing", "connectors", "policy", "gate", "serve", "projects"}
+    unknown = set(data) - {"ledger", "routing", "connectors", "policy", "gate", "serve", "projects", "reception"}
     if unknown:
         raise ValueError(f"unknown config sections: {sorted(unknown)}")
     ledger = _table(data, "ledger", {"url", "blobs"})
@@ -129,7 +141,8 @@ def parse_config(data: dict) -> Config:
     return Config(ledger_url=ledger_url, pins=dict(pins), connectors={k: dict(v) for k, v in connectors.items()},
                   blocked_countries=frozenset(blocked),
                   personal_data_regions=frozenset(regions) if regions is not None else None,
-                  blobs_dir=blobs_dir, gate=dict(gate), serve=_serve(data), projects=_projects(data))
+                  blobs_dir=blobs_dir, gate=dict(gate), serve=_serve(data), projects=_projects(data),
+                  reception=_reception(data))
 
 
 def _serve(data: dict) -> dict:
@@ -150,6 +163,21 @@ def _serve(data: dict) -> dict:
     if ("tls_cert" in serve) != ("tls_key" in serve):
         raise ValueError("serve.tls_cert and serve.tls_key go together")
     return dict(serve)
+
+
+def _reception(data: dict) -> ReceptionSettings:
+    table = _table(data, "reception", {f.name for f in dataclasses.fields(ReceptionSettings)})
+    for key in ("context_tokens", "max_answer_operations"):
+        if key in table and not (type(table[key]) is int and table[key] > 0):
+            raise ValueError(f"reception.{key} must be a positive whole number")
+    for key in ("silence_hours", "max_answer_usd"):
+        if key in table and not _number(table[key]):
+            raise ValueError(f"reception.{key} must be a positive number")
+    if "batch_seconds" in table and not (type(table["batch_seconds"]) in (int, float) and table["batch_seconds"] >= 0):
+        raise ValueError("reception.batch_seconds must be a number of seconds, 0 or more")
+    if "theta" in table and not (type(table["theta"]) in (int, float) and 0 <= table["theta"] <= 1):
+        raise ValueError("reception.theta must be a share from 0 to 1")
+    return ReceptionSettings(**table)
 
 
 def _projects(data: dict) -> dict[str, Project]:
