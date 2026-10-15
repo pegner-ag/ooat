@@ -1,0 +1,12 @@
+{
+  "decision": "task",
+  "reply": "Dělám na tom: změním titulek domovské stránky na „Genetické testy pro celou rodinu“.",
+  "interpretation": "Změnit titulek domovské stránky.",
+  "goal": "Změnit titulek domovské stránky na „Genetické testy pro celou rodinu“.",
+  "acceptance": ["Titulek domovské stránky zní „Genetické testy pro celou rodinu“.", "Jiné texty stránky se nezměnily."],
+  "risk_hint": "R1",
+  "options": [],
+  "needs_files": false,
+  "confidence": 0.86,
+  "memory_notes": []
+}

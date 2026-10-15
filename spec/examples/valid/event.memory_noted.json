@@ -1,0 +1,17 @@
+{
+  "id": "evt_01JA1Q84A0K3M5N7P9Q1R3S5T7",
+  "ts": "2026-10-16T08:20:00Z",
+  "task": null,
+  "actor": {"kind": "system", "id": "ooat-reception"},
+  "type": "MEMORY_NOTED",
+  "refs": [],
+  "body": {
+    "memory": "mem_01JA1Q84B0K3M5N7P9Q1R3S5T7",
+    "scope": "docs",
+    "kind": "todo",
+    "data_class": "internal",
+    "source": "evt_01JA1Q81A0K3M5N7P9Q1R3S5T7",
+    "sha256": "sha256:9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
+    "conversation": "cnv_01JA1Q80B0K3M5N7P9Q1R3S5T7"
+  }
+}

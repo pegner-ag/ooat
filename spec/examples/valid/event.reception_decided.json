@@ -1,0 +1,23 @@
+{
+  "id": "evt_01JA1Q82A0K3M5N7P9Q1R3S5T7",
+  "ts": "2026-10-16T08:00:09Z",
+  "task": null,
+  "actor": {"kind": "system", "id": "ooat-reception"},
+  "type": "RECEPTION_DECIDED",
+  "refs": [],
+  "body": {
+    "conversation": "cnv_01JA1Q80B0K3M5N7P9Q1R3S5T7",
+    "project": "docs",
+    "messages": ["evt_01JA1Q81A0K3M5N7P9Q1R3S5T7"],
+    "decision": "continue_task",
+    "reply": "Doplním i tlačítko na konci stránky, navážu na včerejší změnu titulku.",
+    "interpretation": "Změnit i text tlačítka na konci domovské stránky.",
+    "options": [],
+    "buttons": ["differently"],
+    "task": "tsk_01JA1Q83B0K3M5N7P9Q1R3S5T7",
+    "record": {"engine": "prv.fake.api", "model": "fake-economy", "confidence": 0.84, "threshold": 0.7},
+    "context": ["mem_01JA1Q70B0K3M5N7P9Q1R3S5T7", "tsk_01JA0Q83B0K3M5N7P9Q1R3S5T7"],
+    "data_class": "internal"
+  },
+  "cost": {"adapter": "prv.fake.api", "tier": "economy", "tokens_in": 2900, "tokens_out": 180, "usd": 0.0038, "basis": "exact", "price_ver": "0.1.0"}
+}

@@ -40,11 +40,12 @@ class StagedArtifact:
 
 
 class DuplicateIntake(ValueError):
-    """A TASK_SUBMITTED repeats an intake key already used on its channel; `task` is the task that key created."""
+    """A TASK_SUBMITTED or CONVERSATION_MESSAGE repeats an intake key already used on its channel by an event of its
+    type; `earlier` is that event and `task` the task it created (None for a message)."""
 
-    def __init__(self, task: str):
-        super().__init__(f"this intake key already created {task}")
-        self.task = task
+    def __init__(self, task: str | None, earlier: dict | None = None):
+        super().__init__(f"this intake key already created {task or (earlier or {}).get('id')}")
+        self.task, self.earlier = task, earlier
 
 
 def utc_now() -> str:
@@ -175,14 +176,16 @@ class Ledger:
             raise SpecValidationError("event", [f"$.task: task is already reverted: {event['task']}"])
 
     def _check_intake(self, event: dict) -> None:
-        """One task per intake key and channel, also across restarts and racing deliveries (ADR 0016)."""
-        key = event["body"].get("intake_key") if event["type"] == "TASK_SUBMITTED" else None
+        """One task, or one conversation message, per intake key and channel, also across restarts and racing
+        deliveries (ADR 0016, ADR 0018)."""
+        kind = event["type"]
+        key = event["body"].get("intake_key") if kind in ("TASK_SUBMITTED", "CONVERSATION_MESSAGE") else None
         if key is None:
             return
         channel = event["body"].get("channel")
-        for earlier in self.events(types=["TASK_SUBMITTED"]):
+        for earlier in self.events(types=[kind]):
             if earlier["body"].get("intake_key") == key and earlier["body"].get("channel") == channel:
-                raise DuplicateIntake(earlier["task"])
+                raise DuplicateIntake(earlier["task"], earlier)
 
     def _check_hil(self, event: dict) -> None:
         """Cross-field HIL rules JSON Schema cannot express (spec §9, ADR 0003 #4)."""

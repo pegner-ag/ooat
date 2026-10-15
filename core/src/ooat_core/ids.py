@@ -8,7 +8,8 @@ import re
 import time
 
 _CROCKFORD = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
-PREFIXES = frozenset({"tsk", "ctr", "agt", "evt", "art", "tok"})  # tok: an operator API token (ADR 0016)
+PREFIXES = frozenset({"tsk", "ctr", "agt", "evt", "art", "tok", "cnv", "mem"})  # tok: an operator API token (ADR 0016);
+# cnv: a conversation, mem: a memory item (ADR 0018)
 _ARTIFACT_REF = re.compile(r"^(art_[0-7][0-9A-HJKMNP-TV-Z]{25})@v([1-9][0-9]*)$")
 
 
