@@ -205,6 +205,93 @@ class Reception:
             raise memory.UnknownMemory(f"no memory item {mem_id}")
         return noted
 
+    # Reports and closing ----------------------------------------------------------------------------------------
+
+    def unreported(self) -> list[str]:
+        """Closed tasks a conversation started that have no report yet."""
+        events = self.ledger.events(types=["TASK_SUBMITTED", "TASK_CLOSED", "CONVERSATION_REPORTED"])
+        reported = {e["body"]["task"] for e in events if e["type"] == "CONVERSATION_REPORTED"}
+        closed = {e["task"] for e in events if e["type"] == "TASK_CLOSED"}
+        return [e["task"] for e in events if e["type"] == "TASK_SUBMITTED" and e["body"].get("conversation")
+                and e["task"] in closed and e["task"] not in reported]
+
+    def report(self, task: str) -> dict | None:
+        """CONVERSATION_REPORTED for a closed task of a conversation: asked, how solved, state, numbered next steps
+        (design 08 §4 rule 8, §14). None when the task is open, came from no conversation, or has its report."""
+        if task not in self.unreported():
+            return None
+        events = self.ledger.events(task=task)
+        submitted = next(e for e in events if e["type"] == "TASK_SUBMITTED")["body"]
+        closed = [e for e in events if e["type"] == "TASK_CLOSED"][-1]["body"]
+        from ..gate import gated_data_class
+        data_class = gated_data_class(events, self.runtime.settings)
+        for ref in [*next(e for e in events if e["type"] == "TASK_SUBMITTED")["refs"], *closed.get("artifacts", [])]:
+            data_class = higher_class(data_class, self.ledger.artifact(ref)["data_class"])
+        document = ""
+        if closed.get("artifacts"):
+            document = self.runtime.artifacts.read(closed["artifacts"][0]).decode("utf-8", "replace")
+        request = "\n".join([submitted["goal"], *(f"- {c}" for c in submitted.get("acceptance", []))])
+        outcome = f"{closed['state']}: {closed['summary']}" + (f" Missing: {closed['missing']}"
+                                                               if closed.get("missing") else "")
+        body = {"conversation": submitted["conversation"], "project": submitted.get("project", ""), "task": task,
+                "data_class": data_class}
+        cost = None
+        try:
+            called = model.report_call(self.gateway, request=request, outcome=outcome, document=document,
+                                       conversation=submitted["conversation"], data_class=data_class)
+            body |= called.data
+            cost = called.cost
+        except (model.Unusable, GatewayError) as error:  # the report is OOAT's own line then, never nothing
+            cost = getattr(error, "cost", None)
+            state = {"CLOSED_DONE": ("Hotovo", "Done"), "CLOSED_PARTIAL": ("Hotovo zčásti", "Partly done"),
+                     "CLOSED_ABSTAINED": ("Nehotovo", "Not done"), "CANCELLED": ("Zrušeno", "Cancelled")}
+            cs, en = state[closed["state"]]
+            missing = closed.get("missing", "")
+            body |= {"options": [], "reply": say(submitted["goal"], f"{cs}: {submitted['goal'][:300]}. {missing}",
+                                                 f"{en}: {submitted['goal'][:300]}. {missing}").strip()}
+        if not body["project"]:
+            body["project"] = conversations.conversations(
+                self.ledger.events(types=["CONVERSATION_MESSAGE"]))[submitted["conversation"]].project
+        return self.ledger.append(new_event("CONVERSATION_REPORTED", task=None, actor=ACTOR, refs=[], body=body,
+                                            cost=cost if cost and cost.get("usd") is not None else None))
+
+    def silent(self) -> list[str]:
+        """Open conversations without a message within the silence."""
+        return [c.id for c in conversations.silent(self.ledger.events(types=list(conversations.TYPES)), self.clock(),
+                                                   self.settings.silence_hours)]
+
+    def close(self, conversation: str, reason: str = "silence") -> dict | None:
+        """CONVERSATION_CLOSED, with a summary in project memory when the reception decided anything in it; None
+        when it is closed already."""
+        events = self.ledger.events(types=list(conversations.TYPES))
+        found = conversations.conversations(events).get(conversation)
+        if found is None or found.closed is not None:
+            return None
+        own = conversations.events_of(events, conversation)
+        body = {"conversation": conversation, "project": found.project, "reason": reason}
+        cost = None
+        if self.store is not None and conversations.last_decision(own) is not None:
+            turns, data_class = [], self._class(found.project)
+            for event in own:
+                data_class = higher_class(data_class, event["body"].get("data_class", "public"))
+                said = conversations.message_text(event) if event["type"] == "CONVERSATION_MESSAGE" else \
+                    event["body"].get("reply")
+                if said and event["body"].get("decision") not in conversations.REPLACED:
+                    who = "Person" if event["type"] == "CONVERSATION_MESSAGE" else "Reception"
+                    turns.append(f"{who}: {said[:1000]}")
+            try:
+                called = model.summary_call(self.gateway, turns="\n".join(turns[-40:]), conversation=conversation,
+                                            data_class=data_class)
+                cost = called.cost
+                if called.data:
+                    item = memory.note(self.ledger, self.store, scope=found.project, kind="summary", text=called.data,
+                                       data_class=data_class, source=own[-1]["id"], actor=ACTOR,
+                                       conversation=conversation)
+                    body["summary"] = item.id
+            except (GatewayError, ValueError):  # no summary this time; the conversation closes all the same
+                pass
+        return self.ledger.append(new_event("CONVERSATION_CLOSED", task=None, actor=ACTOR, body=body, cost=cost))
+
     # Deciding ---------------------------------------------------------------------------------------------------
 
     def theta(self, engine: str, model_version: str) -> float:
@@ -484,8 +571,12 @@ class Reception:
         return {"task": task}
 
     def _start(self, found, pending: dict, operator: str, channel: str, key: str, last, files_from=()) -> str:
-        """Submit a task for the conversation; the intake key makes a repeated decision return the same task."""
+        """Submit a task for the conversation; the intake key makes a repeated decision return the same task. The
+        task is declared at the class of the messages it came from: the model's goal may leave out what raised it."""
         files, names = [], []
+        data_class = last["body"]["data_class"] if last is not None else self._class(found.project)
+        for message in files_from:
+            data_class = higher_class(data_class, message["body"]["data_class"])
         for message in files_from:
             for ref, name in zip(message["refs"], message["body"].get("attachment_names", [])):
                 files.append(self.runtime.artifacts.read(ref))
@@ -505,6 +596,7 @@ class Reception:
                         names.append(name)
         task = self.runtime.submit(operator=operator, goal=pending["goal"], acceptance=pending.get("acceptance", []),
                                    project=found.project, risk_class=pending.get("risk_class"), files=files,
+                                   data_class=data_class,
                                    file_names=names, channel=channel, intake_key=key, follows=follows,
                                    conversation=found.id)
         self.on_task(task)

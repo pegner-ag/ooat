@@ -363,3 +363,9 @@ def test_over_the_budget_older_turns_go_but_preferences_and_the_last_turns_stay(
     prompt = desk.model.calls[-1].prompt
     assert "Odpovídej česky." in prompt and "Dlouhý fakt." not in prompt
     assert "Person: Zpráva 5." in prompt and "Person: Zpráva 0." not in prompt
+
+
+def test_a_task_from_a_personal_message_is_declared_personal(tmp_path):
+    desk = Desk(tmp_path, [decision("task", goal="Odpovědět dodavateli ohledně smlouvy.")])
+    desk.ask("Odpověz panu Novákovi na jan.novak@example.cz ohledně smlouvy.")
+    assert desk.submitted()[0]["data_class"] == "personal"

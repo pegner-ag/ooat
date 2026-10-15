@@ -76,16 +76,23 @@ class Desk:
         acknowledge(self.ledger, self.model, ("public", "internal", "client_confidential", "personal"))
         acknowledge(self.ledger, self.jev)
         self.config = parse_config({"projects": projects or {}})
-        clock = clock or (lambda: self.now)
-        gateway = Gateway(self.ledger, Registry([self.model, self.jev]), RoutingPolicy(routing_document()),
-                          self.config, SecretResolver(self.config, {}), clock=clock)
-        self.artifacts = ArtifactStore(self.ledger, BlobStore(tmp_path / "blobs"))
-        workspaces = Workspaces(self.config, None, tmp_path / "workspaces") if projects else None
-        self.runtime = Runtime(self.ledger, gateway, self.artifacts, clock=clock, workspaces=workspaces)
+        self.clock = clock or (lambda: self.now)
+        self.blobs, self.settings = tmp_path / "blobs", settings or ReceptionSettings()
+        self.workspaces = Workspaces(self.config, None, tmp_path / "workspaces") if projects else None
         self.store = MemoryStore(tmp_path / "ooat-memory") if memory else None
         self.queued = []
-        self.reception = Reception(self.runtime, self.store, settings or ReceptionSettings(),
-                                   projects=self.config.projects, clock=clock, on_task=self.queued.append)
+        self.reception = self.fresh_reception(self.ledger)
+        self.runtime, self.artifacts = self.reception.runtime, self.reception.runtime.artifacts
+
+    def fresh_reception(self, ledger=None) -> Reception:
+        """A Reception with its own ledger connection, as another thread of `ooat serve` makes one."""
+        ledger = ledger or Ledger.open(self.url)
+        gateway = Gateway(ledger, Registry([self.model, self.jev]), RoutingPolicy(routing_document()), self.config,
+                          SecretResolver(self.config, {}), clock=self.clock)
+        runtime = Runtime(ledger, gateway, ArtifactStore(ledger, BlobStore(self.blobs)), clock=self.clock,
+                          workspaces=self.workspaces)
+        return Reception(runtime, self.store, self.settings, projects=self.config.projects, clock=self.clock,
+                         on_task=self.queued.append)
 
     def say(self, text, project="docs", channel="web", **options):
         return self.reception.receive(operator="operator", project=project, channel=channel, text=text, **options)

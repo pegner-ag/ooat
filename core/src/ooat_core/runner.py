@@ -15,7 +15,7 @@ from collections import deque
 from collections.abc import Callable
 from datetime import datetime, timedelta
 
-from .runtime import Runtime, _cancel
+from .runtime import CLOSED, Runtime, _cancel
 
 log = logging.getLogger("ooat.serve")
 FIRST_RETRY_S, MAX_RETRY_S = 60, 1800
@@ -47,8 +47,9 @@ def resume_after(events: list[dict]) -> datetime | None:
 
 class Runner:
     def __init__(self, make_runtime: Callable[[], Runtime], *, clock: Callable[[], datetime],
-                 tick_seconds: float = 60.0):
+                 tick_seconds: float = 60.0, on_closed: Callable[[str], None] | None = None):
         self._make_runtime, self.clock, self.tick_seconds = make_runtime, clock, tick_seconds
+        self.on_closed = on_closed  # e.g. the reception's report of a conversation's task (ADR 0018)
         self._runtime: Runtime | None = None
         self._queue: deque[str] = deque()
         self._current: str | None = None
@@ -109,6 +110,8 @@ class Runner:
         try:
             outcome = self.runtime().run(task)
             log.info("%s: %s", task, outcome.state)
+            if outcome.state in CLOSED and self.on_closed is not None:
+                self.on_closed(task)
         except Exception as error:  # one task must not stop the runner; the message may hold task content
             log.warning("%s: not run (%s %s)", task, type(error).__name__, getattr(error, "code", ""))
         finally:
