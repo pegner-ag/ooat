@@ -10,6 +10,7 @@ from datetime import datetime, timedelta
 
 TYPES = ("CONVERSATION_MESSAGE", "RECEPTION_DECIDED", "CONVERSATION_REPORTED", "CONVERSATION_CLOSED")
 QUESTIONS = frozenset({"ask", "confirm"})
+REPLACED = frozenset({"escalated", "retried"})  # a call whose decision the next call replaced
 
 
 @dataclass(frozen=True)
@@ -70,15 +71,22 @@ def silent(events: list[dict], now: datetime, silence_hours: float) -> list[Conv
 
 
 def _decisions(own: list[dict]) -> list[dict]:
-    """The reception's decisions a person saw as replies: not the escalated first step, not a 'reading' notice."""
-    return [e for e in own if e["type"] == "RECEPTION_DECIDED" and e["body"]["decision"] != "escalated"
+    """The reception's decisions a person saw as replies: not a replaced call, not a 'reading' notice."""
+    return [e for e in own if e["type"] == "RECEPTION_DECIDED" and e["body"]["decision"] not in REPLACED
             and not e["body"].get("reading")]
 
 
+def message_text(event: dict) -> str | None:
+    """What a message says: its text, or the correction given with a Differently tap."""
+    body = event["body"]
+    return body.get("text") or (body.get("tap_text") if body.get("tap") == "differently" else None)
+
+
 def undecided(own: list[dict]) -> list[dict]:
-    """Messages with text that no decision has named yet, oldest first. A tap is decided when it is made."""
+    """Messages with text that no decision has named yet, oldest first. A tap is decided when it is made, except a
+    Differently with a correction, which is decided like a message."""
     named = {m for e in own if e["type"] == "RECEPTION_DECIDED" for m in e["body"]["messages"]}
-    return [e for e in own if e["type"] == "CONVERSATION_MESSAGE" and "text" in e["body"] and e["id"] not in named]
+    return [e for e in own if e["type"] == "CONVERSATION_MESSAGE" and message_text(e) and e["id"] not in named]
 
 
 def questions_in_a_row(own: list[dict]) -> int:

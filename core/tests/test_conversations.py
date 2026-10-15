@@ -83,9 +83,12 @@ def test_undecided_leaves_out_messages_a_decision_named_also_in_a_batch():
     assert [m["id"] for m in conversations.undecided(events)] == [third["id"]]
 
 
-def test_a_tap_is_never_undecided():
+def test_a_tap_is_never_undecided_but_a_correction_is():
     cnv = new_id("cnv")
     assert conversations.undecided([message(cnv, tap="yes")]) == []
+    correction = message(cnv, tap="differently", tap_text="Myslím patičku, ne hlavičku.")
+    assert conversations.undecided([correction]) == [correction]
+    assert conversations.message_text(correction) == "Myslím patičku, ne hlavičku."
 
 
 def test_questions_in_a_row():

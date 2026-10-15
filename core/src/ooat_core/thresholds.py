@@ -95,3 +95,8 @@ def threshold(events: Iterable[dict], point: str, engine: str, model: str, risk_
         return INTERIM_DECISION_ENGINE if decision_engine else INTERIM_FALLBACK_ENGINE
     computed = computed_threshold(rated, EPSILON[risk_class])
     return computed if len(rated) >= FULL_HISTORY else max(FLOOR, computed)
+
+
+def reception_threshold(events: Iterable[dict], engine: str, model: str, interim: float) -> float:
+    """θ of the reception's decisions for one engine and model version (plan 08a decision 2)."""
+    return interim

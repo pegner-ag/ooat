@@ -91,8 +91,10 @@ def test_the_question_of_a_cancelled_task_is_neither_open_nor_answerable(tmp_pat
 
 HIL_ACTOR = re.compile(r"""["']kind["']\s*:\s*["']hil["']""")
 # Runtime.submit, cancel and default-on-silence; rating; the answer path; connector state; operator tokens; the
-# operator's revert of a task's workspace changes (ADR 0017).
-MAY_BUILD_A_HUMAN_ACTOR = {"runtime.py", "rating.py", "hil.py", "connector_admin.py", "tokens.py", "workspace/runs.py"}
+# operator's revert of a task's workspace changes (ADR 0017); a person's messages and taps, and their memory edits
+# (ADR 0018). Each takes the operator from its caller (the principal), never from a request body.
+MAY_BUILD_A_HUMAN_ACTOR = {"runtime.py", "rating.py", "hil.py", "connector_admin.py", "tokens.py", "workspace/runs.py",
+                           "memory.py", "reception/__init__.py"}
 
 
 def test_only_the_listed_modules_build_a_human_actor():

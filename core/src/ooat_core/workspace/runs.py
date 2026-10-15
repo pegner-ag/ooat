@@ -94,6 +94,14 @@ class Workspaces:
                                    max_operations=grant.max_operations * factor,
                                    max_write_bytes=grant.max_write_bytes * factor)
 
+    def answer_grant(self, conversation: str, step: str, project: str, max_operations: int) -> WorkspaceGrant:
+        """A direct answer's grant (ADR 0018): read only, at most `max_operations`, its journal under the
+        conversation, never a task's."""
+        if project not in self.config.projects:
+            raise WorkspaceUnavailable(f"project {project} is not in ooat.toml any more")
+        grant = grant_for(self.config, self.config_path, project, self.root / conversation / step)
+        return dataclasses.replace(grant, write=False, max_operations=max_operations)
+
     def timeout_s(self, project: str) -> float:
         settings = self.config.projects.get(project)
         return settings.timeout_min * 60 if settings is not None else 600.0
