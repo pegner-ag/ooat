@@ -23,6 +23,12 @@ Bots use the Python client `ooat-client` (`sdk/python`, standard library only) a
 chat message becomes a task, questions come with buttons, the result with a rating, and `/stats` shows usage. The
 contract is in `docs/chat-bridge.md`.
 
+A reception in `ooat-core` (design 08, ADR 0018) turns a person's messages into answers, one question, a
+confirmation or a task with criteria it writes itself, within a conversation that continues across tasks and with
+project memory the operator can forget. It is in the REST API (`/conversations`, `/memory`), the Python client and
+`ooat ask`; the web app and the chat bridge move to it with plans 08b and 08c. `evals/reception/` measures it
+against a message set.
+
 ## Technology
 In use:
 - Core runtime: Python 3.12+ (`core/`), JSON Schema 2020-12 validation (`jsonschema`)
@@ -54,7 +60,8 @@ Chosen by decision (`docs/adr/`), not yet used in code:
   (each with `description.md`), `integration_tests/` (gateway with the real connectors, no network)
 - `catalog/routing.json` — reference routing policy: Anthropic, OpenAI (Codex models), Google (Antigravity models) and TypeSafe (Jev) list prices with source and date, data-class policy
 - `sdk/python/` — `ooat-client`: the REST API client and the reference chat bridge (`docs/chat-bridge.md`)
-- `dashboard/`, `evals/` — empty
+- `evals/` — eval cases of the catalog's cards and the reception's message set runner (`evals/reception/`)
+- `dashboard/` — empty
 - `docs/adr/` — decision records; `docs/assets/` — images (social preview)
 - `.github/` — CI (`tests.yml`: pytest on 3.12 and 3.13), Claude review workflows (`claude-review.yml` automatic on same-repo PRs, `claude.yml` on `@claude` mentions; Opus 5.5, comment-only, advisory per ADR 0007; auth via `CLAUDE_CODE_OAUTH_TOKEN`), issue and PR templates
 - `CONTRIBUTING.md`, `CODE_OF_CONDUCT.md`, `SECURITY.md` — contribution rules, Contributor Covenant 2.1, private vulnerability reporting
@@ -77,7 +84,8 @@ responsibility there (legal basis, processing agreement, region; ADR 0012), rene
 connector's CLI would run are approved with `ooat connectors approve-hooks` (fingerprints on the acknowledgement,
 ADR 0015); a changed file stops the connector until it is approved again. `[serve]` holds what `ooat serve` needs
 (`operator`, `host`, `port`, `hosts`, `tls_cert`, `tls_key`); bots get operator tokens from `ooat tokens create`,
-kept in the ledger as SHA-256 only (ADR 0016). Tests of the API also need `httpx2` from `requirements-dev.txt`.
+kept in the ledger as SHA-256 only (ADR 0016). `[reception]` holds the reception's settings (`batch_seconds`,
+`silence_hours`, `context_tokens`, `max_answer_usd`, `max_answer_operations`, `theta`; design 08). Tests of the API also need `httpx2` from `requirements-dev.txt`.
 Prices and the data-class policy: `catalog/routing.json`. Dev dependencies: `requirements-dev.txt`, then
 `pip install -e core -e adapters/claude-code -e adapters/codex -e adapters/anthropic-api -e adapters/typesafe-jev -e adapters/antigravity-cli -e sdk/python`;
 run `python -m pytest`

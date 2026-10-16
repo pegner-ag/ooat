@@ -258,3 +258,36 @@ def test_follow_still_yields_the_close_when_the_task_closed_as_the_stream_ended(
         client, waits = follower(stub)
         assert [e["id"] for e in client.follow("tsk_1")] == ["evt_1", "evt_2"]
     assert stub.requests[2]["path"] == "/api/v1/tasks/tsk_1/events?after=evt_1" and waits == []
+
+
+def test_conversation_calls_reach_their_endpoints():
+    with Stub((202, {"conversation": "cnv_1", "message": "evt_1"}), (200, {"decision": None}),
+              (200, {"conversation": "cnv_1"}), (200, {"events": [{"id": "evt_2"}], "next": "evt_2"}),
+              (200, {"items": []}), (200, {"forgotten": True}), (200, {"memory": "mem_1"})) as stub:
+        client = OoatClient(stub.url, "secret")
+        assert client.send_message(project="docs", text="Ahoj.", conversation="cnv_1", attachments=[("a.txt", b"hi")],
+                                   key="chat-1:8") == {"conversation": "cnv_1", "message": "evt_1"}
+        client.tap("cnv_1", "differently", text="Myslím patičku.")
+        assert client.conversation("cnv_1") == {"conversation": "cnv_1"}
+        assert client.conversation_events("cnv_1", after="evt_1") == [{"id": "evt_2"}]
+        assert client.memory("docs", kind="todo") == []
+        assert client.forget("docs", "mem_1") == {"forgotten": True}
+        client.done("docs", "mem_1")
+    assert [(r["method"], r["path"], sent(r)) for r in stub.requests] == [
+        ("POST", "/api/v1/conversations/messages", {
+            "project": "docs", "text": "Ahoj.", "conversation": "cnv_1",
+            "attachments": [{"name": "a.txt", "content_base64": base64.b64encode(b"hi").decode()}]}),
+        ("POST", "/api/v1/conversations/cnv_1/taps", {"tap": "differently", "text": "Myslím patičku."}),
+        ("GET", "/api/v1/conversations/cnv_1", {}), ("GET", "/api/v1/conversations/cnv_1/events?after=evt_1", {}),
+        ("GET", "/api/v1/memory/docs?kind=todo", {}), ("DELETE", "/api/v1/memory/docs/mem_1", {}),
+        ("PATCH", "/api/v1/memory/docs/mem_1", {"done": True})]
+    assert stub.requests[0]["headers"]["Idempotency-Key"] == "chat-1:8"
+
+
+def test_follow_conversation_ends_at_its_close_and_reconnects_after_a_drop():
+    with Stub(stream(event("evt_1", "RECEPTION_DECIDED"), cut=True), (200, {"closed": None}),
+              stream(event("evt_2", "CONVERSATION_CLOSED"))) as stub:
+        client, waits = follower(stub)
+        seen = [e["id"] for e in client.follow_conversation("cnv_1")]
+    assert seen == ["evt_1", "evt_2"]
+    assert stub.requests[2]["headers"]["Last-Event-ID"] == "evt_1" and waits == [1.0]

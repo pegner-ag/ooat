@@ -25,7 +25,7 @@ from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, ConfigDict, Field
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from . import connector_admin, hil, setup, tokens, views
+from . import connector_admin, hil, memory, setup, tokens, views
 from .artifacts import ArtifactStore
 from .backends import LedgerBusyError
 from .blobs import BlobStore
@@ -37,6 +37,8 @@ from .gateway import Gateway
 from .ledger import Ledger
 from .rating import AlreadyRated, NotClosed
 from .routing import RoutingPolicy
+from .reception import Reception, UnknownConversation
+from .reception.desk import Desk
 from .runner import Runner
 from .runtime import Runtime, TaskClosed, TaskOpen, UnknownTask
 from .sessions import SESSION_TTL, Sessions, login_folder, redeem_login_code
@@ -109,7 +111,11 @@ class Server:
                  clock: Callable[[], datetime]):
         self.settings, self.config, self.registry, self.routing, self.clock = settings, config, registry, routing, clock
         self.sessions = Sessions()
-        self.runner = Runner(self.new_runtime, clock=clock)
+        folder = memory.memory_folder(settings.ledger_url)
+        self.memory = memory.MemoryStore(folder) if folder is not None else None
+        # The desk decides a conversation's messages and reports its finished tasks in its own thread (ADR 0018).
+        self.desk = Desk(self.new_reception, clock=clock, batch_seconds=config.reception.batch_seconds)
+        self.runner = Runner(self.new_runtime, clock=clock, on_closed=self.desk.report_later)
         self._local = threading.local()
 
     def new_runtime(self) -> Runtime:
@@ -127,6 +133,17 @@ class Server:
         if runtime is None:
             runtime = self._local.runtime = self.new_runtime()
         return runtime
+
+    def new_reception(self, runtime: Runtime | None = None) -> Reception:
+        return Reception(runtime or self.new_runtime(), self.memory, self.config.reception, self.config.projects,
+                         clock=self.clock, on_task=self.runner.enqueue)
+
+    def reception(self) -> Reception:
+        """This thread's Reception, on this thread's Runtime."""
+        reception = getattr(self._local, "reception", None)
+        if reception is None:
+            reception = self._local.reception = self.new_reception(self.runtime())
+        return reception
 
 
 def server_of(request: Request) -> Server:
@@ -182,8 +199,10 @@ def create_app(settings: ServeSettings, *, config: Config, registry: Registry, r
     async def lifespan(app):
         if start_runner:
             server.runner.start()
+            server.desk.start()
         yield
         if start_runner:
+            server.desk.stop()
             server.runner.stop()
 
     app = FastAPI(title="OOAT", docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan)
@@ -193,9 +212,11 @@ def create_app(settings: ServeSettings, *, config: Config, registry: Registry, r
     app.include_router(login_routes())
     app.include_router(app_routes())
     app.include_router(session_routes(), prefix="/api/v1")
+    from .conversation_endpoints import conversation_routes
     from .endpoints import resource_routes  # endpoints.py builds on this module
 
     app.include_router(resource_routes(), prefix="/api/v1")
+    app.include_router(conversation_routes(), prefix="/api/v1")
     return app
 
 
@@ -226,7 +247,8 @@ def _guards(app: FastAPI, settings: ServeSettings) -> None:
             response = error_response(400, "HOST_NOT_ALLOWED", "this Host is not served")
         elif request.method not in SAFE_METHODS and not _unsafe_allowed(request, settings):
             response = error_response(403, "ORIGIN_NOT_ALLOWED", "an unsafe request needs this server's Origin")
-        elif request.method not in SAFE_METHODS and length is None:
+        elif request.method not in SAFE_METHODS and length is None and not (
+                request.method == "DELETE" and "transfer-encoding" not in request.headers):  # a DELETE has no body
             response = error_response(411, "LENGTH_REQUIRED", "send a Content-Length")
         elif length is not None and not (length.isascii() and length.isdigit()):
             response = error_response(400, "INVALID", "Content-Length must be a number")
@@ -271,6 +293,8 @@ def _errors(app: FastAPI) -> None:
                                (TaskOpen, 409, "NOT_CLOSED"), (AlreadyReverted, 409, "ALREADY_REVERTED"),
                                (WorkspaceBusy, 409, "BUSY"),
                                (hil.R3NeedsBoundIdentity, 403, "R3_NEEDS_BOUND_IDENTITY"),
+                               (UnknownConversation, 404, "NOT_FOUND"), (memory.UnknownMemory, 404, "NOT_FOUND"),
+                               (memory.SecretRefused, 400, "SECRET_REFUSED"),
                                (ValueError, 400, "INVALID")):
         app.add_exception_handler(kind, handler(status, code))
 

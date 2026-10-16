@@ -1,0 +1,16 @@
+{
+  "id": "evt_01JA1Q81A0K3M5N7P9Q1R3S5T7",
+  "ts": "2026-10-16T08:00:00Z",
+  "task": null,
+  "actor": {"kind": "hil", "id": "operator"},
+  "type": "CONVERSATION_MESSAGE",
+  "refs": [],
+  "body": {
+    "conversation": "cnv_01JA1Q80B0K3M5N7P9Q1R3S5T7",
+    "project": "docs",
+    "channel": "token:tok_01J9ZQ80B0K3M5N7P9Q1R3S5T7",
+    "text": "A ještě to tlačítko na konci stránky.",
+    "intake_key": "chat:42:1077",
+    "data_class": "internal"
+  }
+}

@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://moonindustries.eu/ooat/spec/v0.2/reception.schema.json",
+  "title": "OOAT reception decision",
+  "description": "What the reception's model returns for one or more messages of a conversation (design 08 §4, ADR 0018). It is untrusted output: ooat-core validates it against this schema, then applies the design's rules before acting.",
+  "type": "object",
+  "required": ["decision", "reply", "confidence"],
+  "additionalProperties": false,
+  "properties": {
+    "decision": {"enum": ["answer", "task", "confirm", "ask", "continue_task", "status", "cancel", "command", "switch", "forget"]},
+    "reply": {"description": "The text the person sees, in the message's language, sized to the request.", "type": "string", "minLength": 1, "maxLength": 6000},
+    "interpretation": {"description": "How the reception understood the request, in one sentence.", "type": "string", "minLength": 1, "maxLength": 1000},
+    "goal": {"type": "string", "minLength": 1, "maxLength": 4000},
+    "acceptance": {"type": "array", "maxItems": 8, "items": {"type": "string", "minLength": 1, "maxLength": 500}},
+    "risk_hint": {"$ref": "common.schema.json#/$defs/risk_class"},
+    "task": {"$ref": "common.schema.json#/$defs/task_id"},
+    "options": {"type": "array", "maxItems": 9, "items": {"type": "string", "minLength": 1, "maxLength": 300}},
+    "needs_files": {"type": "boolean"},
+    "project": {"type": "string", "pattern": "^[a-z0-9][a-z0-9_-]*$"},
+    "memory": {"$ref": "common.schema.json#/$defs/memory_id"},
+    "confidence": {"$ref": "common.schema.json#/$defs/probability"},
+    "memory_notes": {
+      "type": "array", "maxItems": 3,
+      "items": {
+        "type": "object", "required": ["kind", "text"], "additionalProperties": false,
+        "properties": {
+          "kind": {"enum": ["preference", "fact", "glossary", "todo"]},
+          "text": {"type": "string", "minLength": 1, "maxLength": 500},
+          "scope": {"enum": ["project", "operator"]}
+        }
+      }
+    }
+  },
+  "allOf": [
+    {"if": {"properties": {"decision": {"enum": ["task", "confirm"]}}}, "then": {"required": ["goal"]}},
+    {"if": {"properties": {"decision": {"const": "continue_task"}}}, "then": {"required": ["task"]}},
+    {"if": {"properties": {"decision": {"const": "switch"}}}, "then": {"required": ["project"]}},
+    {"if": {"properties": {"decision": {"const": "forget"}}}, "then": {"required": ["memory"]}}
+  ]
+}

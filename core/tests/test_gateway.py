@@ -569,3 +569,19 @@ def test_a_data_class_refusal_on_a_workspace_request_is_not_called_a_folder_prob
     assert info.value.code == "NOT_PERMITTED"
     assert info.value.message != "no enabled connector can work with project folders"
     assert any(line.startswith("project bots holds client_confidential data") for line in info.value.trace)
+
+
+def test_a_reception_call_belongs_to_a_conversation():
+    setup = ready(API)
+    request = dataclasses.replace(setup.request(), task=None, conversation=new_id("cnv"))
+    assert setup.gateway.call(request).cost["adapter"] == "prv.fake.api"
+    with pytest.raises(ValueError, match="task or a conversation"):
+        setup.gateway.call(dataclasses.replace(request, conversation=None))
+
+
+def test_a_quota_warning_of_a_reception_call_has_no_task():
+    setup = ready(SUBSCRIPTION)
+    setup.connectors[0].error = quota_error()
+    with pytest.raises(GatewayError):
+        setup.gateway.call(dataclasses.replace(setup.request(), task=None, conversation=new_id("cnv")))
+    assert setup.ledger.events(types=["QUOTA_WARNING"])[0]["task"] is None

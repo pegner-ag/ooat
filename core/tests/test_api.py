@@ -308,18 +308,21 @@ OPEN = {"/login", "/login.js", "/api/v1/login"}
 
 def test_every_endpoint_but_the_sign_in_needs_authentication(tmp_path):
     from ooat_core.api import login_routes, session_routes
+    from ooat_core.conversation_endpoints import conversation_routes
     from ooat_core.endpoints import resource_routes
 
     served = Served(tmp_path)
-    routes = [(method, "/api/v1" + route.path) for router in (session_routes(), resource_routes())
+    routes = [(method, "/api/v1" + route.path) for router in (session_routes(), resource_routes(),
+                                                              conversation_routes())
               for route in router.routes for method in route.methods]
     routes += [(method, route.path) for route in login_routes().routes for method in route.methods]
     routes = [(method, path) for method, path in routes if path not in OPEN]
-    assert len(routes) >= 20
+    assert len(routes) >= 28
     for method, path in routes:
         url = path.replace("{task}", "tsk_01J9ZQ7A1BK3M5N7P9Q1R3S5T7").replace(
             "{request_id}", "evt_01J9ZQ70A0K3M5N7P9Q1R3S5T7").replace("{ref}", "art_01J9ZQ6X9EK3M5N7P9Q1R3S5T7@v1") \
-            .replace("{connector_id}", "prv.fake.api")
+            .replace("{connector_id}", "prv.fake.api").replace("{conversation}", "cnv_01J9ZQ7A1BK3M5N7P9Q1R3S5T7") \
+            .replace("{scope_name}", "docs").replace("{mem_id}", "mem_01J9ZQ7A1BK3M5N7P9Q1R3S5T7")
         headers = {"Origin": served.origin} if method in UNSAFE else {}
         response = served.client.request(method, url, headers=headers, json={} if method in UNSAFE else None)
         assert response.status_code == 401, (method, path, response.status_code)

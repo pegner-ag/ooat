@@ -208,6 +208,75 @@ class OoatClient:
         query = urlencode({"period": period, "group": group, **({"project": project} if project else {})})
         return self._json("GET", f"/stats?{query}")
 
+    # Conversations and memory (ADR 0018) ------------------------------------------------------------------------
+
+    def send_message(self, *, project: str, text: str, conversation: str | None = None, reply_to: str | None = None,
+                     attachments: Sequence[tuple[str, bytes]] = (), key: str | None = None) -> dict:
+        """A message to the reception: {conversation, message} at once; the decision comes on the conversation's
+        events (`follow_conversation`). A repeated `key` returns the first message."""
+        body = {"project": project, "text": text,
+                "attachments": [{"name": name, "content_base64": base64.b64encode(content).decode("ascii")}
+                                for name, content in attachments],
+                **{k: v for k, v in (("conversation", conversation), ("reply_to", reply_to)) if v is not None}}
+        return self._json("POST", "/conversations/messages", body=body,
+                          headers={"Idempotency-Key": key} if key else None)
+
+    def tap(self, conversation: str, tap: str, text: str | None = None) -> dict:
+        """A button of a reception reply: yes, differently, new_thing, make_task, todo, forget:<mem>, done:<mem>.
+        Returns {conversation, message, decision}; a Differently with a text is decided later, like a message."""
+        body = {"tap": tap, **({"text": text} if text is not None else {})}
+        return self._json("POST", f"/conversations/{quote(conversation)}/taps", body=body)
+
+    def conversation(self, conversation: str) -> dict:
+        return self._json("GET", f"/conversations/{quote(conversation)}")
+
+    def conversation_events(self, conversation: str, after: str | None = None) -> list[dict]:
+        query = f"?{urlencode({'after': after})}" if after else ""
+        return self._json("GET", f"/conversations/{quote(conversation)}/events{query}")["events"]
+
+    def follow_conversation(self, conversation: str, after: str | None = None,
+                            stop: threading.Event | None = None) -> Iterator[dict]:
+        """The conversation's events after `after`, as they happen, until CONVERSATION_CLOSED (yielded too), with
+        the reconnect rules of `follow`."""
+        cursor, wait = after, RECONNECT_S
+        path = f"/conversations/{quote(conversation)}/events"
+        while not (stop and stop.is_set()):
+            try:
+                headers = {"Accept": "text/event-stream", **({"Last-Event-ID": cursor} if cursor else {})}
+                with self._open("GET", path, headers=headers) as response:
+                    for message in _sse(response, stop):
+                        if message.get("event") == "UNAUTHENTICATED":
+                            raise _error(401, message["data"].encode("utf-8"))
+                        event = json.loads(message["data"])
+                        cursor, wait = event["id"], RECONNECT_S
+                        yield event
+                        if event["type"] == "CONVERSATION_CLOSED":
+                            return
+                if stop and stop.is_set():
+                    return
+                if self.conversation(conversation)["closed"] is not None:
+                    yield from self.conversation_events(conversation, cursor)
+                    return
+                self.pause(RECONNECT_S, stop)
+                continue
+            except (OoatError, OSError, http.client.HTTPException) as error:
+                if not retryable(error):
+                    raise
+            self.pause(wait, stop)
+            wait = min(wait * 2, MAX_RECONNECT_S)
+
+    def memory(self, scope: str, kind: str | None = None, done: bool = False) -> list[dict]:
+        """A project's memory items (or the operator's preferences, scope "operator") within the token's cap."""
+        query = urlencode({**({"kind": kind} if kind else {}), **({"done": "true"} if done else {})})
+        return self._json("GET", f"/memory/{quote(scope)}" + (f"?{query}" if query else ""))["items"]
+
+    def forget(self, scope: str, memory: str) -> dict:
+        return self._json("DELETE", f"/memory/{quote(scope)}/{quote(memory)}")
+
+    def done(self, scope: str, memory: str) -> dict:
+        """Mark an open point (todo) done."""
+        return self._json("PATCH", f"/memory/{quote(scope)}/{quote(memory)}", body={"done": True})
+
 
 def retryable(error: Exception) -> bool:
     """Worth trying again: a busy server (5xx), a dropped or refused connection; never a refusal (4xx) or a

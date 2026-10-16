@@ -6,7 +6,7 @@ Normative part of OOAT: JSON Schemas (draft 2020-12) plus the semantics in `ooat
 
 | Schema | Describes | Spec section |
 |---|---|---|
-| `common.schema.json` | Shared IDs (`tsk_`, `ctr_`, `agt_`, `evt_` + 26-char ULID, `art_<ulid>@v<n>`), tiers, data classes, outcomes, permissions, budget, gates | 2, 5, 6, 9 |
+| `common.schema.json` | Shared IDs (`tsk_`, `ctr_`, `agt_`, `evt_`, `cnv_`, `mem_` + 26-char ULID, `art_<ulid>@v<n>`), tiers, data classes, outcomes, permissions, budget, gates | 2, 5, 6, 9 |
 | `capability.schema.json` | Capability card: contract, acceptance, model policy, cost card | 5 |
 | `family.schema.json` | Role family: shared rules, permissions, budget, gates | 5 |
 | `role.schema.json` | Role card: capability bundle, artifact types, permissions, budget, gates, A2A fields | 5 |
@@ -14,6 +14,7 @@ Normative part of OOAT: JSON Schemas (draft 2020-12) plus the semantics in `ooat
 | `routing.schema.json` | Tier → adapters, dated price list, data-class policy, display currency | 6, 9 |
 | `contract.schema.json` | Contract instance for one task (body of `CONTRACT_ISSUED`) | 2, 8 |
 | `event.schema.json` | Ledger event envelope and one body schema per event type | 7, 9 |
+| `reception.schema.json` | What the reception's model returns for a conversation's messages, checked before acting (ADR 0018) | 3, 6 |
 
 `$id` values use the base `https://moonindustries.eu/ooat/spec/v0.2/` (ADR 0013); they are names resolved from this
 folder, not URLs that must be served.

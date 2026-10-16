@@ -75,6 +75,13 @@ task already closed returns at once. Buttons keep working, since they carry the
 ids. Replies to questions sent before the restart are not recognised (the bridge keeps question messages in memory):
 answer those with the buttons or in the web app.
 
+## Conversations (the reception)
+
+The API also has conversations (design 08, ADR 0018): `send_message` hands a message to the reception, which
+answers it, asks one question, asks to confirm, or starts a task with criteria it writes itself, and keeps project
+memory. Its decisions arrive on `follow_conversation`. `Bridge` still submits each message as a task; it moves to
+conversations with plan 08c (the Telegram bot's task-04), together with the new buttons and `/pamet`.
+
 ## What changes for a bot that ran a coding CLI
 
 An OOAT task in F1 turns text into a document; for a project mapped in `ooat.toml` it also reads and edits the

@@ -379,8 +379,10 @@ def resource_routes() -> APIRouter:
         tasks = submitted_tasks(server)
         above = frozenset(t for t, c in task_classes(server, tasks).items() if not views.within(c, who.max_data_class))
         events = server.runtime().ledger.events()
-        if project is not None and not any(e[0]["body"].get("project") == project for t, e in tasks.items()
-                                           if t not in above):
+        talked = any(e["type"] == "CONVERSATION_MESSAGE" and e["body"]["project"] == project
+                     and views.within(e["body"]["data_class"], who.max_data_class) for e in events)
+        if project is not None and not talked and not any(e[0]["body"].get("project") == project
+                                                          for t, e in tasks.items() if t not in above):
             events = []  # a project only above the cap reads like an unknown one: no spend, no sign it exists
         return stats.usage(events, now=server.clock(), period=period, project=project, group=group, above_cap=above)
 

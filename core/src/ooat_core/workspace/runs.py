@@ -94,6 +94,14 @@ class Workspaces:
                                    max_operations=grant.max_operations * factor,
                                    max_write_bytes=grant.max_write_bytes * factor)
 
+    def answer_grant(self, conversation: str, step: str, project: str, max_operations: int) -> WorkspaceGrant:
+        """A direct answer's grant (ADR 0018): read only, at most `max_operations`, its journal under the
+        conversation, never a task's."""
+        if project not in self.config.projects:
+            raise WorkspaceUnavailable(f"project {project} is not in ooat.toml any more")
+        grant = grant_for(self.config, self.config_path, project, self.root / conversation / step)
+        return dataclasses.replace(grant, write=False, max_operations=max_operations)
+
     def timeout_s(self, project: str) -> float:
         settings = self.config.projects.get(project)
         return settings.timeout_min * 60 if settings is not None else 600.0
@@ -104,15 +112,17 @@ class Workspaces:
 
     # The journal in the ledger ----------------------------------------------------------------------------------
 
-    def record(self, ledger, artifacts, *, task: str, contract: str | None, role: str, grant: WorkspaceGrant,
-               data_class: str) -> dict | None:
+    def record(self, ledger, artifacts, *, task: str | None, contract: str | None, role: str, grant: WorkspaceGrant,
+               data_class: str, conversation: str | None = None) -> dict | None:
         """Append WORKSPACE_USED for the journal lines since the last event of this role; None when there are
-        none. Each original is stored once, as the task's artifact; the diff covers the task so far."""
+        none. Each original is stored once, as the task's artifact; the diff covers the task so far. A direct
+        answer (ADR 0018) has no task: its event names the conversation, and its journal is its own."""
         try:
             lines = read_journal(grant.journal_dir)
         except (ValueError, OSError):  # damaged or unreadable: never guess what the agent did
             raise JournalLost("workspace journal lost") from None
-        earlier = [e for e in ledger.events(task=task, types=["WORKSPACE_USED"]) if e["body"]["by"] == role]
+        earlier = [] if conversation is not None else [
+            e for e in ledger.events(task=task, types=["WORKSPACE_USED"]) if e["body"]["by"] == role]
         start = earlier[-1]["body"]["journal_lines"] if earlier else 0
         if len(lines) <= start:
             return None
@@ -168,6 +178,8 @@ class Workspaces:
                 "read": [{"path": p, "times": n} for p, n in read.items()], "changed": list(changed.values()),
                 "created": list(created.values()), "refused": refused, "operations": operations,
                 "written_bytes": written, "limit": limit, "journal_lines": len(lines)}
+        if conversation is not None:
+            body["conversation"] = conversation
         if changed or created:
             diff = _diff(lines, grant, failed).encode("utf-8")
             if diff:

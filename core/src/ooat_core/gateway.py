@@ -156,8 +156,8 @@ class Gateway:
         return self._route(request).estimate
 
     def call(self, request: ModelRequest) -> GatewayResult:
-        if request.task is None:
-            raise ValueError("every gateway call belongs to a task")
+        if request.task is None and request.conversation is None:
+            raise ValueError("every gateway call belongs to a task or a conversation")
         candidate = self._route(request)
         self._check_budget(request, candidate.estimate)
         response = self._invoke(request, candidate, "complete")

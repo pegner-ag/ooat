@@ -39,6 +39,7 @@ class ModelRequest:
     model: str | None = None  # set by the gateway to the routed model; connectors must use it
     approved_hooks: tuple[str, ...] = ()  # set by the gateway: sha256 of hook files the operator approved (ADR 0015)
     workspace: WorkspaceGrant | None = None  # set by the runtime from the task's project (design 07); never by text
+    conversation: str | None = None  # a reception call belongs to a conversation instead of a task (ADR 0018)
 
 
 @dataclass(frozen=True)

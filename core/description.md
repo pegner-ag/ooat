@@ -119,6 +119,33 @@ API with web sessions and operator tokens, and the task runner (design 05a). Tea
   user data folder), the config lookup and writer (never overwrites), connectors and API key variable names found,
   the chat bridge's token
 - `init_cli.py` — `ooat init [--data] [--operator] [--yes]`: the setup steps in the terminal
+- `conversations.py` — conversations (`cnv_`, ADR 0018) as projections over `CONVERSATION_MESSAGE`,
+  `RECEPTION_DECIDED`, `CONVERSATION_REPORTED` and `CONVERSATION_CLOSED`: the open one of an operator, project and
+  channel (24 h of silence closes it), undecided messages, questions in a row, the latest numbered options, a
+  confirmation's pending task, the tasks a conversation started
+- `memory.py` — project memory and the operator's preferences (`mem_`): texts in `ooat-memory/` beside the ledger,
+  one file per item, never in the ledger (`MEMORY_NOTED`, `MEMORY_EDITED`, `MEMORY_FORGOTTEN` carry ids and
+  SHA-256); a secret scan refuses passwords, keys and tokens, personal data raises an item's class; forgetting
+  deletes the file; kinds `preference`, `fact`, `glossary`, `summary`, `todo` (open points)
+- `reception/` — the reception (design 08): `Reception.receive()` records a message, `decide()` decides every
+  undecided message of a conversation with one `economy` call (`context.py` gathers preferences, the project's
+  `CLAUDE.md`/`AGENTS.md` through the guard, memory, open points, summaries, work in progress and the conversation
+  within `[reception] context_tokens`; `model.py` holds the prompts and checks the reply against
+  `spec/schemas/reception.schema.json`) and acts: an answer (a second call may read the project's folders with a
+  read-only grant, at most 40 operations, its estimate within `max_answer_usd`, recorded as `WORKSPACE_USED` of
+  the conversation), a task with criteria the reception wrote (a `Done when:` line wins), a confirmation (always
+  for R2 and R3, and below θ after one more try on `workhorse`), one question (after two in a row it starts on its
+  best reading), an answer to a task's open question or a follow-up task, a status, a cancel, a command it says it
+  cannot run (offered as an open point), a project switch, up to 3 memory notes; a failed reception sends the
+  message as a task. `tap()` applies a button at once; `report()` writes a finished task's report with numbered
+  next steps; `close()` writes a summary into memory. `desk.py` is its thread in `ooat serve`: the quiet window
+  (`batch_seconds`), reports when the runner closes a task, a 60 s tick for missed reports and silent conversations.
+  θ comes from `thresholds.reception_threshold()`: `[reception] theta` until 5 verdicts (Yes, Differently, a
+  cancel within 2 minutes, an accepted rating), then calibrated
+- `conversation_endpoints.py` — `POST /conversations/messages` (202, decided by the desk),
+  `POST /conversations/{id}/taps`, `GET /conversations`, `GET /conversations/{id}`, `GET /conversations/{id}/events`
+  (JSON or SSE), `GET|PATCH|DELETE /memory/{scope}[/{id}]`; editing or pinning memory needs a web session
+- `reception_cli.py` — `ooat ask --project P --operator NAME TEXT`: the reception from the terminal, decided at once
 
 Schemas are read from `spec/schemas/` in the repository, so the package works from a checkout or an editable
 install (`pip install -e core`); packaging the schemas into the wheel is release work.
@@ -130,4 +157,5 @@ in a backend; every backend passes `tests/test_ledger.py`.
 ## Public API
 `Ledger.open(url)`, `new_event()`, `ArtifactStore`, `BlobStore`, `task_state()`, `contract_state()`, `validate()`,
 `Gateway`, `Gate`, `Runtime`, `rate()`, `task_facts()`, `threshold()`, `Registry.discover()`, `load_config()`,
-`load_routing()`, `SecretResolver`, `connector_admin`, `hil.answer()`, `tokens`, `stats.usage()`, `create_app()`, the `ooat` console script.
+`load_routing()`, `SecretResolver`, `connector_admin`, `hil.answer()`, `tokens`, `stats.usage()`, `create_app()`,
+`Reception`, `memory`, `conversations`, the `ooat` console script.

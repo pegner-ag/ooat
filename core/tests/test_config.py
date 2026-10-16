@@ -1,6 +1,6 @@
 import pytest
 
-from ooat_core.config import Config, Project, folder_name, load_config, parse_config
+from ooat_core.config import Config, Project, ReceptionSettings, folder_name, load_config, parse_config
 from ooat_core.connectors import ConnectorError
 from ooat_core.credentials_env import REDACTED, SecretResolver
 from ooat_core.gate import settings_from_config
@@ -241,3 +241,28 @@ def test_loading_checks_that_project_folders_exist_and_do_not_nest(tmp_path):
 def test_the_folder_name_is_the_last_segment_in_either_convention():
     assert folder_name("C:\\DATA_DEVELOPMENT\\TelegramBOTs\\") == "TelegramBOTs"
     assert folder_name("/srv/projects/shop") == "shop"
+
+
+def test_reception_settings_have_defaults_and_overrides():
+    assert parse_config({}).reception == ReceptionSettings()
+    settings = parse_config({"reception": {"batch_seconds": 3, "silence_hours": 12, "context_tokens": 2000,
+                                           "max_answer_usd": 0.1, "max_answer_operations": 20, "theta": 0.8}})
+    assert settings.reception == ReceptionSettings(3, 12, 2000, 0.1, 20, 0.8)
+
+
+@pytest.mark.parametrize("reception, message", [
+    ({"theta": 1.2}, "share from 0 to 1"),
+    ({"max_answer_operations": 2.5}, "whole number"),
+    ({"context_tokens": 0}, "whole number"),
+    ({"batch_seconds": -1}, "batch_seconds"),
+    ({"max_answer_usd": "a lot"}, "max_answer_usd"),
+    ({"api_key": "hunter2"}, "unknown settings"),
+])
+def test_invalid_reception_settings_are_refused_without_echoing_values(reception, message):
+    with pytest.raises(ValueError) as info:
+        parse_config({"reception": reception})
+    assert message in str(info.value) and "hunter2" not in str(info.value)
+
+
+def test_a_zero_batch_window_is_allowed():
+    assert parse_config({"reception": {"batch_seconds": 0}}).reception.batch_seconds == 0

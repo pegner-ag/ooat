@@ -3,7 +3,8 @@
 import pytest
 
 from ooat_core.ids import new_id
-from ooat_core.thresholds import RatedDecision, computed_threshold, rated_decisions, threshold
+from ooat_core.thresholds import (RatedDecision, computed_threshold, rated_decisions, reception_threshold,
+                                 reception_verdicts, threshold)
 
 JEV, VERSION = "prv.typesafe.api", "jev-1.13.0"
 
@@ -119,3 +120,84 @@ def test_ratings_from_a_single_task_never_leave_the_interim_threshold():
     other = gate_event(record("a1.1", 0.95, "prv.anthropic.api", "claude-haiku"))  # a second task
     events += [other, rating(other, "a1.1", "confirmed")]
     assert threshold(events, "a1", "prv.anthropic.api", "claude-haiku", decision_engine=False) == 0.8
+
+
+# The reception's threshold (plan 08a task 8) ------------------------------------------------------------------
+
+
+
+def _decided(conversation, kind, confidence=0.75, engine="prv.fake.api", model="fake-economy", task=None):
+    body = {"conversation": conversation, "decision": kind, "messages": [new_id("evt")],
+            "record": {"engine": engine, "model": model, "confidence": confidence, "threshold": 0.7}}
+    if task:
+        body["task"] = task
+    return {"id": new_id("evt"), "ts": "2026-10-16T12:00:00.000000Z", "task": None, "type": "RECEPTION_DECIDED",
+            "actor": {"kind": "system", "id": "ooat-reception"}, "body": body}
+
+
+def _tap(conversation, tap):
+    return {"id": new_id("evt"), "ts": "2026-10-16T12:00:01.000000Z", "task": None, "type": "CONVERSATION_MESSAGE",
+            "actor": {"kind": "hil", "id": "operator"}, "body": {"conversation": conversation, "tap": tap}}
+
+
+def _confirmed(n, yes=True, confidence=0.75, **options):
+    events = []
+    for _ in range(n):
+        conversation = new_id("cnv")
+        events += [_decided(conversation, "confirm", confidence, **options),
+                   _tap(conversation, "yes" if yes else "differently")]
+    return events
+
+
+def test_yes_confirms_and_differently_corrects():
+    conversation = new_id("cnv")
+    verdicts = reception_verdicts([_decided(conversation, "confirm"), _tap(conversation, "differently")])
+    assert [(v.point, v.correct, v.task) for v in verdicts] == [("reception", False, conversation)]
+    assert reception_verdicts(_confirmed(1))[0].correct is True
+
+
+def test_interim_theta_until_five_verdicts():
+    assert reception_threshold(_confirmed(4, confidence=0.9), "prv.fake.api", "fake-economy", 0.7) == 0.7
+
+
+def test_the_interim_is_the_floor_until_twenty():
+    assert reception_threshold(_confirmed(6, confidence=0.6), "prv.fake.api", "fake-economy", 0.7) == 0.7
+
+
+def test_twenty_verdicts_compute_theta():
+    events = _confirmed(20, confidence=0.6)
+    assert reception_threshold(events, "prv.fake.api", "fake-economy", 0.7) == 0.5  # all correct: the grid's lowest
+
+
+def test_wrong_decisions_raise_theta():
+    events = _confirmed(20, confidence=0.6, yes=False) + _confirmed(20, confidence=0.95)
+    assert reception_threshold(events, "prv.fake.api", "fake-economy", 0.7) == 0.61
+
+
+def test_a_quick_cancel_corrects_the_decision_and_an_accepted_rating_confirms_it():
+    conversation, quick, kept = new_id("cnv"), new_id("tsk"), new_id("tsk")
+    events = [_decided(conversation, "task", task=quick), _decided(conversation, "task", task=kept)]
+    for task in (quick, kept):
+        events.append({"id": new_id("evt"), "ts": "2026-10-16T12:00:00.000000Z", "task": task,
+                       "type": "TASK_SUBMITTED", "actor": {"kind": "hil", "id": "operator"}, "body": {"goal": "x"}})
+    events.append({"id": new_id("evt"), "ts": "2026-10-16T12:01:00.000000Z", "task": quick, "type": "DECISION",
+                   "actor": {"kind": "hil", "id": "operator"}, "body": {"decision": "cancel the task"}})
+    events.append({"id": new_id("evt"), "ts": "2026-10-16T13:00:00.000000Z", "task": kept, "type": "TASK_RATED",
+                   "actor": {"kind": "hil", "id": "operator"}, "body": {"accepted": True, "value_class": "B"}})
+    assert sorted(v.correct for v in reception_verdicts(events)) == [False, True]
+
+
+def test_a_late_cancel_is_no_verdict():
+    conversation, task = new_id("cnv"), new_id("tsk")
+    events = [_decided(conversation, "task", task=task),
+              {"id": new_id("evt"), "ts": "2026-10-16T12:00:00.000000Z", "task": task, "type": "TASK_SUBMITTED",
+               "actor": {"kind": "hil", "id": "operator"}, "body": {"goal": "x"}},
+              {"id": new_id("evt"), "ts": "2026-10-16T12:10:00.000000Z", "task": task, "type": "DECISION",
+               "actor": {"kind": "hil", "id": "operator"}, "body": {"decision": "cancel the task"}}]
+    assert reception_verdicts(events) == []
+
+
+def test_reception_thresholds_are_per_engine_and_model():
+    events = _confirmed(20, confidence=0.6)
+    assert reception_threshold(events, "prv.fake.api", "fake-model", 0.7) == 0.7
+    assert reception_threshold(events, "prv.other.api", "fake-economy", 0.7) == 0.7

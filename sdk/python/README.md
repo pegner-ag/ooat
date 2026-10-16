@@ -12,6 +12,11 @@ for event in client.follow(task):                     # the task's timeline, unt
     print(event["type"])
 ```
 
+For the reception (design 08), `client.send_message(project=..., text=...)` returns `{conversation, message}` at
+once, and the decision comes on `client.follow_conversation(conversation)`, with its reply, buttons and the task it
+started. `client.tap(conversation, "yes")` presses a button. `client.memory(scope)`, `client.forget(scope, mem)`
+and `client.done(scope, mem)` read project memory, forget an item and mark an open point done.
+
 `client.revert(task)` writes back the originals of the project files a closed task changed (design 07); ask the
 operator to confirm before calling it. `Bridge` posts a task's diff with its result and offers revert with a
 second tap.
