@@ -71,7 +71,8 @@ verification is raised, not retried. `follow(task, stop=event)` ends within a se
 
 Tasks live in the ledger, not in the bot. `bridge.last_event` maps each watched task to the last event `watch`
 handled; a bot that keeps it calls `watch(task, after=last_event)` after a restart, and nothing is posted twice. For
-conversations a bot keeps `bridge.state()` (its own message and task ids and each conversation's cursor), gives it
+conversations a bot keeps `bridge.state()` (its own message and task ids, what it posted, each conversation's
+cursor and each memory button's scope), saved after every button too, gives it
 back with `bridge.restore(state)` and calls `follow` again. A reply to a reception post sent before the restart is
 an ordinary message, which goes into the open conversation anyway; a Hand-over button from before it asks to send
 the message again. A

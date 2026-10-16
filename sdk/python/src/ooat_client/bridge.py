@@ -72,6 +72,12 @@ def split_text(text: str, limit: int) -> list[str]:
     return parts + ([text] if text else [])
 
 
+def _trim(kept: dict) -> None:
+    """The newest OWN_KEPT entries of a dict that grows in insertion order."""
+    for key in list(kept)[:-OWN_KEPT]:
+        del kept[key]
+
+
 def _utc(ts: str) -> datetime:
     return datetime.fromisoformat(ts.replace("Z", "+00:00"))
 
@@ -95,8 +101,8 @@ class Bridge:
         self.own_messages: list[str] = []  # message and tap ids this bridge sent, newest last
         self.own_tasks: list[str] = []  # tasks the decisions on them started
         self.last_conversation_event: dict[str, str] = {}  # conversation → the last event `follow` handled
-        self._posted: set[str] = set()  # decisions posted (a tap's comes in its response and on the stream)
-        self._claiming = threading.Lock()
+        self._posted: dict[str, None] = {}  # decisions and reports posted, oldest first (a tap's comes twice)
+        self._guard = threading.RLock()  # the state above and below: one follow thread per conversation shares it
         self._sent: dict[str, tuple[str, str]] = {}  # a posted message's id → (conversation, event), for replies
         self._texts: dict[str, str] = {}  # own message id → its text, for a handoff
         self._said: dict[str, str] = {}  # a command decision → the text a handoff passes on
@@ -152,9 +158,11 @@ class Bridge:
         sent = self.client.send_message(project=self.project, text=text, conversation=conversation,
                                         reply_to=reply_to, attachments=files, key=f"{self.chat.id}:{message_id}")
         conversation, message = sent["conversation"], sent["message"]
-        self._own(self.own_messages, message)
-        self._texts[message] = text
-        if conversation not in self.last_conversation_event:  # replies come after it; earlier ones were posted
+        with self._guard:
+            self._own(self.own_messages, message)
+            self._texts[message] = text
+            fresh = conversation not in self.last_conversation_event
+        if fresh:  # replies come after it; earlier ones were posted
             self.last_conversation_event[conversation] = message
         return conversation
 
@@ -163,7 +171,8 @@ class Bridge:
         try:
             if kind in TAPS and rest:
                 result = self.client.tap(rest, TAPS[kind])
-                self._own(self.own_messages, result["message"])
+                with self._guard:
+                    self._own(self.own_messages, result["message"])
                 if result.get("decision") is not None:
                     self._decided(result["decision"])
                 return self._t("recorded")
@@ -249,7 +258,9 @@ class Bridge:
                 lines.append(self._t("mem_more", n=len(todos) - len(shown)))
             parts.append("\n".join(lines))
             for n, i in enumerate(shown, 1):
-                self._scope[i["memory"]] = i["scope"]
+                with self._guard:
+                    self._scope[i["memory"]] = i["scope"]
+                    _trim(self._scope)
                 rows.append([Button(self._t("b_done_n", n=n), f"x:{i['memory']}"),
                              Button(self._t("b_forget_n", n=n), f"f:{i['memory']}")])
         if summaries:
@@ -258,14 +269,22 @@ class Bridge:
         return None
 
     def state(self) -> dict:
-        """What a bot keeps across a restart for `follow`: its own ids and each conversation's cursor."""
-        return {"own_messages": list(self.own_messages), "own_tasks": list(self.own_tasks),
-                "last_conversation_event": dict(self.last_conversation_event)}
+        """What a bot keeps across a restart for `follow` and the memory buttons: its own ids, what it posted, each
+        conversation's cursor and each memory button's scope."""
+        with self._guard:
+            return {"own_messages": list(self.own_messages), "own_tasks": list(self.own_tasks),
+                    "posted": list(self._posted), "scopes": dict(self._scope),
+                    "last_conversation_event": dict(self.last_conversation_event)}
 
     def restore(self, state: dict) -> None:
-        for name in ("own_messages", "own_tasks"):
-            getattr(self, name)[:] = [i for i in state.get(name, []) if isinstance(i, str)][-OWN_KEPT:]
-        cursors = state.get("last_conversation_event", {})
+        with self._guard:
+            for name in ("own_messages", "own_tasks"):
+                getattr(self, name)[:] = [i for i in state.get(name, []) if isinstance(i, str)][-OWN_KEPT:]
+            self._posted.update(dict.fromkeys(i for i in state.get("posted", []) if isinstance(i, str)))
+            self._scope.update({m: s for m, s in state.get("scopes", {}).items() if isinstance(s, str)})
+            _trim(self._posted)
+            _trim(self._scope)
+            cursors = state.get("last_conversation_event", {})
         self.last_conversation_event.update({c: e for c, e in cursors.items() if isinstance(e, str)})
 
     def stats(self, period: str = "7d") -> str:
@@ -344,10 +363,11 @@ class Bridge:
 
     def _claim(self, event_id: str) -> bool:
         """True for the first caller only: a tap's decision comes in its response and on the stream."""
-        with self._claiming:
+        with self._guard:
             if event_id in self._posted:
                 return False
-            self._posted.add(event_id)
+            self._posted[event_id] = None
+            _trim(self._posted)
             return True
 
     def _decided(self, event: dict) -> None:
@@ -356,7 +376,8 @@ class Bridge:
         body = event["body"]
         self._reply(event)
         if body.get("task") and body["decision"] in ("task", "continue_task"):
-            self._own(self.own_tasks, body["task"])
+            with self._guard:
+                self._own(self.own_tasks, body["task"])
             if self.on_task is not None:
                 self.on_task(body["task"])
         if body.get("switch_to") and self.on_switch is not None:
@@ -374,12 +395,16 @@ class Bridge:
             numbered = [f"{n}. {o}" for n, o in enumerate(options, 1)] if isinstance(options, list) else []
             text = "\n\n".join([reply, "\n".join(numbered)]) if numbered else reply
             rows = self._buttons(body, evt)
-        for sent in self._post_parts(text, rows):
-            self._sent[sent] = (body["conversation"], evt)
-        while len(self._sent) > OWN_KEPT:
-            del self._sent[next(iter(self._sent))]
+        sent = self._post_parts(text, rows)
+        with self._guard:
+            self._sent.update(dict.fromkeys(sent, (body["conversation"], evt)))
+            _trim(self._sent)
 
     def _buttons(self, body: dict, evt: str) -> list[list[Button]]:
+        with self._guard:
+            return self._buttons_of(body, evt)
+
+    def _buttons_of(self, body: dict, evt: str) -> list[list[Button]]:
         cnv, taps = body["conversation"], body.get("buttons", [])
         forgets = [b for b in taps if b.startswith("forget:")]
         rows = []
@@ -387,6 +412,7 @@ class Bridge:
             kind, _, mem = tap.partition(":")
             if mem:
                 self._scope[mem] = body["project"]
+                _trim(self._scope)
                 several = len(forgets) > 1 and kind == "forget"
                 label = self._t("b_forget_n", n=forgets.index(tap) + 1) if several else self._t(f"b_{kind}")
                 rows.append([Button(label, f"{'f' if kind == 'forget' else 'x'}:{mem}")])
@@ -405,6 +431,7 @@ class Bridge:
         return [self._send(part, rows if n == len(parts) - 1 else ()) for n, part in enumerate(parts)]
 
     def _own(self, kept: list[str], item: str) -> None:
+        """Keep an own id (with self._guard held)."""
         if item not in kept:
             kept.append(item)
         for dropped in kept[:-OWN_KEPT]:

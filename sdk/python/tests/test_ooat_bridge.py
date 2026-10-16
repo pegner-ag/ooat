@@ -162,7 +162,8 @@ class Talk:
 def event(evt, kind, **body):
     return {"id": evt, "ts": "2026-10-16T10:00:00Z", "type": kind,
             "actor": {"kind": "system", "id": "ooat-reception"},
-            "refs": [], "cost": None, "body": {"conversation": CNV, "project": "docs", "data_class": "internal", **body}}
+            "refs": [], "cost": None,
+            "body": {"conversation": CNV, "project": "docs", "data_class": "internal", **body}}
 
 
 def decided(evt, messages, decision="answer", reply="Ahoj.", **body):
@@ -276,7 +277,8 @@ def test_a_reply_to_a_reception_post_continues_its_conversation():
 
 
 def test_after_a_restart_the_follow_resumes_at_the_cursor_and_posts_only_what_is_new():
-    saved = {"own_messages": [MSG1], "own_tasks": [], "last_conversation_event": {CNV: EVT4}}
+    saved = {"own_messages": [MSG1], "own_tasks": [], "posted": [EVT3], "scopes": {MEM1: "eshop"},
+             "last_conversation_event": {CNV: EVT4}}
     with Stub(sse(decided(EVT5, [MSG1], reply="Ještě něco?"), closed(EVT6))) as stub:
         chat = Talk()
         bridge = Bridge(OoatClient(stub.url, "secret"), chat, "docs")
@@ -373,3 +375,43 @@ def test_empty_memory_says_so():
         chat = Talk()
         bridge_of(stub, chat).show_memory()
     assert chat.sent == ["Project docs has nothing in its memory yet."]
+
+
+def test_a_tapped_decision_is_not_posted_again_after_a_restart():
+    started = decided(EVT5, [TAP1], "task", "Spouštím.", task=TSK1)
+    with Stub((200, {"conversation": CNV, "message": TAP1, "decision": started})) as stub:
+        chat = Talk()
+        bridge = bridge_of(stub, chat)
+        bridge.on_button(f"y:{CNV}")
+        saved = json.loads(json.dumps(bridge.state()))  # the bot stops before the stream brought the decision
+    with Stub(sse(started, closed(EVT6))) as stub:
+        again = Bridge(OoatClient(stub.url, "secret"), Talk(), "docs")
+        again.restore(saved)
+        again.follow(CNV)
+    assert chat.sent == ["Spouštím."] and again.chat.sent == []
+
+
+def test_a_memory_button_keeps_its_scope_across_a_restart():
+    with Stub((200, {"memory": MEM1, "event": EVT5})) as stub:
+        bridge = bridge_of(stub, Talk())
+        bridge.restore({"scopes": {MEM1: "eshop"}})
+        bridge.on_button(f"x:{MEM1}")
+    assert stub.requests[0]["path"] == f"/api/v1/memory/eshop/{MEM1}"
+
+
+def test_many_conversations_at_once_share_the_bridge_safely():
+    bridge = offline_bridge()
+    bridge.chat = Talk()
+
+    def post(n):
+        for i in range(300):
+            evt = f"evt_{n}_{i}"
+            bridge._reply(decided(evt, [MSG1], buttons=[f"forget:mem_{n}_{i}"]))
+            bridge._claim(evt)
+
+    threads = [threading.Thread(target=post, args=(n,)) for n in range(4)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+    assert len(bridge._sent) <= 500 and len(bridge._posted) <= 500 and len(bridge._scope) <= 500
