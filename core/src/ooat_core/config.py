@@ -45,7 +45,7 @@ class Project:
 @dataclass(frozen=True)
 class ReceptionSettings:
     """[reception]: the reception in front of tasks (design 08, plan 08a)."""
-    batch_seconds: float = 8  # messages of a conversation this close together are decided as one (design 08 §14)
+    batch_seconds: float = 60  # messages of a conversation this close together are decided as one (design 08 §14)
     silence_hours: float = 24  # a conversation without a message this long is closed
     context_tokens: int = 3000  # what the reception may see of memory and history
     max_answer_usd: float = 0.05  # the estimate a direct answer that reads files may have

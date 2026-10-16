@@ -64,7 +64,7 @@ questions about the state of work, commands, bursts, cancels and reminders (desi
 10. When a task started from a conversation closes, the reception writes a report, `CONVERSATION_REPORTED`
     (`task: null`): what was asked, how it was solved, the state now, and numbered options for what next. The last
     options stay in the context, so a numbered answer is understood.
-11. Messages of one conversation within a quiet window (default 8 s) are decided together. The API records a
+11. Messages of one conversation within a quiet window (default 60 s after the last one) are decided together. The API records a
     message at once; the decision comes as `RECEPTION_DECIDED` on the conversation's event stream.
 12. Memory gains the kind `todo`, an open point, shown with the project's status until it is marked done.
 13. A reception call belongs to a conversation, not a task: the gateway accepts it, and a `QUOTA_WARNING` it causes
