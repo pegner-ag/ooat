@@ -343,9 +343,9 @@ Approved (owner, 2026-10-15, points 1–6):
    in the message's language and sized to the work (§4 rule 4).
 3. Commands (rule 9): decision `command` with **Keep as an open point**; handing the message to another engine of
    the chat is the bridge's (08c). Running commands comes with containers (part 2).
-4. Bursts (rule 10): a quiet window per conversation, default 8 s (`[reception] batch_seconds`). Because every
-   reply waits for the window, it is shorter than the 20 s first proposed; a message that arrives later is still
-   understood through `continue_task`.
+4. Bursts (rule 10): a quiet window per conversation, default 60 s after the last message (`[reception] batch_seconds`;
+   the owner, 2026-10-16: 8 s is too short to write the next message). Every reply waits for the window; a message
+   that arrives later is still understood through `continue_task`.
 5. Memory kind `todo`: an open point noted from a request ("remind me", "add it to unfinished") or from a
    `command`; it stays in the project's status and on the Memory page until it is marked done.
 6. Switching the project by text (`switch`), moved from the wishlist: the reception sees the slugs of
