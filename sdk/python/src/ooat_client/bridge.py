@@ -8,7 +8,7 @@ message's id. Methods called on a person's action return the text to show them; 
 
 import http.client
 import threading
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Protocol
@@ -18,6 +18,10 @@ from .texts import TEXTS
 
 TEXT_OPTIONS = frozenset({"clarify", "narrow_scope"})  # answered with text: their button asks for a reply
 VALUES = ("A", "B", "C")
+TAPS = {"y": "yes", "d": "differently", "n": "new_thing", "t": "make_task", "o": "todo"}  # button data → tap
+CODES = {tap: code for code, tap in TAPS.items()}
+REPLACED = frozenset({"escalated", "retried"})  # decisions the next call replaced: never posted
+OWN_KEPT = 500  # how many own message and task ids a bridge keeps (and a bot stores across restarts)
 
 
 @dataclass(frozen=True)
@@ -83,6 +87,20 @@ class Bridge:
         self._questions: dict[str, str] = {}  # a question message's id → its request, for answers by reply
         self.last_event: dict[str, str] = {}  # task → the last event `watch` handled: keep it for a restart
         self._told_text_only = False  # the notice for a project without folders goes out once
+        # The reception (design 08 §9): the bot's callbacks are attributes; see docs/chat-bridge.md.
+        self.on_task: Callable[[str], None] | None = None  # a task a decision started: watch it
+        self.on_switch: Callable[[str], str | None] | None = None  # a project to switch to; a text when it cannot
+        self.handoff: Callable[[str], None] | None = None  # a command's text, handed to the bot's other engine
+        self.handoff_name = "Claude Code"
+        self.own_messages: list[str] = []  # message and tap ids this bridge sent, newest last
+        self.own_tasks: list[str] = []  # tasks the decisions on them started
+        self.last_conversation_event: dict[str, str] = {}  # conversation → the last event `follow` handled
+        self._posted: set[str] = set()  # decisions posted (a tap's comes in its response and on the stream)
+        self._claiming = threading.Lock()
+        self._sent: dict[str, tuple[str, str]] = {}  # a posted message's id → (conversation, event), for replies
+        self._texts: dict[str, str] = {}  # own message id → its text, for a handoff
+        self._said: dict[str, str] = {}  # a command decision → the text a handoff passes on
+        self._scope: dict[str, str] = {}  # memory item → its scope, from the post that showed its button
 
     def _t(self, name: str, **values) -> str:
         return self.texts[name].format(**values)
@@ -123,9 +141,44 @@ class Bridge:
                 pass  # the task exists: never lose its id for a notice
         return task
 
+    def converse(self, text: str, message_id: str, files: Sequence[tuple[str, bytes]] = (),
+                 replied_to: str | None = None) -> str:
+        """A message (with files) to the reception of the chat's project; a reply to one of the reception's posts
+        continues its conversation. The same message delivered again is the same message. Returns the
+        conversation id: pass it to `follow`."""
+        if not text.strip():
+            raise ValueError(self._t("no_text"))
+        conversation, reply_to = self._sent.get(replied_to, (None, None)) if replied_to else (None, None)
+        sent = self.client.send_message(project=self.project, text=text, conversation=conversation,
+                                        reply_to=reply_to, attachments=files, key=f"{self.chat.id}:{message_id}")
+        conversation, message = sent["conversation"], sent["message"]
+        self._own(self.own_messages, message)
+        self._texts[message] = text
+        if conversation not in self.last_conversation_event:  # replies come after it; earlier ones were posted
+            self.last_conversation_event[conversation] = message
+        return conversation
+
     def on_button(self, data: str) -> str:
         kind, _, rest = data.partition(":")
         try:
+            if kind in TAPS and rest:
+                result = self.client.tap(rest, TAPS[kind])
+                self._own(self.own_messages, result["message"])
+                if result.get("decision") is not None:
+                    self._decided(result["decision"])
+                return self._t("recorded")
+            if kind == "f" and rest:
+                self.client.forget(self._scope.get(rest, self.project), rest)
+                return self._t("forgotten")
+            if kind == "x" and rest:
+                self.client.done(self._scope.get(rest, self.project), rest)
+                return self._t("marked_done")
+            if kind == "k" and rest:
+                said = self._said.pop(rest, None)
+                if self.handoff is None or said is None:
+                    return self._t("handoff_gone")
+                self.handoff(said)
+                return self._t("handed", engine=self.handoff_name)
             if kind == "a" and rest.endswith(":revert"):  # writing files back takes a second tap (design 07 §12)
                 self._send(self._t("revert_confirm"), [[Button(self._t("revert_yes"), f"c:{rest[:-len(':revert')]}")]])
                 return self._t("confirm_below")
@@ -175,6 +228,46 @@ class Bridge:
             return error.message
         return self._t("cancel_requested" if asked == "requested" else "cancel_already")
 
+    def show_memory(self) -> str | None:
+        """`/pamet`: the project's pinned items, its open points with Done and Forget, and the last summary, posted;
+        returns the server's refusal as text, else None."""
+        try:
+            items = self.client.memory(self.project)
+        except OoatError as error:
+            return error.message
+        said = lambda item: item["text"] if isinstance(item["text"], str) else self._t("redacted")  # noqa: E731
+        pinned = [i for i in items if i["pinned"] and i["kind"] != "todo"]
+        todos = sorted((i for i in items if i["kind"] == "todo" and not i["done"]), key=lambda i: i["noted"])
+        summaries = sorted((i for i in items if i["kind"] == "summary"), key=lambda i: i["noted"])
+        parts, rows = [], []
+        if pinned:
+            parts.append("\n".join([self._t("mem_pinned"), *(f"• {said(i)}" for i in pinned)]))
+        if todos:
+            shown = todos[:10]
+            lines = [self._t("mem_todos"), *(f"{n}. {said(i)}" for n, i in enumerate(shown, 1))]
+            if len(todos) > len(shown):
+                lines.append(self._t("mem_more", n=len(todos) - len(shown)))
+            parts.append("\n".join(lines))
+            for n, i in enumerate(shown, 1):
+                self._scope[i["memory"]] = i["scope"]
+                rows.append([Button(self._t("b_done_n", n=n), f"x:{i['memory']}"),
+                             Button(self._t("b_forget_n", n=n), f"f:{i['memory']}")])
+        if summaries:
+            parts.append(self._t("mem_summary", text=said(summaries[-1])))
+        self._post_parts("\n\n".join(parts) or self._t("mem_empty", project=self.project), rows)
+        return None
+
+    def state(self) -> dict:
+        """What a bot keeps across a restart for `follow`: its own ids and each conversation's cursor."""
+        return {"own_messages": list(self.own_messages), "own_tasks": list(self.own_tasks),
+                "last_conversation_event": dict(self.last_conversation_event)}
+
+    def restore(self, state: dict) -> None:
+        for name in ("own_messages", "own_tasks"):
+            getattr(self, name)[:] = [i for i in state.get(name, []) if isinstance(i, str)][-OWN_KEPT:]
+        cursors = state.get("last_conversation_event", {})
+        self.last_conversation_event.update({c: e for c, e in cursors.items() if isinstance(e, str)})
+
     def stats(self, period: str = "7d") -> str:
         """`/stats`: the chat's project, by role and by connector."""
         try:
@@ -219,6 +312,104 @@ class Bridge:
             # The server went busy or away while an event was posted: post it again once it is back.
             self.client.pause(wait, stop)
             wait = min(wait * 2, MAX_RECONNECT_S)
+
+    def follow(self, conversation: str, stop: threading.Event | None = None) -> None:
+        """Post the reception's replies to this bridge's messages until the conversation is closed: each decision
+        with its numbered options and buttons, and the report of each task they started. A started task goes to
+        `on_task`, a project switch to `on_switch`. It blocks: a bot runs it in a thread. Retries as `watch` does."""
+        wait = RECONNECT_S
+        while not (stop and stop.is_set()):
+            try:
+                cursor = self.last_conversation_event.get(conversation)
+                for event in self.client.follow_conversation(conversation, cursor, stop):
+                    self._converse_post(event)
+                    wait, self.last_conversation_event[conversation] = RECONNECT_S, event["id"]
+                if not (stop and stop.is_set()):
+                    self.last_conversation_event.pop(conversation, None)  # closed: nothing more comes
+                return
+            except (OoatError, OSError, http.client.HTTPException) as error:
+                if not retryable(error):
+                    self._send(error.message if isinstance(error, OoatError) else str(error))
+                    return
+            self.client.pause(wait, stop)
+            wait = min(wait * 2, MAX_RECONNECT_S)
+
+    def _converse_post(self, event: dict) -> None:
+        kind, body = event["type"], event["body"]
+        if kind == "RECEPTION_DECIDED":
+            if body["decision"] not in REPLACED and set(body["messages"]) & set(self.own_messages):
+                self._decided(event)
+        elif kind == "CONVERSATION_REPORTED" and body.get("task") in self.own_tasks and self._claim(event["id"]):
+            self._reply(event)
+
+    def _claim(self, event_id: str) -> bool:
+        """True for the first caller only: a tap's decision comes in its response and on the stream."""
+        with self._claiming:
+            if event_id in self._posted:
+                return False
+            self._posted.add(event_id)
+            return True
+
+    def _decided(self, event: dict) -> None:
+        if not self._claim(event["id"]):
+            return
+        body = event["body"]
+        self._reply(event)
+        if body.get("task") and body["decision"] in ("task", "continue_task"):
+            self._own(self.own_tasks, body["task"])
+            if self.on_task is not None:
+                self.on_task(body["task"])
+        if body.get("switch_to") and self.on_switch is not None:
+            said = self.on_switch(body["switch_to"])
+            if said:
+                self._send(said)
+
+    def _reply(self, event: dict) -> None:
+        """A decision or a report: its reply, its numbered options and its buttons; the notice above the cap."""
+        body, evt = event["body"], event["id"]
+        reply, options = body.get("reply"), body.get("options")
+        if not isinstance(reply, str):
+            text, rows = self._t("redacted"), []
+        else:
+            numbered = [f"{n}. {o}" for n, o in enumerate(options, 1)] if isinstance(options, list) else []
+            text = "\n\n".join([reply, "\n".join(numbered)]) if numbered else reply
+            rows = self._buttons(body, evt)
+        for sent in self._post_parts(text, rows):
+            self._sent[sent] = (body["conversation"], evt)
+        while len(self._sent) > OWN_KEPT:
+            del self._sent[next(iter(self._sent))]
+
+    def _buttons(self, body: dict, evt: str) -> list[list[Button]]:
+        cnv, taps = body["conversation"], body.get("buttons", [])
+        forgets = [b for b in taps if b.startswith("forget:")]
+        rows = []
+        for tap in taps:
+            kind, _, mem = tap.partition(":")
+            if mem:
+                self._scope[mem] = body["project"]
+                several = len(forgets) > 1 and kind == "forget"
+                label = self._t("b_forget_n", n=forgets.index(tap) + 1) if several else self._t(f"b_{kind}")
+                rows.append([Button(label, f"{'f' if kind == 'forget' else 'x'}:{mem}")])
+            elif tap in CODES:
+                rows.append([Button(self._t(f"b_{tap}"), f"{CODES[tap]}:{cnv}")])
+        if body.get("decision") == "command" and self.handoff is not None:
+            said = [self._texts[m] for m in body["messages"] if m in self._texts]
+            if said:
+                self._said[evt] = "\n\n".join(said)
+                rows.append([Button(self._t("b_handoff", engine=self.handoff_name), f"k:{evt}")])
+        return rows
+
+    def _post_parts(self, text: str, rows: Sequence[Sequence[Button]]) -> list[str]:
+        """The text in parts of the chat's limit, the buttons on the last; the ids of the messages sent."""
+        parts = split_text(text, self.limit) or [text]
+        return [self._send(part, rows if n == len(parts) - 1 else ()) for n, part in enumerate(parts)]
+
+    def _own(self, kept: list[str], item: str) -> None:
+        if item not in kept:
+            kept.append(item)
+        for dropped in kept[:-OWN_KEPT]:
+            self._texts.pop(dropped, None)
+        del kept[:-OWN_KEPT]
 
     def _post(self, task: str, event: dict, attempts: int) -> None:
         kind, body = event["type"], event["body"]

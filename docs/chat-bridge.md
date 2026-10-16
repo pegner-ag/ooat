@@ -70,22 +70,43 @@ verification is raised, not retried. `follow(task, stop=event)` ends within a se
 ## Restarts
 
 Tasks live in the ledger, not in the bot. `bridge.last_event` maps each watched task to the last event `watch`
-handled; a bot that keeps it calls `watch(task, after=last_event)` after a restart, and nothing is posted twice. A
+handled; a bot that keeps it calls `watch(task, after=last_event)` after a restart, and nothing is posted twice. For
+conversations a bot keeps `bridge.state()` (its own message and task ids and each conversation's cursor), gives it
+back with `bridge.restore(state)` and calls `follow` again. A reply to a reception post sent before the restart is
+an ordinary message, which goes into the open conversation anyway; a Hand-over button from before it asks to send
+the message again. A
 task already closed returns at once. Buttons keep working, since they carry the
 ids. Replies to questions sent before the restart are not recognised (the bridge keeps question messages in memory):
 answer those with the buttons or in the web app.
 
 ## Conversations (the reception)
 
-The API also has conversations (design 08, ADR 0018): `send_message` hands a message to the reception, which
-answers it, asks one question, asks to confirm, or starts a task with criteria it writes itself, and keeps project
-memory. Its decisions arrive on `follow_conversation`. `Bridge` still submits each message as a task; it moves to
-conversations with plan 08c (the Telegram bot's task-04), together with the new buttons and `/pamet`.
+A bot with the reception (design 08, ADR 0018) sends each message with `converse` instead of `on_message`. The
+reception answers it, asks one question, asks to confirm, or starts a task with criteria it writes itself, and keeps
+project memory. `on_message`, one task per message, stays for a bot without the reception.
+
+| Chat action | `Bridge` | API |
+|---|---|---|
+| A message (with files) | `converse(text, message_id, files, replied_to)` → conversation id | `POST /conversations/messages` with the chat's project; `Idempotency-Key: <chat id>:<message id>`; a reply to one of the reception's posts sends its `conversation` and `reply_to` |
+| Replies | `follow(conversation, stop)` | follows `GET /conversations/{id}/events` until `CONVERSATION_CLOSED`. It posts each `RECEPTION_DECIDED` on the bridge's own messages, with its numbered options (`1. …`) and buttons, and the `CONVERSATION_REPORTED` of each task those decisions started. A task started goes to `on_task` (the bot watches it with `watch`), a project switch to `on_switch` |
+| Yes, Differently, New thing, Make it a task, Keep as an open point | `on_button` with `y:`, `d:`, `n:`, `t:`, `o:` + `<conversation>` | `POST /conversations/{id}/taps`; the decision in the response is posted at once, and not again from the stream |
+| Forget, Done | `on_button` with `f:` / `x:` + `<memory>` | `DELETE` / `PATCH /memory/{scope}/{memory}`, the scope from the post that showed the button (else the chat's project); they keep working after the conversation closes |
+| Hand a command to another engine | `on_button` with `k:<event>`, only when the bot set `handoff` | none: the bot's `handoff(text)` gets the text of the bridge's own messages behind that `command` decision, once |
+| `/pamet` | `show_memory()` | `GET /memory/{project}`: pinned items, open points (each with Done and Forget), the last summary |
+
+A bridge posts only the replies to its own messages and the reports of its own tasks, so several bots that share a
+token and a chat id never post one reply twice. A reply above the token's data class is the notice to open the web
+app, without buttons. The reception waits for a quiet window after the last message (60 s by default) before it
+decides, so a bot should show that the message arrived (the Telegram bot reacts with 👀).
+
+The callbacks are attributes the bot sets: `on_task(task)`, `on_switch(project) -> text or None` (a text is posted
+when the switch could not be applied), `handoff(text)` with `handoff_name` for the button's label.
 
 ## What changes for a bot that ran a coding CLI
 
 An OOAT task in F1 turns text into a document; for a project mapped in `ooat.toml` it also reads and edits the
-project's files through OOAT's own tools (ADR 0017), but it runs no commands. It has no conversation
-memory (each message is its own task, with clarifications inside the task), and every task pays for the Gate and
-the acceptance checks. Add the bridge as one more engine a chat can switch to (`/engine ooat`), next to the direct
-CLI, until tool capabilities and sessions exist (owner decision).
+project's files through OOAT's own tools (ADR 0017), but it runs no commands. With the reception a question is
+answered without a task, the conversation and project memory carry over between messages, and a command (commit,
+push, restart) is said to be out of reach, with a button that hands it to the chat's coding CLI when the bot offers
+one. Every task still pays for the Gate and the acceptance checks. Add the bridge as one more engine a chat can
+switch to (`/engine ooat`), next to the direct CLI, until tool capabilities and sessions exist (owner decision).
