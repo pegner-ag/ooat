@@ -15,7 +15,9 @@ for event in client.follow(task):                     # the task's timeline, unt
 For the reception (design 08), `client.send_message(project=..., text=...)` returns `{conversation, message}` at
 once, and the decision comes on `client.follow_conversation(conversation)`, with its reply, buttons and the task it
 started. `client.tap(conversation, "yes")` presses a button. `client.memory(scope)`, `client.forget(scope, mem)`
-and `client.done(scope, mem)` read project memory, forget an item and mark an open point done.
+and `client.done(scope, mem)` read project memory, forget an item and mark an open point done. A chat bot uses
+`Bridge.converse(text, message_id)` for a message, runs `Bridge.follow(conversation)` in a thread to post the
+replies, and sets `bridge.on_task` to start `watch` for each task the reception starts.
 
 `client.revert(task)` writes back the originals of the project files a closed task changed (design 07); ask the
 operator to confirm before calling it. `Bridge` posts a task's diff with its result and offers revert with a
