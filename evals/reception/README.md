@@ -19,3 +19,17 @@ The figures it prints are compared with design 08 §1:
 
 `example.json` is made up. The owner's own messages are the owner's data. They stay outside the repository until
 the owner has picked them and removed anything sensitive.
+
+## Growing the set
+
+Corrections are where the reception was wrong, so they are the best cases. Export them, with the tasks the operator
+rejected, to a file outside the repository:
+
+    python evals/candidates.py --config ooat.toml --out ../reception-candidates.json
+
+A candidate has `expected` left empty, and `run.py` refuses such a case. The owner writes the expected decision,
+removes anything sensitive and saves the picked cases in `cases/`. From there they run as one set:
+
+    python evals/reception/run.py --config ooat.toml --cases evals/reception/cases --min-expected 0.8
+
+The run exits with 1 below the share given, so it can guard a change of the reception's prompt.

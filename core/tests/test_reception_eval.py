@@ -1,6 +1,7 @@
 """The eval runner for the reception's message set (plan 08a task 11)."""
 
 import importlib.util
+import json
 from pathlib import Path
 
 import pytest
@@ -58,3 +59,36 @@ def test_the_runner_decides_in_a_scratch_ledger(tmp_path):
     ledger = Ledger.open(url)
     assert len(ledger.events()) == before  # nothing written to the operator's ledger
     ledger.close()
+
+
+def test_a_candidate_with_no_expected_decision_is_refused():
+    with pytest.raises(ValueError, match="case 1: expected"):
+        run.load_cases(json.dumps([{"text": "x", "expected": None}]))
+
+
+def test_a_picked_candidate_keeps_its_extra_keys():
+    assert run.load_cases(json.dumps([{"text": "x", "expected": "task", "got": "confirm", "correction": "y",
+                                       "then": "task"}]))[0]["got"] == "confirm"
+
+
+def test_a_folder_of_cases_is_read_in_name_order(tmp_path):
+    (tmp_path / "b.json").write_text(json.dumps([{"text": "b", "expected": "task"}]), encoding="utf-8")
+    (tmp_path / "a.json").write_text(json.dumps([{"text": "a", "expected": "ask"}]), encoding="utf-8")
+    assert [c["text"] for c in run.load_folder(tmp_path)] == ["a", "b"]
+
+
+def test_a_bad_file_in_the_folder_is_named(tmp_path):
+    (tmp_path / "a.json").write_text(json.dumps([{"text": "a"}]), encoding="utf-8")
+    with pytest.raises(ValueError, match="a.json: case 1"):
+        run.load_folder(tmp_path)
+
+
+def test_the_committed_cases_load():
+    folder = RUNNER.parent / "cases"
+    if any(folder.glob("*.json")):
+        run.load_folder(folder)
+
+
+def test_a_run_below_the_minimum_share_falls_short():
+    assert run.short_of({"as_expected": 0.75}, 0.8) and not run.short_of({"as_expected": 0.8}, 0.8)
+    assert not run.short_of({"as_expected": 0.1}, None)
