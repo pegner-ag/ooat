@@ -127,3 +127,21 @@ test("follow stops on the server's refusal instead of trying again", async () =>
   await assert.rejects(api.follow("tsk_1", null, () => {}, new AbortController().signal),
     (/** @type {ApiError} */ error) => error.code === "NOT_FOUND");
 });
+
+test("followConversation reads the conversation's stream and stops at CONVERSATION_CLOSED", async () => {
+  /** @type {[string, string | null][]} */
+  const calls = [];
+  const responses = [stream([sse("evt_1", "RECEPTION_DECIDED")]), stream([sse("evt_2", "CONVERSATION_CLOSED"),
+    sse("evt_3", "RECEPTION_DECIDED")])];
+  const api = createApi({storage, onSignedOut: () => assert.fail("signed out"), sleep: async () => {},
+    fetch: async (url, init) => {
+      calls.push([String(url), /** @type {Record<string, string>} */ (init?.headers)["Last-Event-ID"] ?? null]);
+      return /** @type {Response} */ (responses.shift());
+    }});
+  /** @type {string[]} */
+  const seen = [];
+  await api.followConversation("cnv_1", null, (event) => seen.push(event.id), new AbortController().signal);
+  assert.deepEqual(seen, ["evt_1", "evt_2"]);
+  assert.deepEqual(calls, [["/api/v1/conversations/cnv_1/events", null], ["/api/v1/conversations/cnv_1/events",
+    "evt_1"]]);
+});

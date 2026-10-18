@@ -9,8 +9,14 @@ cases in `evals/`; `ooat-core` has the ledger foundation, the provider gateway
 with model and decision connectors, the Topology Gate for T0–T2 and the task runtime with the `ooat task` and
 `ooat hil` commands, and `ooat serve` with the REST API, sessions, operator tokens, the task runner and the web app (no teams yet).
 
-`ooat serve` opens the web app: the inbox (new task, questions and ratings waiting, tasks paused by a provider
-failure, all tasks), a task page (live timeline, the document of every attempt rendered, as source or as a diff,
+`ooat serve` opens the web app. Its home page is one box like a search field with a project picker (the projects of
+`ooat.toml` and those already used, from `GET /projects`; the last one is remembered). The conversation with the
+reception runs below it: replies with numbered options and buttons, a link to each task it started, and the task's
+report. Then the project's earlier conversations, a folded form for a task with exact criteria, and the inbox's lists
+(questions and ratings waiting, tasks paused by a provider failure, all tasks). A conversation has its own page,
+read only unless it is open on the web. Memory lists a project's items and the operator's preferences, with add (by
+hand, `POST /memory/{scope}`, web session only), edit, pin, done and forget. The app also has a task page
+(live timeline, the document of every attempt rendered, as source or as a diff,
 attachments, cancel, the rating card; for a task on a project's folders the files OOAT saw change, the diff and
 revert behind a confirm step, also for a limit question's `revert` answer), Usage (spend, calls and tokens by role and by connector) and Connectors (the
 consequences card, enable with a typed confirmation, disable, hooks). English or Czech. The app is plain
@@ -20,14 +26,15 @@ The first `ooat serve` sets OOAT up in the user data folder and opens Setup in t
 the connectors found, a chat bridge token, a sample task); `ooat init` walks the same steps in the terminal.
 
 Bots use the Python client `ooat-client` (`sdk/python`, standard library only) and its reference chat bridge: a
-chat message becomes a task, questions come with buttons, the result with a rating, and `/stats` shows usage. The
+chat message goes to the reception (or becomes a task, for a bot without it), questions come with buttons, the result
+with a rating, `/pamet` shows the project's memory and `/stats` shows usage. The
 contract is in `docs/chat-bridge.md`.
 
 A reception in `ooat-core` (design 08, ADR 0018) turns a person's messages into answers, one question, a
 confirmation or a task with criteria it writes itself, within a conversation that continues across tasks and with
-project memory the operator can forget. It is in the REST API (`/conversations`, `/memory`), the Python client and
-`ooat ask`; the web app and the chat bridge move to it with plans 08b and 08c. `evals/reception/` measures it
-against a message set.
+project memory the operator can forget. It is in the REST API (`/conversations`, `/memory`, `/projects`), the
+Python client, `ooat ask`, the web app's home page and the chat bridge. `evals/reception/` measures it against a
+message set.
 
 ## Technology
 In use:

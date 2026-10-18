@@ -368,11 +368,19 @@ def app_routes() -> APIRouter:
     def page() -> Response:
         return Response(shell, media_type="text/html; charset=utf-8")
 
-    for path in ("/", "/usage", "/connectors", "/setup"):
+    for path in ("/", "/usage", "/connectors", "/setup", "/memory"):
         router.add_api_route(path, page, methods=["GET"])
 
     @router.get("/tasks/{task}")
     def task_page(task: str) -> Response:  # the page reads the id from its address
+        return page()
+
+    @router.get("/conversations/{conversation}")
+    def conversation_page(conversation: str) -> Response:
+        return page()
+
+    @router.get("/memory/{scope_name}")
+    def memory_page(scope_name: str) -> Response:
         return page()
 
     @router.get("/app/{path:path}")
