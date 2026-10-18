@@ -8,8 +8,10 @@ buttons, the tasks it started and their reports. A project's **Memory** page and
 list memory items with edit, pin, done and forget.
 
 **Architecture:**
-- The web app uses the 08a REST API as it is. The server gains one read endpoint, `GET /api/v1/projects`, because
-  nothing lists the projects of `ooat.toml` today. It also serves the app's shell at the new addresses.
+- The web app uses the 08a REST API. The server gains two endpoints and serves the app's shell at the new
+  addresses:
+  - `GET /api/v1/projects`, because nothing lists the projects of `ooat.toml` today;
+  - `POST /api/v1/memory/{scope}`, for an item added by hand (the owner, 2026-10-18).
 - One new pure module, `conversation.js`, turns a conversation's events into what the page shows. It is tested in
   Node like `timeline.js`.
 - Two new views:
@@ -63,9 +65,18 @@ endpoint.
 6. **Enter sends, Shift+Enter makes a new line.** After sending, the message shows at once with a status line:
    "Received. The reception replies once you stop writing for a moment." The status line never names a number of
    seconds, which is `[reception] batch_seconds` on the server.
-7. **Memory items are not added by hand on the web.** No create endpoint exists, and "Remember …" in the box does it
-   through the reception, with the secret scan. The Memory page lists, edits, pins, marks done and forgets. It shows
-   done open points behind a toggle.
+7. **Memory items are added by hand on the web too (the owner, 2026-10-18).** A new `POST /api/v1/memory/{scope}`
+   takes `{kind, text, pinned?}`.
+   - Like editing and pinning, it needs the web session: a token gets 403 `SCOPE`, because a hand-written item
+     steers every later task.
+   - The kinds are `fact`, `glossary`, `preference` and `todo`. A `summary` is the reception's own.
+   - The scope `operator` takes only `preference`, at most 20 of them, as `memory.note` holds.
+   - It goes through `memory.note`, so the secret scan refuses a token-like text (400 `SECRET_REFUSED`) and personal
+     data raises the item's class. The item starts at the project's data class, as an item noted from a message does.
+   - The source is `web`.
+
+   "Remember …" in the box still works through the reception. The Memory page lists, adds, edits, pins, marks done
+   and forgets, with done open points behind a toggle.
 8. **The header's navigation gains "Memory".** It links to the Memory page of the project last chosen in the picker.
    From there, one link leads to the Operator preferences page. The nav does not grow by two entries.
 
@@ -90,9 +101,9 @@ today).
 
 | File | Responsibility |
 | --- | --- |
-| `core/src/ooat_core/endpoints.py` or `conversation_endpoints.py` (modify) | `GET /projects` |
+| `core/src/ooat_core/conversation_endpoints.py` (modify) | `GET /projects`, `POST /memory/{scope}` |
 | `core/src/ooat_core/api.py` (modify) | the shell for `/conversations/{id}`, `/memory/{scope}` |
-| `core/tests/test_conversation_api.py`, `core/tests/test_web.py` (modify) | the endpoint, the shell paths |
+| `core/tests/test_api_conversations.py`, `core/tests/test_web.py` (modify) | the endpoints, the shell paths |
 | `core/src/ooat_core/web/app/api.js` (modify) | `follow` for a task or a conversation |
 | `core/src/ooat_core/web/app/conversation.js` (create) | events → shown turns; tap labels; open conversation |
 | `core/src/ooat_core/web/app/views/home.js` (create) | the box, the picker, the live conversation, the lists |
@@ -103,16 +114,19 @@ today).
 | `core/web-tests/conversation.test.mjs` (create), `core/web-tests/api.test.mjs` (modify) | Node tests |
 | `docs/description.md` (modify) | the web app as built |
 
-### Task 1: The project list and the new addresses
+### Task 1: The project list, an item by hand, and the new addresses
 
 **Files:**
 - Modify: `core/src/ooat_core/conversation_endpoints.py` (the route sits with the conversations, which need it),
   `core/src/ooat_core/api.py`
-- Test: `core/tests/test_conversation_api.py`, `core/tests/test_web.py`
+- Test: `core/tests/test_api_conversations.py`, `core/tests/test_web.py`
 
 **Interfaces:**
-- Produces: `GET /api/v1/projects -> {"projects": [{"project": str, "data_class": str, "write": bool,
-  "folders": int}]}`, plus the app shell at `/conversations/{conversation}`, `/memory/{scope}`.
+- Produces:
+  - `GET /api/v1/projects -> {"projects": [{"project": str, "data_class": str, "write": bool, "folders": int}]}`;
+  - `POST /api/v1/memory/{scope}` with `{kind, text, pinned?}`, which returns 201 with the item as
+    `views.memory_view` shows it;
+  - the app shell at `/conversations/{conversation}` and `/memory/{scope}`.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -131,13 +145,37 @@ def test_projects_never_returns_a_folder_path(tmp_path):
     assert str(tmp_path) not in served.client.get("/api/v1/projects", headers=served.web()).text
 ```
 
+def test_an_item_by_hand_needs_the_web_and_passes_the_secret_scan(tmp_path):
+    s = served(tmp_path)
+    body = {"kind": "fact", "text": "Ceny jsou s DPH.", "pinned": True}
+    refused = s.client.post("/api/v1/memory/docs", headers=s.token(), json=body)
+    assert refused.status_code == 403 and refused.json()["error"]["code"] == "SCOPE"
+    made = s.client.post("/api/v1/memory/docs", headers=s.login(), json=body)
+    assert made.status_code == 201
+    assert made.json() | {"memory": None, "noted": None} == {"memory": None, "scope": "docs", "kind": "fact",
+        "data_class": "internal", "text": "Ceny jsou s DPH.", "pinned": True, "done": False, "noted": None,
+        "source": "web", "conversation": None}
+    secret = s.client.post("/api/v1/memory/docs", headers=s.login(), json={"kind": "fact", "text": "password=hunter22"})
+    assert secret.status_code == 400 and "hunter22" not in secret.text
+
+
+def test_an_item_by_hand_keeps_to_its_kinds(tmp_path):
+    s = served(tmp_path)
+    web = s.login()
+    for scope, kind in (("docs", "summary"), ("operator", "fact")):
+        response = s.client.post(f"/api/v1/memory/{scope}", headers=web, json={"kind": kind, "text": "Krátce."})
+        assert response.status_code == 400, (scope, kind)
+    assert s.client.post("/api/v1/memory/operator", headers=web,
+                         json={"kind": "preference", "text": "Odpovídej česky."}).status_code == 201
+```
+
 Add `"/conversations/cnv_01ABC"`, `"/memory/docs"` and `"/memory/operator"` to the paths of
-`test_the_app_shell_is_served_for_each_screen_without_a_session`. Use the fixtures the file already has; the names
-above (`Served(projects=…)`, `message`, `token`, `web`) are to be matched to them.
+`test_the_app_shell_is_served_for_each_screen_without_a_session`. Use the fixtures the file already has: `served`,
+`send`, `s.token(cap=…)`, `s.login()`, and `Served(config=parse_config({"projects": …}))` for configured projects.
 
 - [ ] **Step 2: Run them and see them fail** — `.venv/Scripts/python -m pytest -q -p no:cacheprovider
-  core/tests/test_conversation_api.py core/tests/test_web.py`. Expected: 404 for `/api/v1/projects` and the new
-  shell paths.
+  core/tests/test_api_conversations.py core/tests/test_web.py`. Expected: 404 for `/api/v1/projects` and the new
+  shell paths, 405 for the POST.
 
 - [ ] **Step 3: Implement**
 
@@ -158,14 +196,41 @@ above (`Served(projects=…)`, `message`, `token`, `web`) are to be matched to t
         return {"projects": [listed[slug] for slug in sorted(listed)]}
 ```
 
-Check the actor field of `TASK_SUBMITTED` against `views.task_summary` (a task's submitter) before relying on
-`actor.id`. In `app_routes`, add `/conversations/{conversation}` and `/memory/{scope}` like `/tasks/{task}`.
+```python
+class MemoryIn(_Body):
+    kind: str = Field(pattern=r"^(fact|glossary|preference|todo)$")
+    text: str = Field(min_length=1, max_length=memory.MAX_TEXT)
+    pinned: bool = False
+
+
+    @api.post("/memory/{scope_name}", status_code=201)
+    def add_memory(scope_name: str, body: MemoryIn, request: Request,
+                   who: Principal = Depends(scope("answer"))) -> dict:
+        server = server_of(request)
+        if who.channel != "web":  # a hand-written item steers every later task, as a pinned one (design 08 §8)
+            raise ApiError(403, "SCOPE", "adding memory needs the web app; tell the reception \"remember …\"")
+        if scope_name == memory.OPERATOR_SCOPE and body.kind != "preference":
+            raise ApiError(400, "INVALID", "the operator's memory holds preferences only")
+        data_class = "internal" if scope_name == memory.OPERATOR_SCOPE else project_class(server, scope_name)
+        require_within(who, data_class)
+        if server.memory is None:
+            raise ApiError(404, "NOT_FOUND", "this ledger keeps no memory")
+        item = memory.note(server.runtime().ledger, server.memory, scope=scope_name, kind=body.kind, text=body.text,
+                           data_class=data_class, source="web", actor={"kind": "hil", "id": who.operator},
+                           pinned=body.pinned, channel=who.channel)
+        return views.memory_view(item)
+```
+
+`memory.note`'s `ValueError` (a bad scope, twenty preferences) is to be mapped to 400 `INVALID` where the API maps
+its errors (`api.py`, beside `SecretRefused`), unless a plain `ValueError` is mapped there already.
+
+In `app_routes`, add `/conversations/{conversation}` and `/memory/{scope}` like `/tasks/{task}`.
 
 - [ ] **Step 4: Run the tests and see them pass**, then the whole core suite.
 
 - [ ] **Step 5: Commit** — `git add core/src/ooat_core/conversation_endpoints.py core/src/ooat_core/api.py
-  core/tests/test_conversation_api.py core/tests/test_web.py`, then
-  `git commit -m "feat: GET /projects for the picker, the shell for the new pages (08b task 1)"`.
+  core/tests/test_api_conversations.py core/tests/test_web.py docs/description.md` (the REST list there gains both
+  endpoints), then `git commit -m "feat: GET /projects, POST /memory/{scope} and the new pages' shell (08b task 1)"`.
 
 ### Task 2: What a conversation shows, and following it
 
@@ -334,8 +399,8 @@ only when the conversation is open and its channel is `web`; otherwise the page 
 - Modify: `app.js`, `app.css`, `i18n/en.js`, `i18n/cs.js`
 
 **Interfaces:**
-- Consumes: `GET /memory/{scope}?done=…`, `PATCH /memory/{scope}/{mem}` (`text`, `pinned`, `done`), and
-  `DELETE /memory/{scope}/{mem}`.
+- Consumes: `GET /memory/{scope}?done=…`, `POST /memory/{scope}` (task 1), `PATCH /memory/{scope}/{mem}`
+  (`text`, `pinned`, `done`), and `DELETE /memory/{scope}/{mem}`.
 - Produces: `memoryPage(root, ctx, scope)` for `/memory/{scope}`. The scope `operator` is the Operator preferences
   page.
 
@@ -350,6 +415,9 @@ The page:
   - **Pin**/**Unpin** sends `PATCH {pinned}`.
   - **Done** (todo only) sends `PATCH {done: true}`.
   - **Forget** asks `confirm(t("memory.forgetConfirm"))`, then sends `DELETE`.
+- An **Add** form above the list: a kind select (`fact`, `glossary`, `todo`, `preference`; only `preference` on the
+  preferences page), a text field, a **Pin** checkbox, and **Add**. A refusal (the secret scan, 400) is shown under
+  it, and the typed text stays.
 - A checkbox "show done open points" reloads with `done=true`.
 - One muted line says that forgetting deletes the text, and that the message it came from stays in the conversation
   (design §7).
@@ -359,11 +427,12 @@ The page:
 - [ ] **Step 1: Strings** (en, cs): `memory.title`, `memory.preferences`, `memory.toPreferences`,
   `memory.toProject`, `memory.kind.*` for the five kinds and pinned, `memory.edit`, `memory.save`, `memory.cancel`,
   `memory.pin`, `memory.unpin`, `memory.done`, `memory.forget`, `memory.forgetConfirm`, `memory.showDone`,
-  `memory.empty`, `memory.source`, `memory.forgetNote`.
+  `memory.empty`, `memory.source`, `memory.forgetNote`, `memory.add`, `memory.addText`, `memory.addPinned`,
+  `memory.byHand`.
 - [ ] **Step 2: Write `views/memory.js`**, its route in `app.js` (`/^\/memory\/([a-z0-9_-]+)$/`) and the nav entry.
 - [ ] **Step 3: Run `npm run check` and `npm test`.**
 - [ ] **Step 4: Check in the browser:**
-  - edit, pin, done and forget an item;
+  - add an item by hand, then edit, pin, mark done and forget one;
   - an edit holding a token-like text is refused, with the reason shown;
   - a forgotten item is gone after a reload, and from the next reception context (`ooat ask` in the same project).
 - [ ] **Step 5: Commit** — `git add core/src/ooat_core/web/app/views/memory.js` and the modified files by name, then
