@@ -135,10 +135,12 @@ def find(events: list[dict], mem_id: str) -> dict | None:
     return noted
 
 
-def note(ledger: Ledger, store: MemoryStore, *, scope: str, kind: str, text: str, data_class: str, source: str,
-         actor: dict, conversation: str | None = None, pinned: bool = False, channel: str | None = None) -> MemoryItem:
+def note(ledger: Ledger, store: MemoryStore, *, scope: str, kind: str, text: str, data_class: str,
+         source: str | None, actor: dict, conversation: str | None = None, pinned: bool = False,
+         channel: str | None = None) -> MemoryItem:
     """Store a new item: its text in the store, then MEMORY_NOTED. A text the ledger refuses to record is deleted
-    again, so no text is kept without its event."""
+    again, so no text is kept without its event. An item written by hand (`source` None) has its own MEMORY_NOTED
+    as its source: the operator's act is where it came from."""
     if kind not in KINDS:
         raise ValueError(f"a memory kind is one of {', '.join(KINDS)}")
     if not _SCOPE.match(scope):
@@ -158,12 +160,15 @@ def note(ledger: Ledger, store: MemoryStore, *, scope: str, kind: str, text: str
         body["pinned"] = True
     if channel is not None:
         body["channel"] = channel
+    event = new_event("MEMORY_NOTED", task=None, actor=actor, body=body)
+    body["source"] = source or event["id"]
     try:
-        event = ledger.append(new_event("MEMORY_NOTED", task=None, actor=actor, body=body))
+        event = ledger.append(event)
     except BaseException:
         store.delete(mem_id)
         raise
-    return MemoryItem(mem_id, scope, kind, data_class, source, text, pinned, False, event["ts"], conversation)
+    return MemoryItem(mem_id, scope, kind, data_class, body["source"], text, pinned, False, event["ts"],
+                      conversation)
 
 
 def edit(ledger: Ledger, store: MemoryStore, mem_id: str, *, operator: str, channel: str, text: str | None = None,

@@ -45,6 +45,12 @@ class TapIn(_Body):
     text: str | None = Field(default=None, max_length=20000)
 
 
+class MemoryIn(_Body):
+    kind: str = Field(pattern=r"^(fact|glossary|preference|todo)$")  # a summary is the reception's own
+    text: str = Field(min_length=1, max_length=memory.MAX_TEXT)
+    pinned: bool = False
+
+
 class MemoryEditIn(_Body):
     text: str | None = Field(default=None, min_length=1, max_length=memory.MAX_TEXT)
     pinned: bool | None = None
@@ -152,6 +158,39 @@ def conversation_routes() -> APIRouter:
             return {"events": shown, "next": shown[-1]["id"] if shown else cursor}
         return StreamingResponse(_stream(server, conversation, cursor, lambda: scope("read")(principal(request))),
                                  media_type="text/event-stream")
+
+    @api.get("/projects")
+    def list_projects(request: Request, who: Principal = Depends(scope("read"))) -> dict:
+        """What a project picker offers (design 08 §9): the projects of ooat.toml within the reader's cap, then the
+        projects of the reader's own conversations and tasks that ooat.toml lacks. Names only, never a folder."""
+        server = server_of(request)
+        listed = {slug: {"project": slug, "data_class": p.data_class, "write": p.write, "folders": len(p.folders)}
+                  for slug, p in server.config.projects.items() if views.within(p.data_class, who.max_data_class)}
+        for event in server.runtime().ledger.events(types=["TASK_SUBMITTED", "CONVERSATION_MESSAGE"]):
+            slug = event["body"].get("project")
+            if slug and slug not in listed and slug not in server.config.projects \
+                    and event["actor"]["id"] == who.operator:
+                listed[slug] = {"project": slug, "data_class": "internal", "write": False, "folders": 0}
+        return {"projects": [listed[slug] for slug in sorted(listed)]}
+
+    @api.post("/memory/{scope_name}", status_code=201)
+    def add_memory(scope_name: str, body: MemoryIn, request: Request,
+                   who: Principal = Depends(scope("answer"))) -> dict:
+        server = server_of(request)
+        if who.channel != "web":
+            # An item written by hand steers every later task, as a pinned one: a named operator's session only.
+            raise ApiError(403, "SCOPE", "adding memory needs the web app; a token's message may ask the reception "
+                                         "to remember")
+        if scope_name == memory.OPERATOR_SCOPE and body.kind != "preference":
+            raise ApiError(400, "INVALID", "the operator's memory holds preferences only")
+        data_class = "internal" if scope_name == memory.OPERATOR_SCOPE else project_class(server, scope_name)
+        require_within(who, data_class)
+        if server.memory is None:
+            raise ApiError(404, "NOT_FOUND", "this ledger keeps no memory")
+        item = memory.note(server.runtime().ledger, server.memory, scope=scope_name, kind=body.kind, text=body.text,
+                           data_class=data_class, source=None, actor={"kind": "hil", "id": who.operator},
+                           pinned=body.pinned, channel=who.channel)
+        return views.memory_view(item)
 
     @api.get("/memory/{scope_name}")
     def list_memory(scope_name: str, request: Request, kind: str | None = None, done: bool = False,

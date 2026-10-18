@@ -221,3 +221,54 @@ def test_a_delete_may_go_without_a_length_but_never_with_a_streamed_body(tmp_pat
     response = s.client.request("DELETE", url, headers={**s.token(), "Transfer-Encoding": "chunked"}, content=b"")
     assert response.status_code == 411 and s.server.memory.read(item.id) is not None
     assert s.client.delete(url, headers=s.token()).status_code == 200
+
+
+def test_projects_lists_the_configured_ones_within_the_cap_and_those_seen(tmp_path):
+    for name in ("Docs", "Hr"):
+        (tmp_path / name).mkdir()
+    config = parse_config({"reception": {"batch_seconds": 0}, "projects": {
+        "docs": {"folders": [str(tmp_path / "Docs")]},
+        "hr": {"folders": [str(tmp_path / "Hr")], "data_class": "personal"}}})
+    s = Served(tmp_path, model=ReceptionModel(), config=config)
+    bot = s.token()
+    s.client.post("/api/v1/conversations/messages", headers=bot, json={"project": "eshop", "text": "Ahoj."})
+    s.client.post("/api/v1/conversations/messages", headers=s.token(), json={"project": "docs", "text": "Ahoj."})
+    listed = s.client.get("/api/v1/projects", headers=bot)
+    assert listed.json() == {"projects": [
+        {"project": "docs", "data_class": "internal", "write": False, "folders": 1},
+        {"project": "eshop", "data_class": "internal", "write": False, "folders": 0}]}
+    assert str(tmp_path.name) not in listed.text  # names only, never a folder
+    other = s.client.get("/api/v1/projects", headers=s.login(operator="someone else")).json()["projects"]
+    assert [p["project"] for p in other] == ["docs", "hr"]  # another operator's projects stay theirs
+
+
+def test_an_item_by_hand_needs_the_web_and_passes_the_secret_scan(tmp_path):
+    s = served(tmp_path)
+    body = {"kind": "fact", "text": "Ceny jsou s DPH.", "pinned": True}
+    refused = s.client.post("/api/v1/memory/docs", headers=s.token(), json=body)
+    assert refused.status_code == 403 and refused.json()["error"]["code"] == "SCOPE"
+    web = s.login()
+    made = s.client.post("/api/v1/memory/docs", headers=web, json=body)
+    assert made.status_code == 201, made.text
+    item = made.json()
+    assert item | {"memory": None, "noted": None, "source": None} == {
+        "memory": None, "scope": "docs", "kind": "fact", "data_class": "internal", "text": "Ceny jsou s DPH.",
+        "pinned": True, "done": False, "noted": None, "source": None, "conversation": None}
+    noted_event = next(e for e in s.server.runtime().ledger.events(types=["MEMORY_NOTED"]))
+    assert item["source"] == noted_event["id"] and noted_event["actor"] == {"kind": "hil", "id": "operator"}
+    assert [i["text"] for i in s.client.get("/api/v1/memory/docs", headers=web).json()["items"]] == [
+        "Ceny jsou s DPH."]
+    secret = s.client.post("/api/v1/memory/docs", headers=web, json={"kind": "fact", "text": "password=hunter22"})
+    assert secret.status_code == 400 and secret.json()["error"]["code"] == "SECRET_REFUSED"
+    assert "hunter22" not in secret.text
+
+
+def test_an_item_by_hand_keeps_to_its_kinds(tmp_path):
+    s = served(tmp_path)
+    web = s.login()
+    for scope_name, kind in (("docs", "summary"), ("operator", "fact"), ("Docs!", "fact")):
+        response = s.client.post(f"/api/v1/memory/{scope_name}", headers=web, json={"kind": kind, "text": "Krátce."})
+        assert response.status_code == 400, (scope_name, kind, response.text)
+    made = s.client.post("/api/v1/memory/operator", headers=web,
+                         json={"kind": "preference", "text": "Odpovídej česky."})
+    assert made.status_code == 201 and made.json()["scope"] == "operator"
