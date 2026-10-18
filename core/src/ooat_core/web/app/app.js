@@ -4,7 +4,9 @@ import { createApi, KEY_STORAGE } from "./api.js";
 import { h, report } from "./dom.js";
 import { money } from "./format.js";
 import { currentLanguage, setLanguage, t } from "./i18n.js";
-import { inbox } from "./views/inbox.js";
+import { home, storedProject } from "./views/home.js";
+import { conversationPage } from "./views/conversation.js";
+import { memoryPage } from "./views/memory.js";
 import { taskPage } from "./views/task.js";
 import { connectors } from "./views/connectors.js";
 import { usage } from "./views/usage.js";
@@ -18,8 +20,15 @@ const top = /** @type {HTMLElement} */ (document.getElementById("top"));
 /** @typedef {(root: HTMLElement, ctx: import("./api.js").Context, match: RegExpMatchArray) => Promise<void>} Screen */
 /** @type {[RegExp, Screen][]} */
 const ROUTES = [
-  [/^\/$/, (root, ctx) => inbox(root, ctx)],
+  [/^\/$/, (root, ctx) => home(root, ctx)],
+  [/^\/conversations\/(cnv_[A-Za-z0-9]+)$/, (root, ctx, match) => conversationPage(root, ctx, match[1])],
   [/^\/tasks\/([A-Za-z0-9_]+)$/, (root, ctx, match) => taskPage(root, ctx, match[1])],
+  [/^\/memory$/, (root, ctx) => {  // the header's Memory: the project last shown on the home page
+    const scope = storedProject() ?? "operator";
+    history.replaceState(null, "", `/memory/${scope}`);
+    return memoryPage(root, ctx, scope);
+  }],
+  [/^\/memory\/([a-z0-9][a-z0-9_-]*)$/, (root, ctx, match) => memoryPage(root, ctx, match[1])],
   [/^\/usage$/, (root, ctx) => usage(root, ctx)],
   [/^\/connectors$/, (root, ctx) => connectors(root, ctx)],
   [/^\/setup$/, (root, ctx) => setup(root, ctx)],
@@ -27,6 +36,7 @@ const ROUTES = [
 /** @type {[string, () => string][]} */
 const NAV = [
   ["/", () => t("nav.inbox")],
+  ["/memory", () => t("nav.memory")],
   ["/usage", () => t("nav.usage")],
   ["/connectors", () => t("nav.connectors")],
   ["/setup", () => t("nav.setup")],

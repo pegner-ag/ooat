@@ -1,18 +1,21 @@
-// Home (design 05 §4): what waits for me, what is stuck, the tasks, and the box for a new task.
+// The lists of the home page (design 05 §4): what waits for me, what is stuck, the tasks; and the form for a task
+// with exact criteria, folded under the reception's box (design 08 §9, plan 08b).
 import { questionCard, ratingCard } from "../cards.js";
 import { h, report } from "../dom.js";
 import { ago, clock, money, title } from "../format.js";
 import { t } from "../i18n.js";
 
 const REFRESH_MS = 15_000;
-const MAX_ATTACHMENT_BYTES = 14 * 1024 * 1024;  // a request carries at most 20 MB; base64 adds a third
+export const MAX_ATTACHMENT_BYTES = 14 * 1024 * 1024;  // a request carries at most 20 MB; base64 adds a third
 const DATA_CLASSES = ["public", "internal", "client_confidential", "personal"];
 
-/** @param {HTMLElement} root @param {import("../api.js").Context} ctx */
-export async function inbox(root, ctx) {
+/**
+ * Waiting for you, stuck, and the tasks, refreshed every 15 s while the focus is outside them.
+ * @param {import("../api.js").Context} ctx
+ * @param {{known: (tasks: any[]) => void}} form told the listed tasks, for its project suggestions
+ */
+export async function taskLists(ctx, form) {
   const lists = h("div");
-  const form = newTask(ctx);
-  root.replaceChildren(h("h1", {}, t("inbox.title")), form.element, lists);
 
   async function draw() {
     const [tasks, questions, ratings] = await Promise.all([
@@ -36,6 +39,7 @@ export async function inbox(root, ctx) {
     if (!lists.contains(document.activeElement)) draw().catch((error) => report(lists, error));  // keep typed text
   }, REFRESH_MS);
   ctx.signal.addEventListener("abort", () => clearInterval(timer));
+  return lists;
 }
 
 /** @param {any} task */
@@ -53,8 +57,11 @@ function table(tasks) {
       h("td", {}, ago(task.updated, now))))));
 }
 
-/** @param {import("../api.js").Context} ctx */
-function newTask(ctx) {
+/**
+ * A task with exact criteria, data class and budget, in a closed <details>.
+ * @param {import("../api.js").Context} ctx
+ */
+export function taskForm(ctx) {
   const goal = h("textarea", {rows: "3", required: true, maxlength: "20000", placeholder: t("new.goal"),
     "aria-label": t("new.goal")});
   const acceptance = h("textarea", {rows: "2", placeholder: t("new.acceptance"), "aria-label": t("new.acceptance")});
@@ -70,7 +77,8 @@ function newTask(ctx) {
   const submit = h("button", {type: "submit"}, t("new.submit"));
   const status = h("p", {class: "status", role: "status"});
   let key = crypto.randomUUID();  // one Idempotency-Key per task typed in: a double click or a retry makes one task
-  if (new URLSearchParams(location.search).has("sample")) {  // Setup's last step: filled in, sent only on Submit
+  const sample = new URLSearchParams(location.search).has("sample");
+  if (sample) {  // Setup's last step: filled in, sent only on Submit
     goal.value = t("sample.goal");
     acceptance.value = t("sample.acceptance");
     project.value = "sample";
@@ -105,8 +113,9 @@ function newTask(ctx) {
     }
   }
 
-  const element = h("form", {class: "card new-task", onsubmit: send}, goal, acceptance,
-    h("div", {class: "row"}, project, projects, dataClass, budget, attachments, submit), status);
+  const element = h("details", {open: sample}, h("summary", {}, t("home.exactTask")),
+    h("form", {class: "card new-task", onsubmit: send}, goal, acceptance,
+      h("div", {class: "row"}, project, projects, dataClass, budget, attachments, submit), status));
   return {
     element,
     /** The projects of the listed tasks, offered as you type; the newest is the default. @param {any[]} tasks */
@@ -119,7 +128,7 @@ function newTask(ctx) {
 }
 
 /** @param {File} file @returns {Promise<string>} */
-function base64(file) {
+export function base64(file) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = () => resolve(String(reader.result).split(",", 2)[1] ?? "");

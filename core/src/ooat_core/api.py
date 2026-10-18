@@ -368,7 +368,7 @@ def app_routes() -> APIRouter:
     def page() -> Response:
         return Response(shell, media_type="text/html; charset=utf-8")
 
-    for path in ("/", "/usage", "/connectors", "/setup"):
+    for path in ("/", "/usage", "/connectors", "/setup", "/memory"):
         router.add_api_route(path, page, methods=["GET"])
 
     @router.get("/tasks/{task}")
