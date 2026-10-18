@@ -466,3 +466,31 @@ def test_a_tokens_message_never_raises_memory_above_its_cap(tmp_path):
                     channel=f"token:{issued['body']['token']}")["body"]
     kept = memory.items(desk.ledger.events(), desk.store, scope="docs")
     assert [i.text for i in kept] == ["Ceny jsou s DPH."] and len(body["memory"]) == 1
+
+
+def test_a_lesson_from_a_personal_batch_is_kept_at_the_batchs_class(tmp_path):
+    desk = Desk(tmp_path, [decision("confirm", "Mám začít?", confidence=0.5),
+                           decision("task", lesson={"kind": "preference", "text": "Tomuto klientovi piš formálně."})])
+    body = desk.ask("Napiš klientovi.")["body"]
+    desk.reception.tap(body["conversation"], "differently", operator="operator", channel="web",
+                       text="Panu Novákovi na jan.novak@example.cz, formálně.")
+    offered = desk.reception.decide(body["conversation"])["body"]
+    assert offered["data_class"] == "personal" and offered["lesson"]
+    tapped = desk.reception.tap(body["conversation"], "remember", operator="operator", channel="web")
+    assert tapped["decision"]["body"]["data_class"] == "personal"
+    assert desk.events("MEMORY_NOTED")[0]["body"]["data_class"] == "personal"
+
+
+def test_a_lesson_whose_own_text_raises_the_class_is_not_offered(tmp_path):
+    desk = Desk(tmp_path)
+    body = corrected(desk, {"kind": "fact", "text": "Kontakt: jan.novak@example.cz"})
+    assert "lesson" not in body and "jan.novak" not in body["reply"]
+
+
+def test_an_open_point_keeps_the_class_of_the_decision_it_comes_from(tmp_path):
+    desk = Desk(tmp_path, [decision("command", "Posílat e-maily neumím.", interpretation="Poslat klientovi nabídku.")])
+    body = desk.ask("Pošli nabídku na jan.novak@example.cz.")["body"]
+    assert body["data_class"] == "personal"
+    tapped = desk.reception.tap(body["conversation"], "todo", operator="operator", channel="web")
+    assert tapped["decision"]["body"]["data_class"] == "personal"
+    assert desk.events("MEMORY_NOTED")[0]["body"]["data_class"] == "personal"

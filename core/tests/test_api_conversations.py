@@ -290,3 +290,22 @@ def test_an_item_by_hand_above_the_sessions_cap_is_refused_not_orphaned(tmp_path
                              json={"kind": "fact", "text": "Jan Novák, jan.novak@example.cz, platí fakturou."})
     assert response.status_code == 403 and response.json()["error"]["code"] == "DATA_CLASS_ABOVE_TOKEN"
     assert s.client.get("/api/v1/memory/docs", headers=s.login()).json()["items"] == []
+
+
+def test_an_internal_token_cannot_remember_a_lesson_from_a_personal_decision(tmp_path):
+    s = served(tmp_path, decision("confirm", "Mám začít?", confidence=0.5),
+               decision("task", lesson={"kind": "preference", "text": "Tomuto klientovi piš formálně."}),
+               classes=PERSONAL_ROUTE)
+    web = s.login()
+    sent = send(s, web, "Napiš klientovi.")
+    decided(s, web, sent["conversation"])
+    tapped = s.client.post(f"/api/v1/conversations/{sent['conversation']}/taps", headers=web,
+                           json={"tap": "differently", "text": "Panu Novákovi na jan.novak@example.cz, formálně."})
+    assert tapped.status_code == 200, tapped.text
+    assert decided(s, web, sent["conversation"])[-1]["body"]["lesson"]
+    bot = s.token(cap="internal")
+    response = s.client.post(f"/api/v1/conversations/{sent['conversation']}/taps", headers=bot,
+                             json={"tap": "remember"})
+    assert response.status_code == 403 and response.json()["error"]["code"] == "DATA_CLASS_ABOVE_TOKEN"
+    with s.ledger() as ledger:
+        assert ledger.events(types=["MEMORY_NOTED"]) == []

@@ -173,8 +173,9 @@ class Reception:
                 raise ValueError("there is nothing to keep")
             text = last["body"].get("interpretation") or " ".join(
                 conversations.message_text(e) or "" for e in own if e["id"] in last["body"]["messages"])
+            decided["data_class"] = higher_class(decided["data_class"], last["body"]["data_class"])
             item = memory.note(self.ledger, self.store, scope=found.project, kind="todo", text=text,
-                               data_class=message["body"]["data_class"], source=message["id"],
+                               data_class=decided["data_class"], source=message["id"],
                                actor={"kind": "hil", "id": operator}, conversation=found.id, channel=channel)
             decided |= {"decision": "answer", "memory": [item.id], "buttons": [f"done:{item.id}", f"forget:{item.id}"],
                         "reply": reply(f"🧠 Otevřený bod: {item.text}", f"🧠 Open point: {item.text}")}
@@ -184,8 +185,9 @@ class Reception:
                 raise ValueError("there is nothing to remember")
             scope = memory.OPERATOR_SCOPE if lesson.get("scope") == "operator" and lesson["kind"] == "preference" \
                 else found.project
+            decided["data_class"] = higher_class(decided["data_class"], last["body"]["data_class"])
             item = memory.note(self.ledger, self.store, scope=scope, kind=lesson["kind"], text=lesson["text"],
-                               data_class=message["body"]["data_class"], source=message["id"],
+                               data_class=decided["data_class"], source=message["id"],
                                actor={"kind": "hil", "id": operator}, conversation=found.id, channel=channel)
             decided |= {"decision": "answer", "memory": [item.id], "buttons": [f"forget:{item.id}"],
                         "reply": reply(f"🧠 Zapamatováno: {item.text}", f"🧠 Remembered: {item.text}")}
@@ -499,8 +501,10 @@ class Reception:
         lesson = decision.get("lesson")
         corrected = any(m["body"].get("tap") == "differently" and m["body"].get("tap_text") for m in waiting)
         cap = self._channel_cap(channel)
-        if (lesson and corrected and self.store is not None and memory.looks_secret(lesson["text"]) is None
-                and (cap is None or ORDER.index(raised_class(data_class, lesson["text"])) <= ORDER.index(cap))):
+        if (lesson and corrected and self.store is not None and not result.get("read_files")
+                and memory.looks_secret(lesson["text"]) is None
+                and raised_class(data_class, lesson["text"]) == data_class  # a lesson never raises its decision
+                and (cap is None or ORDER.index(data_class) <= ORDER.index(cap))):
             result["lesson"] = lesson  # offered only: stored by the remember tap (plan 09 decision 5)
             result["reply"] = "\n\n".join([result["reply"], say(said, f"🧠 Zapamatovat si: {lesson['text']}?",
                                                                  f"🧠 Remember: {lesson['text']}?")])

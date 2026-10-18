@@ -91,3 +91,17 @@ def test_the_project_instructions_are_in_the_context(tmp_path, project):
     desk = Desk(tmp_path, projects=project, model=model)
     desk.ask("Jak uvádíme ceny?")
     assert "Web/CLAUDE.md:\nCeny vždy s DPH." in model.calls[0].prompt and "SECRET" not in model.calls[0].prompt
+
+
+def test_a_lesson_is_not_offered_with_an_answer_that_reads_files(tmp_path, project):
+    lesson = {"kind": "preference", "text": "Ceny uváděj vždy s DPH."}
+    model = ReceptionModel([decision("confirm", "Mám začít?", confidence=0.5),
+                            decision("answer", "Podívám se do souborů.", needs_files=True, lesson=lesson),
+                            "Cena testu je 2 990 Kč s DPH (Web/ceny.md)."],
+                           tools=(("read_file", {"path": "Web/ceny.md"}),))
+    desk = Desk(tmp_path, projects=project, model=model)
+    body = desk.ask("Cena?")["body"]
+    desk.reception.tap(body["conversation"], "differently", operator="operator", channel="web", text="S DPH.")
+    desk.reception.decide(body["conversation"])
+    assert all("lesson" not in e["body"] and "remember" not in e["body"]["buttons"]
+               for e in desk.events("RECEPTION_DECIDED"))

@@ -9,6 +9,7 @@ from collections.abc import Callable, Iterable
 from dataclasses import asdict, dataclass
 
 from .catalog import load_card
+from .pii import scan
 from .thresholds import (RECEPTION_POINT, quick_cancels, rated_decisions, reception_threshold, reception_verdicts,
                          threshold)
 
@@ -113,7 +114,8 @@ def _reception(events: list[dict]) -> tuple[list[dict], dict]:
     rows: dict[str, dict] = {}
     last: dict[str, dict] = {}  # conversation -> the row of its newest decision the person saw
     cancelled = quick_cancels(events)
-    offered = kept = 0
+    offered = 0
+    taps = set()  # the remember taps; one counts as kept when its item was stored
     for event in events:
         body = event["body"]
         if event["type"] == "RECEPTION_DECIDED" and body["decision"] not in REPLACED:
@@ -126,7 +128,9 @@ def _reception(events: list[dict]) -> tuple[list[dict], dict]:
         elif event["type"] == "CONVERSATION_MESSAGE" and body.get("tap") in ("differently", "remember"):
             if body["tap"] == "differently" and body["conversation"] in last:
                 last.pop(body["conversation"])["differently"] += 1
-            kept += body["tap"] == "remember"
+            if body["tap"] == "remember":
+                taps.add(event["id"])
+    kept = sum(1 for e in events if e["type"] == "MEMORY_NOTED" and e["body"].get("source") in taps)
     return (sorted(rows.values(), key=lambda r: (-r["count"], r["decision"])),
             {"lessons_offered": offered, "lessons_kept": kept})
 
@@ -136,6 +140,12 @@ def _memory(events: list[dict]) -> dict:
     noted = {e["body"]["memory"] for e in events if e["type"] == "MEMORY_NOTED" and e["actor"]["kind"] == "system"}
     forgotten = {e["body"]["memory"] for e in events if e["type"] == "MEMORY_FORGOTTEN"} & noted
     return {"noted": len(noted), "forgotten": len(forgotten)}
+
+
+def _plain(note: str | None) -> str | None:
+    """A rating note is the operator's free text with no class of its own: shown only when it holds no personal
+    data the scan recognises."""
+    return note if note is None or not scan(note) else None
 
 
 def _attention(events: list[dict], visible: Callable[[str], bool]) -> list[dict]:
@@ -148,7 +158,7 @@ def _attention(events: list[dict], visible: Callable[[str], bool]) -> list[dict]
         state = closed.get(event["task"], "")
         found.append({"task": event["task"], "state": state,
                       "why": "lazy_abstention" if state == ABSTAINED else "rejected",
-                      "note": event["body"].get("note")})
+                      "note": _plain(event["body"].get("note"))})
     return found[-ATTENTION:][::-1]
 
 

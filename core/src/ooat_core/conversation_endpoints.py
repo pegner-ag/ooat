@@ -107,8 +107,12 @@ def conversation_routes() -> APIRouter:
     @api.post("/conversations/{conversation}/taps")
     def tap(conversation: str, body: TapIn, request: Request, who: Principal = Depends(scope("answer"))) -> dict:
         server = server_of(request)
-        found, _ = own_conversation(server, who, conversation)
+        found, events = own_conversation(server, who, conversation)
         require_within(who, project_class(server, found.project))
+        if body.tap in ("remember", "todo"):  # the item keeps the class of the decision it comes from
+            last = conversations.last_decision(conversations.events_of(events, conversation))
+            if last is not None:
+                require_within(who, last["body"]["data_class"])
         if body.tap.startswith(("forget:", "done:")):
             mem_id = body.tap.split(":", 1)[1]
             events = server.runtime().ledger.events(types=memory.EVENTS)

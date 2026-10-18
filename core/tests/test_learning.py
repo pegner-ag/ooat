@@ -81,6 +81,8 @@ def test_reception_decisions_are_counted_with_the_differently_that_followed_them
                           ("decided", "escalated", {}),
                           ("decided", "answer", {"lesson": {"kind": "fact", "text": "x"}}),
                           ("tap", "remember"))
+    events.append({"id": new_id("evt"), "type": "MEMORY_NOTED", "task": None, "ts": "2026-10-19T10:00:06Z",
+                   "actor": {"kind": "hil", "id": "operator"}, "body": {"source": events[-1]["id"]}})
     found = summary(events, visible=lambda task: True, reception_interim=0.8)
     rows = {r["decision"]: r for r in found["reception"]}
     assert rows["confirm"] == {"decision": "confirm", "count": 1, "differently": 1, "cancelled": 0}
@@ -98,3 +100,19 @@ def test_a_rejected_task_needs_a_look_only_within_the_cap():
 def test_a_justified_abstention_does_not_need_a_look():
     found = summary(run("CLOSED_ABSTAINED", accepted=True), visible=lambda task: True, reception_interim=0.8)
     assert found["attention"] == []
+
+
+def test_a_refused_remember_tap_is_not_counted_as_kept():
+    events = conversation(("decided", "task", {"lesson": {"kind": "fact", "text": "x"}}), ("tap", "remember"),
+                          ("tap", "remember"))
+    tap = events[1]
+    events.insert(2, {"id": new_id("evt"), "type": "MEMORY_NOTED", "task": None, "ts": "2026-10-19T10:00:06Z",
+                      "actor": {"kind": "hil", "id": "operator"},
+                      "body": {"memory": new_id("mem"), "scope": "docs", "kind": "fact", "source": tap["id"]}})
+    assert summary(events, visible=lambda task: True, reception_interim=0.8)["memory"]["lessons_kept"] == 1
+
+
+def test_a_rating_note_with_personal_data_is_not_shown():
+    events = run(accepted=False)
+    events[-1]["body"]["note"] = "Volal Jan Novák, jan.novak@example.cz"
+    assert summary(events, visible=lambda task: True, reception_interim=0.8)["attention"][0]["note"] is None

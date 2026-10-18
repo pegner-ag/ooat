@@ -102,3 +102,11 @@ def test_main_writes_both_lists_outside_the_repository(candidates, tmp_path):
     with pytest.raises(ValueError, match="outside the repository"):
         candidates.main(["--config", str(tmp_path / "ooat.toml"), "--out", str(REPO / "evals" / "x.json")])
     assert not (REPO / "evals" / "x.json").exists()
+
+
+def test_a_rating_note_with_personal_data_raises_the_task_above_the_max_class(candidates):
+    task = new_id("tsk")
+    events = [{"id": new_id("evt"), "type": "TASK_SUBMITTED", "task": task, "refs": [], "body": {"goal": "x"}},
+              {"id": new_id("evt"), "type": "TASK_RATED", "task": task,
+               "body": {"accepted": False, "value_class": "C", "note": "Volal jan.novak@example.cz"}}]
+    assert candidates.task_candidates(events, "internal", task_class=lambda t: "internal") == ([], 1)

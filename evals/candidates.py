@@ -77,14 +77,17 @@ def reception_candidates(events: list[dict], max_class: str) -> tuple[list[dict]
 
 
 def task_candidates(events: list[dict], max_class: str, task_class: Callable[[str], str]) -> tuple[list[dict], int]:
-    """(cases, left out): every task rated rejected; `task_class(task)` is the class the task ran under."""
+    """(cases, left out): every task rated rejected; `task_class(task)` is the class the task ran under, raised by
+    personal data in the rating note, which has no class of its own."""
+    from ooat_core.pii import raised_class
+
     submitted = {e["task"]: e for e in events if e["type"] == "TASK_SUBMITTED"}
     closed = {e["task"]: e["body"]["state"] for e in events if e["type"] == "TASK_CLOSED"}
     cases, left_out = [], 0
     for event in events:
         if event["type"] != "TASK_RATED" or event["body"]["accepted"] or event["task"] not in submitted:
             continue
-        if not _within(task_class(event["task"]), max_class):
+        if not _within(raised_class(task_class(event["task"]), event["body"].get("note") or ""), max_class):
             left_out += 1
             continue
         task = submitted[event["task"]]["body"]
