@@ -272,3 +272,11 @@ def test_an_item_by_hand_keeps_to_its_kinds(tmp_path):
     made = s.client.post("/api/v1/memory/operator", headers=web,
                          json={"kind": "preference", "text": "Odpovídej česky."})
     assert made.status_code == 201 and made.json()["scope"] == "operator"
+
+
+def test_an_item_by_hand_above_the_sessions_cap_is_refused_not_orphaned(tmp_path):
+    s = served(tmp_path, host="192.168.1.10", hosts=("ooat.lan",), tls=True)  # beyond loopback: capped at internal
+    response = s.client.post("/api/v1/memory/docs", headers=s.login(),
+                             json={"kind": "fact", "text": "Jan Novák, jan.novak@example.cz, platí fakturou."})
+    assert response.status_code == 403 and response.json()["error"]["code"] == "DATA_CLASS_ABOVE_TOKEN"
+    assert s.client.get("/api/v1/memory/docs", headers=s.login()).json()["items"] == []

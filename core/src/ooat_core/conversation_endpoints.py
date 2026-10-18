@@ -20,6 +20,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from . import conversations, memory, views
 from .api import ApiError, Principal, Server, principal, require_within, scope, server_of
 from .endpoints import AttachmentIn
+from .pii import raised_class
 
 INTAKE_KEY = re.compile(r"^[!-~]{1,128}$")
 SSE_POLL_S, SSE_MAX_S = 1.0, 900.0
@@ -169,7 +170,7 @@ def conversation_routes() -> APIRouter:
         for event in server.runtime().ledger.events(types=["TASK_SUBMITTED", "CONVERSATION_MESSAGE"]):
             slug = event["body"].get("project")
             if slug and slug not in listed and slug not in server.config.projects \
-                    and event["actor"]["id"] == who.operator:
+                    and event["actor"]["id"] == who.operator and views.within("internal", who.max_data_class):
                 listed[slug] = {"project": slug, "data_class": "internal", "write": False, "folders": 0}
         return {"projects": [listed[slug] for slug in sorted(listed)]}
 
@@ -184,7 +185,9 @@ def conversation_routes() -> APIRouter:
         if scope_name == memory.OPERATOR_SCOPE and body.kind != "preference":
             raise ApiError(400, "INVALID", "the operator's memory holds preferences only")
         data_class = "internal" if scope_name == memory.OPERATOR_SCOPE else project_class(server, scope_name)
-        require_within(who, data_class)
+        # Personal data in the text raises the item's class: refused when that is above the author's cap, so an item
+        # is never stored that its author could no longer see.
+        require_within(who, raised_class(data_class, body.text))
         if server.memory is None:
             raise ApiError(404, "NOT_FOUND", "this ledger keeps no memory")
         item = memory.add(server.runtime().ledger, server.memory, scope=scope_name, kind=body.kind, text=body.text,

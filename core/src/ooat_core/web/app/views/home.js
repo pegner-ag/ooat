@@ -55,13 +55,13 @@ export async function home(root, ctx) {
   /** The conversation shown: its id (null until the next message starts one), its turns, its stream. */
   let current = {project: picker.value, conversation: /** @type {string | null} */ (null),
     turns: thread(ctx, {live: true}), stop: new AbortController()};
+  ctx.signal.addEventListener("abort", () => current.stop.abort());  // leaving the screen ends the stream shown
   let key = crypto.randomUUID();  // one Idempotency-Key per typed message: a double Enter or a retry is one message
 
   /** @param {string} project */
   async function open(project) {
     current.stop.abort();  // the old project's replies never show under the new one
     const stop = new AbortController();
-    ctx.signal.addEventListener("abort", () => stop.abort());
     const turns = thread(ctx, {live: true, onTurn: (turn) => {
       talk.querySelector(".empty")?.remove();
       if (turn.who !== "you") status.textContent = "";

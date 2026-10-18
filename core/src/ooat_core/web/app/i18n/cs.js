@@ -180,7 +180,6 @@ export default {
   "conv.forgotten": "Zapomenuto.",
   "conv.markedDone": "Odškrtnuto.",
   "conv.correction": "Jak to myslíš?",
-  "conv.task": "Úkol: {goal}",
   "conv.openTask": "Otevřít úkol",
   "conv.closed": "Konverzace skončila ({reason}).",
   "conv.readOnly": "Tato konverzace je tu jen ke čtení: skončila, nebo patří jinému kanálu.",

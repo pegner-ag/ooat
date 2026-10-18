@@ -179,7 +179,6 @@ export default {
   "conv.forgotten": "Forgotten.",
   "conv.markedDone": "Marked done.",
   "conv.correction": "How do you mean it?",
-  "conv.task": "Task: {goal}",
   "conv.openTask": "Open the task",
   "conv.closed": "The conversation closed ({reason}).",
   "conv.readOnly": "This conversation is read only here: it is closed, or it belongs to another channel.",
