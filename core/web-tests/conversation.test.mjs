@@ -41,6 +41,7 @@ test("a tap is shown by its kind, with its correction; a stubbed message is reda
     [["differently", "Jen titulek", false], ["forget", null, false], [null, null, true]]);
   assert.equal(tapLabel("forget:mem_01"), "conv.forget");
   assert.equal(tapLabel("whatever"), null);
+  assert.equal(tapLabel("remember"), "conv.remember");
 });
 
 test("the open web conversation of the project, never a chat bridge's or a closed one", () => {

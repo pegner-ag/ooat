@@ -325,6 +325,18 @@ def test_several_notes_get_numbered_forget_buttons():
     assert chat.buttons == [[[("Forget 1", f"f:{MEM1}")], [("Forget 2", f"f:{MEM2}")]]]
 
 
+def test_a_lesson_gets_a_remember_button_that_taps_remember():
+    offered = decided(EVT3, [MSG1], "task", "Dělám na tom.", buttons=["remember"])
+    remembered = decided(EVT5, [TAP1], "answer", "🧠 Zapamatováno.", buttons=[f"forget:{MEM1}"])
+    with Stub(sse(offered, closed(EVT4)), (200, {"conversation": CNV, "message": TAP1, "decision": remembered})) as stub:
+        chat = Talk()
+        bridge = bridge_of(stub, chat, "cs", own=[MSG1])
+        bridge.follow(CNV)
+        bridge.on_button(f"m:{CNV}")
+    assert chat.buttons[0] == [[("Zapamatovat", f"m:{CNV}")]]
+    assert json.loads(stub.requests[-1]["body"]) == {"tap": "remember"}
+
+
 def test_a_command_offers_the_handoff_and_passes_the_own_text_once():
     handed = []
     with Stub((202, {"conversation": CNV, "message": MSG1}),

@@ -172,6 +172,7 @@ export default {
   "conv.newThing": "New thing",
   "conv.makeTask": "Make it a task",
   "conv.todo": "Keep as an open point",
+  "conv.remember": "Remember",
   "conv.forget": "Forget",
   "conv.forgetN": "Forget {n}",
   "conv.done": "Done ✓",

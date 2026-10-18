@@ -173,6 +173,7 @@ export default {
   "conv.newThing": "Nová věc",
   "conv.makeTask": "Udělat z toho úkol",
   "conv.todo": "Nechat jako otevřený bod",
+  "conv.remember": "Zapamatovat",
   "conv.forget": "Zapomenout",
   "conv.forgetN": "Zapomenout {n}",
   "conv.done": "Hotovo ✓",

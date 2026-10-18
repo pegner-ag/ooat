@@ -62,7 +62,7 @@ export function tapKind(tap) {
 
 /** @type {Record<string, import("./i18n.js").Key>} */
 const LABELS = {yes: "conv.yes", differently: "conv.differently", new_thing: "conv.newThing",
-  make_task: "conv.makeTask", todo: "conv.todo", forget: "conv.forget", done: "conv.done"};
+  make_task: "conv.makeTask", todo: "conv.todo", remember: "conv.remember", forget: "conv.forget", done: "conv.done"};
 
 /**
  * The i18n key of a button or of a tap message's label; null for a tap this page does not know.
