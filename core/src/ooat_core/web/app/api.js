@@ -83,20 +83,44 @@ export function createApi(env) {
   }
 
   /**
-   * Follows a task's timeline until its TASK_CLOSED, or until `signal` aborts. The server ends a stream after
-   * 15 minutes, and a network can drop one; the next starts after the last event seen, so nothing is shown twice
-   * or missed. A dropped connection is tried again after 1 s, then twice as long per further drop, at most 30 s.
+   * Follows a task's timeline until its TASK_CLOSED, or until `signal` aborts.
    * @param {string} task
    * @param {string | null} after the last event already shown
    * @param {(event: any) => void} onEvent
    * @param {AbortSignal} signal
    */
-  async function follow(task, after, onEvent, signal) {
+  function follow(task, after, onEvent, signal) {
+    return stream(`/tasks/${encodeURIComponent(task)}/events`, "TASK_CLOSED", after, onEvent, signal);
+  }
+
+  /**
+   * Follows a conversation with the reception until its CONVERSATION_CLOSED, or until `signal` aborts.
+   * @param {string} conversation
+   * @param {string | null} after the last event already shown
+   * @param {(event: any) => void} onEvent
+   * @param {AbortSignal} signal
+   */
+  function followConversation(conversation, after, onEvent, signal) {
+    return stream(`/conversations/${encodeURIComponent(conversation)}/events`, "CONVERSATION_CLOSED", after, onEvent,
+      signal);
+  }
+
+  /**
+   * The events of a stream until the event `end`. The server ends a stream after 15 minutes, and a network can drop
+   * one; the next starts after the last event seen, so nothing is shown twice or missed. A dropped connection is
+   * tried again after 1 s, then twice as long per further drop, at most 30 s.
+   * @param {string} path below /api/v1
+   * @param {string} end the event type that ends it
+   * @param {string | null} after
+   * @param {(event: any) => void} onEvent
+   * @param {AbortSignal} signal
+   */
+  async function stream(path, end, after, onEvent, signal) {
     let cursor = after;
     let wait = RECONNECT_MS;
     while (!signal.aborted) {
       try {
-        const response = await env.fetch(`/api/v1/tasks/${encodeURIComponent(task)}/events`, {
+        const response = await env.fetch(`/api/v1${path}`, {
           headers: headers({Accept: "text/event-stream", ...(cursor ? {"Last-Event-ID": cursor} : {})}), signal,
         });
         if (!response.ok || !response.body) throw await failure(response);
@@ -116,7 +140,7 @@ export function createApi(env) {
             cursor = event.id;
             wait = RECONNECT_MS;
             onEvent(event);
-            if (event.type === "TASK_CLOSED") return;
+            if (event.type === end) return;
           }
         }
       } catch (error) {
@@ -130,7 +154,7 @@ export function createApi(env) {
     }
   }
 
-  return {json, raw, follow};
+  return {json, raw, follow, followConversation};
 }
 
 /** @typedef {ReturnType<typeof createApi>} Api */
