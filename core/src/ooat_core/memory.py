@@ -171,6 +171,13 @@ def note(ledger: Ledger, store: MemoryStore, *, scope: str, kind: str, text: str
                       conversation)
 
 
+def add(ledger: Ledger, store: MemoryStore, *, scope: str, kind: str, text: str, data_class: str, operator: str,
+        channel: str, pinned: bool = False) -> MemoryItem:
+    """The operator writes an item by hand (the web's Memory page); its source is its own MEMORY_NOTED."""
+    return note(ledger, store, scope=scope, kind=kind, text=text, data_class=data_class, source=None,
+                actor={"kind": "hil", "id": checked_operator(operator)}, pinned=pinned, channel=channel)
+
+
 def edit(ledger: Ledger, store: MemoryStore, mem_id: str, *, operator: str, channel: str, text: str | None = None,
          pinned: bool | None = None, done: bool | None = None) -> dict:
     """The operator changes an item's text, pins it, or marks an open point done; returns MEMORY_EDITED."""

@@ -187,9 +187,8 @@ def conversation_routes() -> APIRouter:
         require_within(who, data_class)
         if server.memory is None:
             raise ApiError(404, "NOT_FOUND", "this ledger keeps no memory")
-        item = memory.note(server.runtime().ledger, server.memory, scope=scope_name, kind=body.kind, text=body.text,
-                           data_class=data_class, source=None, actor={"kind": "hil", "id": who.operator},
-                           pinned=body.pinned, channel=who.channel)
+        item = memory.add(server.runtime().ledger, server.memory, scope=scope_name, kind=body.kind, text=body.text,
+                          data_class=data_class, operator=who.operator, channel=who.channel, pinned=body.pinned)
         return views.memory_view(item)
 
     @api.get("/memory/{scope_name}")
