@@ -106,6 +106,24 @@ def _utc(text: str):
     return datetime.fromisoformat(text.replace("Z", "+00:00"))
 
 
+def quick_cancels(events: Iterable[dict]) -> set[str]:
+    """Ids of the reception's task decisions whose task the operator cancelled within QUICK_CANCEL_S of its
+    submission: the task was not what the person meant."""
+    started, submitted, found = {}, {}, set()
+    for event in events:
+        body = event["body"]
+        if (event["type"] == "RECEPTION_DECIDED" and body["decision"] in ("task", "continue_task")
+                and body.get("task")):
+            started[body["task"]] = event["id"]
+        elif event["type"] == "TASK_SUBMITTED":
+            submitted[event["task"]] = event["ts"]
+        elif (event["type"] == "DECISION" and event["actor"]["kind"] == "hil" and event["task"] in started
+              and body["decision"] == "cancel the task" and event["task"] in submitted
+              and (_utc(event["ts"]) - _utc(submitted[event["task"]])).total_seconds() <= QUICK_CANCEL_S):
+            found.add(started[event["task"]])
+    return found
+
+
 def reception_verdicts(events: Iterable[dict]) -> list[RatedDecision]:
     """The operator's verdicts on reception decisions, read from the conversation (plan 08a decision 3): Yes after
     a confirm confirms it and Differently corrects it; a task the reception started is corrected by a cancel within
@@ -114,7 +132,7 @@ def reception_verdicts(events: Iterable[dict]) -> list[RatedDecision]:
     events = list(events)
     awaiting: dict[str, dict] = {}  # conversation -> the confirm waiting for its tap
     started: dict[str, dict] = {}  # task -> the decision that started it
-    submitted, verdicts = {}, {}
+    verdicts = {}
     for event in events:
         body = event["body"]
         if event["type"] == "RECEPTION_DECIDED" and "record" in body:
@@ -126,16 +144,13 @@ def reception_verdicts(events: Iterable[dict]) -> list[RatedDecision]:
             confirm = awaiting.pop(body["conversation"], None)
             if confirm is not None:
                 verdicts[confirm["id"]] = (confirm, body["tap"] == "yes")
-        elif event["type"] == "TASK_SUBMITTED":
-            submitted[event["task"]] = event["ts"]
-        elif (event["type"] == "DECISION" and event["actor"]["kind"] == "hil" and event["task"] in started
-              and body["decision"] == "cancel the task" and event["task"] in submitted
-              and (_utc(event["ts"]) - _utc(submitted[event["task"]])).total_seconds() <= QUICK_CANCEL_S):
-            decision = started[event["task"]]
-            verdicts[decision["id"]] = (decision, False)
         elif event["type"] == "TASK_RATED" and event["task"] in started and body["accepted"]:
             decision = started[event["task"]]
             verdicts.setdefault(decision["id"], (decision, True))
+    recorded = {d["id"]: d for d in started.values()}  # only decisions with a record can be verdicts
+    for decision_id in quick_cancels(events):
+        if decision_id in recorded:
+            verdicts[decision_id] = (recorded[decision_id], False)  # a quick cancel outweighs an accepted rating
     return [RatedDecision(RECEPTION_POINT, d["body"]["record"]["engine"], d["body"]["record"]["model"],
                           d["body"]["record"]["confidence"], correct, d["body"]["conversation"])
             for d, correct in verdicts.values()]

@@ -56,3 +56,45 @@ def test_task_types_are_separate_rows_and_a_task_without_one_is_general():
 
 def test_the_cards_prior_is_read_from_the_catalog():
     assert card_prior(CAP) == pytest.approx(0.7)
+
+
+from ooat_core.learning import summary
+
+
+def conversation(*steps):
+    """Reception events of one conversation: ("decided", kind, extra) or ("tap", tap)."""
+    cnv, events = new_id("cnv"), []
+    for step in steps:
+        if step[0] == "decided":
+            events.append({"id": new_id("evt"), "type": "RECEPTION_DECIDED", "task": None, "ts": "2026-10-19T10:00:00Z",
+                           "actor": {"kind": "system", "id": "ooat-reception"},
+                           "body": {"conversation": cnv, "decision": step[1], **step[2]}})
+        else:
+            events.append({"id": new_id("evt"), "type": "CONVERSATION_MESSAGE", "task": None,
+                           "ts": "2026-10-19T10:00:05Z", "actor": {"kind": "hil", "id": "operator"},
+                           "body": {"conversation": cnv, "tap": step[1]}})
+    return events
+
+
+def test_reception_decisions_are_counted_with_the_differently_that_followed_them():
+    events = conversation(("decided", "confirm", {}), ("tap", "differently"), ("decided", "task", {}),
+                          ("decided", "escalated", {}),
+                          ("decided", "answer", {"lesson": {"kind": "fact", "text": "x"}}),
+                          ("tap", "remember"))
+    found = summary(events, visible=lambda task: True, reception_interim=0.8)
+    rows = {r["decision"]: r for r in found["reception"]}
+    assert rows["confirm"] == {"decision": "confirm", "count": 1, "differently": 1, "cancelled": 0}
+    assert "escalated" not in rows  # a replaced call is not a decision the person saw
+    assert found["memory"]["lessons_offered"] == 1 and found["memory"]["lessons_kept"] == 1
+
+
+def test_a_rejected_task_needs_a_look_only_within_the_cap():
+    shown, hidden = run(accepted=False), run(accepted=False)
+    found = summary(shown + hidden, visible=lambda task: task == shown[0]["task"], reception_interim=0.8)
+    assert [a["task"] for a in found["attention"]] == [shown[0]["task"]]
+    assert found["price_list"][0]["n"] == 2  # counts include the task above the cap
+
+
+def test_a_justified_abstention_does_not_need_a_look():
+    found = summary(run("CLOSED_ABSTAINED", accepted=True), visible=lambda task: True, reception_interim=0.8)
+    assert found["attention"] == []

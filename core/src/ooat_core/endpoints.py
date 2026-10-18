@@ -20,7 +20,7 @@ from fastapi import APIRouter, Depends, Header, Request
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field, StrictInt, StrictStr
 
-from . import connector_admin, hil, stats, views
+from . import connector_admin, hil, learning, stats, views
 from .api import ApiError, Principal, Server, principal, require_within, scope, server_of
 from .gate import settings_from_config
 from .ids import parse_artifact_ref
@@ -371,6 +371,15 @@ def resource_routes() -> APIRouter:
         return {"connector": connector_id, "event": event["id"]}
 
     # Usage -----------------------------------------------------------------------------------------------------
+
+    @api.get("/learning")
+    def learning_view(request: Request, who: Principal = Depends(scope("read"))) -> dict:
+        """What it learns (plan 09 decision 7): counts over the whole ledger, task ids and notes within the cap."""
+        server = server_of(request)
+        tasks = submitted_tasks(server)
+        visible = {t for t, c in task_classes(server, tasks).items() if views.within(c, who.max_data_class)}
+        return learning.summary(server.runtime().ledger.events(), visible=visible.__contains__,
+                                reception_interim=server.config.reception.theta)
 
     @api.get("/stats")
     def usage(request: Request, period: str = "7d", project: str | None = None, group: str = "role",
