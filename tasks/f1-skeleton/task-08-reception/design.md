@@ -1,7 +1,8 @@
 # Reception, conversations and project memory: asking OOAT like a search box — design
 
 **Epic:** f1-skeleton · **Sub-project:** 08 · **Status:** approved by the owner 2026-10-15 (sections 1–4 in chat, the
-PR with ADR 0018 and the spec amendment); addendum §14 approved 2026-10-15, after a reading of the bot's log
+PR with ADR 0018 and the spec amendment); addendum §14 approved 2026-10-15, after a reading of the bot's log;
+built in plans 08a (core), 08c (chat bridge) and 08b (web; memory added by hand, owner 2026-10-18)
 **Spec:** `spec/ooat-specification.md` §3 (components), §4 (Gate, rule A1), §6 (decision points, confidence-gated
 autonomy), §7 (ledger), §9 (risk classes, data protection), §10 (dashboard); ADR 0009, ADR 0010, ADR 0011,
 ADR 0012, ADR 0016, ADR 0017, ADR 0018 (new); workspace design (`../task-07-project-workspace/design.md`),
