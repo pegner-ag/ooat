@@ -140,7 +140,8 @@ def test_a_clear_task_runs_as_t2_and_every_decision_is_recorded():
     assert (outcome.action, outcome.topology, outcome.data_class, outcome.budget_usd) == ("run", "T2", "internal", 2.0)
     decided = setup.events(task, "TOPOLOGY_DECIDED")[0]
     assert decided["body"]["topology"] == "T2" and decided["body"]["rules_applied"] == []
-    assert decided["body"]["candidates"] == [{"topology": "T2", "model_usd": outcome.estimate_usd}]
+    assert decided["body"]["candidates"] == [{"topology": "T2", "model_usd": outcome.estimate_usd,
+                                             "p_accept": 0.7}]
     assert decided["body"]["parameters"] == {"budget_usd": 2.0}
     records = {r["question"]: r for r in decided["body"]["decisions"]}
     assert set(records) == {"a1.1", "a4", "a5", "a7", "a10"}
@@ -198,7 +199,7 @@ def test_a_task_that_costs_more_than_it_is_worth_is_closed_as_t0():
     decided = setup.events(task, "TOPOLOGY_DECIDED")[0]["body"]
     assert decided["topology"] == "T0" and "A3" in decided["rules_applied"]
     assert decided["parameters"]["v_usd"] == 0.01
-    assert "exceeds the task value" in setup.events(task, "TASK_CLOSED")[0]["body"]["missing"]
+    assert "expected value" in setup.events(task, "TASK_CLOSED")[0]["body"]["missing"]
 
 
 def test_value_classes_map_to_usd():
@@ -592,6 +593,37 @@ def test_the_budget_check_uses_p90():
     assert outcome.action == "ask" and outcome.estimate_p90_usd == pytest.approx(0.507)
     raise_to = next(o for o in setup.events(task, "HIL_REQUEST")[0]["body"]["options"] if o["id"] == "raise_budget")
     assert raise_to["cost_usd"] >= 0.507
+
+
+def test_the_candidate_records_p_accept_and_eu():
+    setup = GateSetup()
+    task = setup.submit(value={"usd": 100.0})
+    setup.gate.run(task)
+    [candidate] = setup.events(task, "TOPOLOGY_DECIDED")[-1]["body"]["candidates"]
+    assert candidate["p_accept"] == pytest.approx(0.7)
+    assert candidate["eu_usd"] == pytest.approx(100.0 * 0.7 - candidate["model_usd"])
+
+
+def test_a_task_worth_less_than_its_cost_at_its_acceptance_is_closed():
+    setup = GateSetup()
+    for usd in (0.10, 0.10, 0.10, 0.10, 0.10):
+        setup.closed_run(usd)
+    task = setup.submit(value={"usd": 0.12})  # 0.12 > 0.10, but 0.7 * 0.12 = 0.084 < 0.10
+    assert setup.gate.run(task).closed == "CLOSED_ABSTAINED"
+    assert "expected value" in setup.events(task, "TASK_CLOSED")[0]["body"]["missing"]
+
+
+def test_without_a_value_there_is_no_eu():
+    setup = GateSetup()
+    task = setup.submit()
+    setup.gate.run(task)
+    [candidate] = setup.events(task, "TOPOLOGY_DECIDED")[-1]["body"]["candidates"]
+    assert "eu_usd" not in candidate and "p_accept" in candidate
+
+
+def test_the_gate_names_the_capability_the_runtime_issues():
+    from ooat_core import gate, runtime
+    assert gate.WORKER_CAPABILITY == runtime.CAPABILITY
 
 
 def test_without_a_decision_route_the_prior_is_never_below_the_old_formula(monkeypatch):
