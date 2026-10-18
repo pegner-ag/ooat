@@ -277,7 +277,70 @@ def test_differently_with_a_correction_is_decided_like_a_message(tmp_path):
                                 text="Myslím titulek v patičce.")
     assert tapped["decision"] is None
     decided = desk.reception.decide(body["conversation"])["body"]
-    assert decided["messages"] == [tapped["message"]["id"]] and "titulek v patičce" in desk.model.calls[1].prompt
+    assert decided["messages"] == [tapped["message"]["id"]]
+    assert "Differently: Myslím titulek v patičce." in desk.model.calls[1].prompt
+
+
+LESSON = {"kind": "preference", "text": "V tomto projektu měň jen viditelný text, nikdy kód."}
+
+
+def corrected(desk, lesson=LESSON):
+    """A confirm, then Differently with a correction, decided with a lesson."""
+    desk.model.replies = [decision("confirm", "Mám začít?", confidence=0.5), decision("task", lesson=lesson)]
+    body = desk.ask("Titulek.")["body"]
+    desk.reception.tap(body["conversation"], "differently", operator="operator", channel="web",
+                       text="Jen text titulku, kód nech být.")
+    return desk.reception.decide(body["conversation"])["body"]
+
+
+def test_after_a_correction_a_lesson_is_offered_and_stored_only_on_the_tap(tmp_path):
+    desk = Desk(tmp_path)
+    body = corrected(desk)
+    assert body["lesson"] == LESSON and "remember" in body["buttons"] and LESSON["text"] in body["reply"]
+    assert desk.events("MEMORY_NOTED") == []
+    tapped = desk.reception.tap(body["conversation"], "remember", operator="operator", channel="web")
+    noted = desk.events("MEMORY_NOTED")[0]
+    assert noted["actor"] == {"kind": "hil", "id": "operator"} and noted["body"]["scope"] == "docs"
+    assert tapped["decision"]["body"]["buttons"] == [f"forget:{noted['body']['memory']}"]
+    with pytest.raises(ValueError, match="nothing to remember"):
+        desk.reception.tap(body["conversation"], "remember", operator="operator", channel="web")
+    assert len(desk.events("MEMORY_NOTED")) == 1
+
+
+def test_a_lesson_without_a_correction_in_the_batch_is_dropped(tmp_path):
+    desk = Desk(tmp_path, [decision("task", lesson=LESSON)])
+    body = desk.ask("Změň titulek na Objednat.")["body"]
+    assert "lesson" not in body and "remember" not in body["buttons"]
+
+
+def test_an_operator_preference_goes_to_the_operator_scope(tmp_path):
+    desk = Desk(tmp_path)
+    body = corrected(desk, LESSON | {"scope": "operator"})
+    desk.reception.tap(body["conversation"], "remember", operator="operator", channel="web")
+    assert desk.events("MEMORY_NOTED")[0]["body"]["scope"] == memory.OPERATOR_SCOPE
+
+
+def test_a_secret_lesson_is_never_offered_nor_stored(tmp_path):
+    desk = Desk(tmp_path)
+    body = corrected(desk, {"kind": "fact", "text": "heslo: Tajne123!"})
+    assert "lesson" not in body and "Tajne123" not in body["reply"]
+    with pytest.raises(ValueError, match="nothing to remember"):
+        desk.reception.tap(body["conversation"], "remember", operator="operator", channel="web")
+    assert desk.events("MEMORY_NOTED") == []
+
+
+def test_a_lesson_above_the_tokens_cap_is_not_offered(tmp_path):
+    from ooat_core import tokens
+    from reception_fakes import NOW
+    desk = Desk(tmp_path, [decision("confirm", "Mám začít?", confidence=0.5),
+                           decision("task", lesson={"kind": "fact", "text": "Kontakt: jan.novak@example.cz"})])
+    _, issued = tokens.issue(desk.ledger, operator="operator", name="telegram", scopes=["submit"],
+                             max_data_class="internal", now=NOW)
+    channel = f"token:{issued['body']['token']}"
+    body = desk.ask("Titulek.", channel=channel)["body"]
+    desk.reception.tap(body["conversation"], "differently", operator="operator", channel=channel, text="Jen text.")
+    decided = desk.reception.decide(body["conversation"])["body"]
+    assert "lesson" not in decided and "remember" not in decided["buttons"]
 
 
 def test_a_command_can_be_kept_as_an_open_point(tmp_path):

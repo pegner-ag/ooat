@@ -88,6 +88,16 @@ def test_yes_on_a_confirmation_starts_the_task(tmp_path):
     assert task in s.server.runner._queue
 
 
+def test_remember_without_a_lesson_is_refused(tmp_path):
+    s = served(tmp_path, decision("answer", "Ceny jsou s DPH."))
+    bot = s.token()
+    sent = send(s, bot, "Jsou ceny s DPH?")
+    decided(s, bot, sent["conversation"])
+    response = s.client.post(f"/api/v1/conversations/{sent['conversation']}/taps", headers=bot,
+                             json={"tap": "remember"})
+    assert response.status_code == 400 and "nothing to remember" in response.text
+
+
 def test_a_token_without_answer_cannot_tap(tmp_path):
     s = served(tmp_path)
     bot = s.token(scopes=("submit", "read"))

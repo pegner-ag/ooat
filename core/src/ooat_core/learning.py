@@ -83,6 +83,7 @@ def observed(events: Iterable[dict], priors: dict[str, float]) -> list[Observed]
     for (cap, kind), runs in sorted(groups.items()):
         counted = [c for c in (_counted(s, a) for s, a in runs) if c is not None]
         prior = priors.get(cap, 0.5)
-        rows.append(Observed(cap, kind, len(counted), sum(counted), prior, _beta_mean(sum(counted), len(counted), prior),
-                             len(runs), sum(s == ABSTAINED for s, _ in runs) / len(runs)))
+        mean = _beta_mean(sum(counted), len(counted), prior)
+        rows.append(Observed(cap, kind, len(counted), sum(counted), prior, mean, len(runs),
+                             sum(s == ABSTAINED for s, _ in runs) / len(runs)))
     return rows

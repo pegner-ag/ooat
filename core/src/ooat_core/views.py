@@ -171,7 +171,7 @@ def rating_queue(tasks: dict[str, list[dict]], classes: dict[str, str], cap: str
 
 # Conversations and memory (ADR 0018) ------------------------------------------------------------------------------
 
-_SAID = ("text", "tap_text", "reply", "interpretation", "options", "pending", "attachment_names")
+_SAID = ("text", "tap_text", "reply", "interpretation", "options", "pending", "attachment_names", "lesson")
 
 
 def conversation_stub(conversation: str) -> dict:
