@@ -85,7 +85,8 @@ def test_a_case_whose_earlier_turn_was_above_the_max_class_is_left_out(candidate
 def test_a_rejected_task_above_the_max_class_is_left_out(candidates):
     task = new_id("tsk")
     events = [{"id": new_id("evt"), "type": "TASK_SUBMITTED", "task": task, "refs": [], "body": {"goal": "x"}},
-              {"id": new_id("evt"), "type": "TASK_RATED", "task": task, "body": {"accepted": False, "value_class": "C"}}]
+              {"id": new_id("evt"), "type": "TASK_RATED", "task": task,
+               "body": {"accepted": False, "value_class": "C"}}]
     assert candidates.task_candidates(events, "internal", task_class=lambda t: "personal") == ([], 1)
 
 
