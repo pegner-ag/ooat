@@ -276,12 +276,53 @@ def test_exhausted_quota_cools_down_the_connector_and_routing_moves_on():
     setup = Setup(subscription, FakeConnector(API))
     for connector in setup.connectors:
         setup.acknowledge(connector)
-    with pytest.raises(GatewayError) as info:
-        setup.gateway.call(setup.request())
-    assert info.value.code == "QUOTA_EXHAUSTED" and info.value.cost["usd"] == 0.0
+    assert setup.gateway.call(setup.request()).cost["adapter"] == "prv.fake.api"  # the same call moves on
     warning = setup.ledger.events(types=["QUOTA_WARNING"])[0]["body"]
     assert warning["window_resets_at"] == "2026-10-01T17:00:00Z"  # plan quota window of 5 hours
     assert setup.gateway.call(setup.request()).cost["adapter"] == "prv.fake.api"
+    assert len(subscription.calls) == 1  # cooling down: not tried again
+
+
+def test_an_unavailable_connector_hands_the_call_to_the_next_one():
+    hooks = FakeConnector(SUBSCRIPTION, error=ConnectorError("UNAVAILABLE", "hooks not approved"))
+    setup = Setup(hooks, FakeConnector(API))
+    for connector in setup.connectors:
+        setup.acknowledge(connector)
+    assert setup.gateway.call(setup.request()).cost["adapter"] == "prv.fake.api"
+    assert len(hooks.calls) == 1
+
+
+def test_every_connector_unavailable_names_each_one():
+    setup = Setup(FakeConnector(SUBSCRIPTION, error=ConnectorError("UNAVAILABLE", "hooks not approved")),
+                  FakeConnector(API, error=quota_error()))
+    for connector in setup.connectors:
+        setup.acknowledge(connector)
+    with pytest.raises(GatewayError) as info:
+        setup.gateway.call(setup.request())
+    assert info.value.code == "UNAVAILABLE" and info.value.cost["usd"] == 0.0
+    assert info.value.message == ("prv.fake.subscription_cli: hooks not approved; "
+                                  "prv.fake.api: usage limit reached")
+
+
+def test_a_failure_that_may_have_reached_the_provider_is_not_tried_elsewhere():
+    timed_out = FakeConnector(SUBSCRIPTION, error=ConnectorError("TIMEOUT", "no reply in 600 s"))
+    api = FakeConnector(API)
+    setup = Setup(timed_out, api)
+    for connector in setup.connectors:
+        setup.acknowledge(connector)
+    with pytest.raises(GatewayError, match="TIMEOUT"):
+        setup.gateway.call(setup.request())
+    assert api.calls == []  # it may have run, or changed files: never twice
+
+
+def test_a_pinned_connector_that_is_unavailable_is_not_bypassed():
+    setup = Setup(FakeConnector(SUBSCRIPTION, error=ConnectorError("UNAVAILABLE", "logged out")),
+                  FakeConnector(API), pins={"workhorse": "prv.fake.subscription_cli"})
+    for connector in setup.connectors:
+        setup.acknowledge(connector)
+    with pytest.raises(GatewayError, match="UNAVAILABLE"):
+        setup.gateway.call(setup.request())
+    assert setup.connectors[1].calls == []
 
 
 def test_cool_down_survives_a_restart_and_ends_at_reset():

@@ -25,17 +25,32 @@ def _utc(text: str) -> datetime:
     return datetime.fromisoformat(text.replace("Z", "+00:00"))
 
 
+def provider_failure(event: dict) -> str | None:
+    """"CODE: message" of an event that pauses its task until the provider is back, or None: a failed worker call,
+    a paused acceptance check or a Gate that stopped before deciding."""
+    body = event["body"]
+    if event["type"] == "RESULT" and body["outcome"] == "FAILED" and body["error"]["code"] != "INVALID_OUTPUT":
+        return f"{body['error']['code']}: {body['error']['message']}"
+    if event["type"] == "DECISION" and (
+            event["actor"]["id"] == "ooat-runtime" and body["decision"].startswith("acceptance check paused")
+            or event["actor"]["id"] == "ooat-gate" and body["decision"].startswith("Gate stopped before deciding")):
+        code = body["decision"].partition("(")[2].partition(")")[0]
+        return f"{code}: {body.get('rationale') or code}"
+    return None
+
+
+def last_failure(events: list[dict]) -> str | None:
+    """The provider failure that paused the task, while it is paused; None otherwise."""
+    if resume_after(events) is None:
+        return None
+    return next(failure for failure in map(provider_failure, reversed(events)) if failure is not None)
+
+
 def resume_after(events: list[dict]) -> datetime | None:
     """When a task paused by provider failures may be tried again; None when its last step did not fail."""
     failures, last = 0, None
     for event in events:
-        body = event["body"]
-        failed = (event["type"] == "RESULT" and body["outcome"] == "FAILED"
-                  and body["error"]["code"] != "INVALID_OUTPUT") or (
-            event["type"] == "DECISION" and event["actor"]["id"] == "ooat-runtime"
-            and body["decision"].startswith("acceptance check paused")) or (
-            event["type"] == "DECISION" and event["actor"]["id"] == "ooat-gate"
-            and body["decision"].startswith("Gate stopped before deciding"))
+        failed = provider_failure(event) is not None
         if failed:
             failures, last = failures + 1, event["ts"]
         elif event["type"] in ("RESULT", "GATE_PASSED", "GATE_FAILED", "HIL_RESPONSE"):

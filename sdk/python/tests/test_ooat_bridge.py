@@ -427,3 +427,50 @@ def test_many_conversations_at_once_share_the_bridge_safely():
     for thread in threads:
         thread.join()
     assert len(bridge._sent) <= 500 and len(bridge._posted) <= 500 and len(bridge._scope) <= 500
+
+
+def task_event(evt, kind, actor="ooat-runtime", **body):
+    return {"id": evt, "ts": "2026-10-19T19:13:06Z", "type": kind, "actor": {"kind": "system", "id": actor},
+            "refs": [], "cost": None, "body": body}
+
+
+def failed(evt, code="UNAVAILABLE", message="hooks.json defines hooks the operator has not approved"):
+    return task_event(evt, "RESULT", outcome="FAILED", error={"code": code, "message": message})
+
+
+def test_a_paused_task_says_once_what_stopped_it_and_what_happens_next():
+    chat = Kept()
+    bridge = Bridge(OoatClient("http://127.0.0.1:9", "secret"), chat, "docs", language="cs")
+    for event in (failed("e1"), failed("e2"), task_event("e3", "RESULT", outcome="DONE"), failed("e4", "TIMEOUT")):
+        bridge._post("tsk_1", event, 1)
+    first, again = (text for text, _ in chat.sent)
+    assert first.startswith("⏸ Úkol stojí: konektor teď nejde použít.")
+    assert "Důvod: hooks.json defines hooks the operator has not approved" in first
+    assert "Konektory" in first and "zkusím znovu sám" in first
+    assert again.startswith("⏸ Úkol stojí: poskytovatel neodpověděl včas.") and "Konektory" not in again
+
+
+def test_an_invalid_output_is_a_new_attempt_not_a_pause():
+    chat = Kept()
+    Bridge(OoatClient("http://127.0.0.1:9", "secret"), chat, "docs")._post("tsk_1", failed("e1", "INVALID_OUTPUT"), 1)
+    assert chat.sent == []
+
+
+def test_a_paused_acceptance_check_or_gate_is_told_too():
+    chat = Kept()
+    bridge = Bridge(OoatClient("http://127.0.0.1:9", "secret"), chat, "docs")
+    bridge._post("tsk_1", task_event("e1", "DECISION", rationale="usage limit reached", decision=(
+        "acceptance check paused (QUOTA_EXHAUSTED); the document is checked again later")), 1)
+    bridge._post("tsk_2", task_event("e2", "DECISION", actor="ooat-gate", rationale="HTTP 529", decision=(
+        "Gate stopped before deciding (API_ERROR); it runs again later.")), 1)
+    bridge._post("tsk_3", task_event("e3", "DECISION", decision="Worker attempt 1 accepted."), 1)
+    assert [text.split("\n")[:2] for text, _ in chat.sent] == [
+        ["⏸ The task is stopped: the subscription's quota is used up.", "Reason: usage limit reached"],
+        ["⏸ The task is stopped: the provider returned an error.", "Reason: HTTP 529"]]
+
+
+def test_a_pause_above_the_cap_is_told_without_its_reason():
+    chat = Kept()
+    hidden = task_event("e1", "RESULT", redacted="Above this token's data class.", link="/tasks/tsk_1")
+    Bridge(OoatClient("http://127.0.0.1:9", "secret"), chat, "docs")._post("tsk_1", hidden, 1)
+    assert chat.sent == []  # a redacted RESULT may be any outcome: only its question and result are posted

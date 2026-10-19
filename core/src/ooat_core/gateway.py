@@ -34,6 +34,7 @@ _STATE_EVENTS = ["ADAPTER_ACKNOWLEDGED", "ADAPTER_DISABLED", "QUOTA_WARNING"]
 # When no decision connector can answer, the cheapest text tier answers the same typed questions (spec §6).
 FALLBACK_TIER = "economy"
 FALLBACK_TIMEOUT_S = 120
+NEVER_RAN = ("UNAVAILABLE", "QUOTA_EXHAUSTED")  # the call did not reach the provider: the next connector may serve it
 
 
 class GatewayError(Exception):
@@ -158,9 +159,7 @@ class Gateway:
     def call(self, request: ModelRequest) -> GatewayResult:
         if request.task is None and request.conversation is None:
             raise ValueError("every gateway call belongs to a task or a conversation")
-        candidate = self._route(request)
-        self._check_budget(request, candidate.estimate)
-        response = self._invoke(request, candidate, "complete")
+        candidate, response = self._invoke_first(request, self._routes(request), "complete")
         cost = self._cost(request, candidate, response)
         self._warn_budget(request, cost["usd"])
         return GatewayResult(response, cost, candidate.estimate)
@@ -210,9 +209,7 @@ class Gateway:
         return dataclasses.replace(result, fallback_from=failure)
 
     def _decide_on_connector(self, request: DecisionRequest, expanded: DecisionRequest) -> DecisionResult:
-        candidate = self._route(expanded, kind="decision")
-        self._check_budget(expanded, candidate.estimate)
-        response = self._invoke(expanded, candidate, "decide")
+        candidate, response = self._invoke_first(expanded, self._routes(expanded, kind="decision"), "decide")
         cost = self._cost(expanded, candidate, response)
         try:
             answers = checked_answers(expanded.questions, response.answers)
@@ -277,9 +274,32 @@ class Gateway:
                                cost=self._failure_cost(request, candidate, True)) from None
         return self._sanitised(response)
 
+    def _invoke_first(self, request, candidates: list["_Candidate"], method: str):
+        """(candidate, response) of the cheapest candidate that runs. One that could not start the call (unavailable,
+        out of quota) hands it to the next; any other failure may have reached the provider, or changed files, so
+        it is raised. When none could start, the cheapest one's code is raised, naming each failure."""
+        failed = []
+        for candidate in candidates:
+            self._check_budget(request, candidate.estimate)
+            try:
+                return candidate, self._invoke(request, candidate, method)
+            except GatewayError as error:
+                if error.code not in NEVER_RAN:
+                    raise
+                failed.append((candidate.connector.manifest["id"], error))
+        first = failed[0][1]
+        if len(failed) == 1:
+            raise first
+        raise GatewayError(first.code, "; ".join(f"{connector_id}: {error.message}" for connector_id, error in failed),
+                           cost=first.cost)
+
     # Routing ------------------------------------------------------------------------------------------------
 
     def _route(self, request: ModelRequest | DecisionRequest, kind: str = "model") -> _Candidate:
+        return self._routes(request, kind)[0]
+
+    def _routes(self, request: ModelRequest | DecisionRequest, kind: str = "model") -> list[_Candidate]:
+        """The candidates in the order they are tried: the cheapest first, or only the pinned one."""
         if request.data_class not in DATA_CLASSES:
             raise ValueError(f"unknown data class: {request.data_class}")
         candidates, trace, cooling = [], [], set()
@@ -314,7 +334,7 @@ class Gateway:
             if not pinned:
                 code = "QUOTA_EXHAUSTED" if pin in cooling else "NOT_PERMITTED"
                 raise GatewayError(code, f"pinned connector {pin} cannot serve this request", trace)
-            return pinned[0]
+            return pinned[:1]
         if not candidates and getattr(request, "workspace", None) is not None and all(
                 line.endswith(("cannot work with project folders", "not acknowledged by the operator (or disabled)"))
                 for line in trace if not line.startswith(("pre-scan", "project "))):
@@ -322,8 +342,8 @@ class Gateway:
         if not candidates:
             code = "QUOTA_EXHAUSTED" if cooling else "NOT_PERMITTED"
             raise GatewayError(code, f"no connector can serve tier {request.tier} for {request.data_class}", trace)
-        return min(candidates, key=lambda c: (c.estimate.usd, _ACCESS_RANK[c.connector.manifest["access"]],
-                                              c.connector.manifest["id"]))
+        return sorted(candidates, key=lambda c: (c.estimate.usd, _ACCESS_RANK[c.connector.manifest["access"]],
+                                                 c.connector.manifest["id"]))
 
     def _exclusion(self, connector, request, acknowledgement, cooldowns) -> str | None:
         manifest, connector_id, data_class = connector.manifest, connector.manifest["id"], request.data_class

@@ -42,7 +42,7 @@ API with web sessions and operator tokens, and the task runner (design 05a). Tea
 - `routing.py` — `RoutingPolicy` from `routing.json`: dated prices, optional tier allow-list, data-class policy
 - `gateway.py` — `Gateway.estimate()` / `.call()`: data-class guard (the operator's responsibility stands in
   for a processing agreement, a region and no training; `[policy]` blocks countries and limits personal data to
-  regions), acknowledgement and automation rules from the ledger, quota cool-down, pins, cheapest connector, contract budget, cost record with `estimated_usd`;
+  regions), acknowledgement and automation rules from the ledger, quota cool-down, pins, cheapest connector (one that cannot start the call, `UNAVAILABLE` or `QUOTA_EXHAUSTED`, hands it to the next; a pin is never bypassed, and a failure that may have reached the provider is never tried elsewhere), contract budget, cost record with `estimated_usd`;
   passes the routed model to the connector in `ModelRequest.model`. `Gateway.estimate_decision()` /
   `.decide()`: the same rules for decision connectors; every choice is asked twice with reversed options,
   answers are checked before use, and when no decision connector can answer, the `economy` text tier answers the
@@ -101,7 +101,8 @@ API with web sessions and operator tokens, and the task runner (design 05a). Tea
 - `views.py` — the API's task, timeline, HIL and rating views with a reader's data-class cap (stubs above it);
   `workspace_view()`: a task's files changed, latest diff, revert state and whether it can be reverted
 - `runner_lock.py`, `runner.py` — the OS file lock beside the ledger; the runner thread with its FIFO queue rebuilt
-  from the ledger, a 60 s tick (defaults on silence, runnable tasks) and a growing pause for paused tasks
+  from the ledger, a 60 s tick (defaults on silence, runnable tasks) and a growing pause for paused tasks;
+  `provider_failure()` / `last_failure()` say what paused one (the task summary's `paused_by`, shown in the inbox)
 - `sessions.py` — one-time sign-in codes (hash-named files in `ooat-login/` beside the ledger) and web sessions
 - `api.py` — `create_app()`: the HTTP shell of `ooat serve` (Host, Origin, CSRF, 20 MB limit, sessions and tokens,
   typed errors, security headers, a log of method, path and status); `endpoints.py` — the REST resources
@@ -137,7 +138,7 @@ API with web sessions and operator tokens, and the task runner (design 05a). Tea
   for R2 and R3, and below θ after one more try on `workhorse`), one question (after two in a row it starts on its
   best reading), an answer to a task's open question or a follow-up task, a status, a cancel, a command it says it
   cannot run (offered as an open point), a project switch, up to 3 memory notes; a failed reception sends the
-  message as a task. `tap()` applies a button at once; `report()` writes a finished task's report with numbered
+  message as a task, and its reply names the provider failure. `tap()` applies a button at once; `report()` writes a finished task's report with numbered
   next steps; `close()` writes a summary into memory. `desk.py` is its thread in `ooat serve`: the quiet window
   (`batch_seconds`), reports when the runner closes a task, a 60 s tick for missed reports and silent conversations.
   θ comes from `thresholds.reception_threshold()`: `[reception] theta` until 5 verdicts (Yes, Differently, a

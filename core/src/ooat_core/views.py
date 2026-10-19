@@ -12,7 +12,7 @@ from collections.abc import Callable
 from .gate import GateSettings, gated_data_class
 from .pii import ORDER, higher_class
 from .rating import CHOICE_OPTIONS, task_decisions
-from .runner import resume_after
+from .runner import last_failure, resume_after
 from .runtime import CLOSED
 from .state import task_state
 
@@ -67,6 +67,7 @@ def task_summary(task: str, events: list[dict], data_class: str, cap: str | None
         "submitted": submitted["ts"], "updated": events[-1]["ts"],
         "closed": closed["body"]["state"] if closed else None,
         "resume_after": paused.isoformat().replace("+00:00", "Z") if paused else None,
+        "paused_by": last_failure(events) if paused and visible else None,
     }
 
 

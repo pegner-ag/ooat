@@ -212,7 +212,8 @@ def test_an_unknown_decision_is_unusable(tmp_path):
 def test_a_provider_failure_sends_the_message_as_a_task(tmp_path):
     desk = Desk(tmp_path, [ConnectorError("UNAVAILABLE", "down")])
     body = desk.ask("Change the title.\nDone when: the title reads Family tests")["body"]
-    assert body["fallback"] is True and body["reply"].startswith("The reception is not available")
+    assert body["fallback"] is True
+    assert body["reply"] == "The reception is not available now (UNAVAILABLE: down); I sent the message as a task."
     assert desk.submitted()[0]["acceptance"] == ["the title reads Family tests"]
 
 
