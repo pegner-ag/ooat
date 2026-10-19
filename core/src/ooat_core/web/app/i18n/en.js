@@ -20,6 +20,7 @@ export default {
   "inbox.waiting": "Waiting for you ({n})",
   "inbox.stuck": "Stuck ({n})",
   "inbox.paused": "paused after a provider failure; tries again at {at}",
+  "inbox.paused_by": "Reason: {reason}. When it is a connector, fix it on the Connectors page.",
   "inbox.tasks": "Tasks",
   "inbox.task": "Task",
   "inbox.state": "State",

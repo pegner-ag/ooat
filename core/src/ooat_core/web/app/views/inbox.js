@@ -30,7 +30,8 @@ export async function taskLists(ctx, form) {
       ...ratings.tasks.map((/** @type {any} */ entry) => ratingCard(entry, ctx, {compact: true, onDone: again})),
       h("h2", {}, t("inbox.stuck", {n: stuck.length})),
       ...stuck.map((/** @type {any} */ task) => h("p", {}, "⏸ ", link(task), " ",
-        t("inbox.paused", {at: clock(task.resume_after)}))),
+        t("inbox.paused", {at: clock(task.resume_after)}),
+        ...(task.paused_by ? [h("br"), t("inbox.paused_by", {reason: task.paused_by})] : []))),
       h("h2", {}, t("inbox.tasks")), table(tasks.tasks));
   }
 

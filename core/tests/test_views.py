@@ -93,9 +93,12 @@ def test_a_task_paused_by_a_provider_failure_says_when_it_is_tried_again(tmp_pat
     tasks, found = classes(setup)
     summary = task_summary(task, tasks[task], found[task], None)
     assert summary["state"] == "RUNNING" and summary["resume_after"].endswith("Z")
+    assert summary["paused_by"] == "UNAVAILABLE: HTTP 529"
+    assert task_summary(task, tasks[task], found[task], "public")["paused_by"] is None  # above the reader's cap
     setup.runtime.run(task)  # the provider is back
     tasks, found = classes(setup)
-    assert task_summary(task, tasks[task], found[task], None)["resume_after"] is None
+    summary = task_summary(task, tasks[task], found[task], None)
+    assert summary["resume_after"] is None and summary["paused_by"] is None
 
 
 def test_an_attachment_is_listed_with_its_file_name_within_the_cap(tmp_path):

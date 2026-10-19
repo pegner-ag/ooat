@@ -21,6 +21,7 @@ export default {
   "inbox.waiting": "Čeká na vás ({n})",
   "inbox.stuck": "Uvízlé ({n})",
   "inbox.paused": "pozastaveno po výpadku poskytovatele; další pokus v {at}",
+  "inbox.paused_by": "Důvod: {reason}. Když jde o konektor, napravíte to na stránce Konektory.",
   "inbox.tasks": "Úlohy",
   "inbox.task": "Úloha",
   "inbox.state": "Stav",

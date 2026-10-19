@@ -13,7 +13,7 @@ with model and decision connectors, the Topology Gate for T0–T2 and the task r
 `ooat.toml` and those already used, from `GET /projects`; the last one is remembered). The conversation with the
 reception runs below it: replies with numbered options and buttons, a link to each task it started, and the task's
 report. Then the project's earlier conversations, a folded form for a task with exact criteria, and the inbox's lists
-(questions and ratings waiting, tasks paused by a provider failure, all tasks). A conversation has its own page,
+(questions and ratings waiting, tasks paused by a provider failure with its reason, all tasks). A conversation has its own page,
 read only unless it is open on the web. Memory lists a project's items and the operator's preferences, with add (by
 hand, `POST /memory/{scope}`, web session only), edit, pin, done and forget. The app also has a task page
 (live timeline, the document of every attempt rendered, as source or as a diff,

@@ -7,6 +7,7 @@ message's id. Methods called on a person's action return the text to show them; 
 """
 
 import http.client
+import re
 import threading
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
@@ -23,6 +24,7 @@ TAPS = {"y": "yes", "d": "differently", "n": "new_thing", "t": "make_task", "o":
 CODES = {tap: code for code, tap in TAPS.items()}
 REPLACED = frozenset({"escalated", "retried"})  # decisions the next call replaced: never posted
 OWN_KEPT = 500  # how many own message and task ids a bridge keeps (and a bot stores across restarts)
+_PAUSED = re.compile(r"(?:acceptance check paused|Gate stopped before deciding) \((\w+)\)")
 
 
 @dataclass(frozen=True)
@@ -79,6 +81,16 @@ def _trim(kept: dict) -> None:
         del kept[key]
 
 
+def stopped_by(event: dict) -> tuple[str, str] | None:
+    """(code, reason) of an event that pauses a task until its provider is back (ADR 0014), or None: a failed
+    worker call, a paused acceptance check or a Gate that stopped before deciding."""
+    body = event["body"]
+    if event["type"] == "RESULT" and body.get("outcome") == "FAILED" and body["error"]["code"] != "INVALID_OUTPUT":
+        return body["error"]["code"], body["error"]["message"]
+    paused = _PAUSED.match(body.get("decision") or "") if event["type"] == "DECISION" else None
+    return (paused.group(1), body.get("rationale") or paused.group(1)) if paused else None
+
+
 def _utc(ts: str) -> datetime:
     return datetime.fromisoformat(ts.replace("Z", "+00:00"))
 
@@ -108,6 +120,7 @@ class Bridge:
         self._texts: dict[str, str] = {}  # own message id → its text, for a handoff
         self._said: dict[str, str] = {}  # a command decision → the text a handoff passes on
         self._scope: dict[str, str] = {}  # memory item → its scope, from the post that showed its button
+        self._told_paused: dict[str, None] = {}  # tasks whose pause was told: once until they move again
 
     def _t(self, name: str, **values) -> str:
         return self.texts[name].format(**values)
@@ -443,6 +456,12 @@ class Bridge:
         kind, body = event["type"], event["body"]
         if "redacted" in body and kind not in ("HIL_REQUEST", "TASK_CLOSED"):
             return  # above the token's data class: only the question and the result are posted
+        stopped = stopped_by(event)
+        if stopped is not None:
+            self._paused(task, *stopped)
+        else:
+            with self._guard:
+                self._told_paused.pop(task, None)
         if kind == "TOPOLOGY_DECIDED":
             self._send(self._t("gate", topology=body["topology"]))
         elif kind == "CONTRACT_ISSUED":
@@ -454,6 +473,19 @@ class Bridge:
             self._send(self._t("defaulted" if body.get("default_applied") else "answered", answer=answer))
         elif kind == "TASK_CLOSED":
             self._result(task, event)
+
+    def _paused(self, task: str, code: str, reason: str) -> None:
+        """What stopped the task, why, how to fix it and what OOAT does meanwhile: once per pause, not per retry."""
+        with self._guard:
+            if task in self._told_paused:
+                return
+            self._told_paused[task] = None
+            _trim(self._told_paused)
+        why = self.texts.get(f"stop_{code}", self.texts["stop_other"])
+        lines = [self._t("stopped", why=why), self._t("stop_reason", reason=self._shown(reason))]
+        if code == "UNAVAILABLE":
+            lines.append(self._t("stop_fix_connector"))
+        self._send("\n".join([*lines, self._t("stop_next")]))
 
     def _question(self, request_id: str) -> None:
         request = next((r for r in self.client.questions() if r["request"] == request_id), None)

@@ -68,6 +68,7 @@ class Reception:
         self.projects = projects if projects is not None else (
             runtime.workspaces.config.projects if runtime.workspaces is not None else {})
         self._deciding = threading.Lock()
+        self._failed: str | None = None  # the last decision call's provider failure, under _deciding
 
     # Messages and taps ------------------------------------------------------------------------------------------
 
@@ -339,7 +340,7 @@ class Reception:
             marked = self._messages(waiting, marked=True)
             called = self._ask(base, context.text, marked, data_class)
             if called is None:
-                return self._fallback(found, waiting, base, said)
+                return self._fallback(found, waiting, base, said, self._failed)
             decision = called.data
             theta = self.theta(called.engine, called.model)
             if decision["decision"] in ("task", "continue_task") and decision["confidence"] < theta:
@@ -362,7 +363,8 @@ class Reception:
 
     def _ask(self, base: dict, context: str, said: str, data_class: str, tier: str = model.DECISION_TIER):
         """The decision call, once more after an unusable reply; None when the reception cannot decide. Every call
-        that was charged and not used is recorded with its cost."""
+        that was charged and not used is recorded with its cost. A provider failure is kept in `_failed`."""
+        self._failed = None
         for attempt in (1, 2):
             try:
                 return model.decide_call(self.gateway, tier=tier, context=context, messages=said,
@@ -374,6 +376,7 @@ class Reception:
                 if error.cost is not None and error.cost.get("usd"):
                     self._record(base | {"decision": "retried", "options": [], "buttons": []}, None, None,
                                  cost=error.cost)
+                self._failed = f"{error.code}: {error.message[:300]}"
                 return None
         return None
 
@@ -402,17 +405,19 @@ class Reception:
         settings = self.projects.get(project)
         return settings.data_class if settings is not None else "internal"
 
-    def _fallback(self, found, waiting, base, said) -> dict:
-        """The reception could not decide: the message goes as a task, as the chat bridge sent it before 08."""
+    def _fallback(self, found, waiting, base, said, failed: str | None = None) -> dict:
+        """The reception could not decide: the message goes as a task, as the chat bridge sent it before 08. The
+        reply names the provider failure, so the person can tell what to fix."""
         goal, acceptance = split_done_when(said)
+        why = f" ({failed})" if failed else ""
         operator = waiting[-1]["actor"]["id"]
         task = self._start(found, {"goal": goal or said, "acceptance": acceptance}, operator,
                            waiting[-1]["body"]["channel"], f"reception:{waiting[0]['id']}", None,
                            files_from=waiting)
         return self._record(base | {
             "decision": "task", "task": task, "fallback": True, "options": [], "buttons": [],
-            "reply": say(said, "Recepce teď není dostupná, poslal jsem zprávu jako úkol.",
-                         "The reception is not available now; I sent the message as a task.")}, None, None)
+            "reply": say(said, f"Recepce teď není dostupná{why}, poslal jsem zprávu jako úkol.",
+                         f"The reception is not available now{why}; I sent the message as a task.")}, None, None)
 
     def _act(self, found, own, waiting, said, decision, theta, data_class) -> dict:
         """The design's rules on the model's decision, then the action; returns the body of the final decision."""

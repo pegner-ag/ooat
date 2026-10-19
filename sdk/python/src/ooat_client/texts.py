@@ -5,6 +5,16 @@ TEXTS = {
     "en": {
         "gate": "Gate: {topology}",
         "working": "Working on it (attempt {n}).",
+        "stopped": "⏸ The task is stopped: {why}",
+        "stop_UNAVAILABLE": "the connector cannot be used now.",
+        "stop_QUOTA_EXHAUSTED": "the subscription's quota is used up.",
+        "stop_TIMEOUT": "the provider did not answer in time.",
+        "stop_API_ERROR": "the provider returned an error.",
+        "stop_other": "the provider failed.",
+        "stop_reason": "Reason: {reason}",
+        "stop_fix_connector": "Fix it on the Connectors page of the web app or with `ooat connectors`.",
+        "stop_next": ("I try again by myself in a minute, then less often (at most every 30 minutes); once the cause "
+                      "is fixed, it runs on. If you no longer want it, cancel the task."),
         "answered": "Answered: {answer}",
         "defaulted": "No answer in time: {answer} applies.",
         "default": "If nobody answers by {deadline}: {option}.",
@@ -64,6 +74,16 @@ TEXTS = {
     "cs": {
         "gate": "Gate: {topology}",
         "working": "Pracuji na tom (pokus {n}).",
+        "stopped": "⏸ Úkol stojí: {why}",
+        "stop_UNAVAILABLE": "konektor teď nejde použít.",
+        "stop_QUOTA_EXHAUSTED": "předplatné vyčerpalo kvótu.",
+        "stop_TIMEOUT": "poskytovatel neodpověděl včas.",
+        "stop_API_ERROR": "poskytovatel vrátil chybu.",
+        "stop_other": "poskytovatel selhal.",
+        "stop_reason": "Důvod: {reason}",
+        "stop_fix_connector": "Napravíte to ve webové aplikaci na stránce Konektory nebo příkazem `ooat connectors`.",
+        "stop_next": ("Za minutu to zkusím znovu sám, pak v delších odstupech (nejvýš po 30 minutách); jakmile bude "
+                      "příčina napravená, úkol poběží dál. Pokud ho už nechcete, zrušte ho."),
         "answered": "Odpověď: {answer}",
         "defaulted": "Bez odpovědi včas: platí {answer}.",
         "default": "Když nikdo neodpoví do {deadline}: {option}.",
