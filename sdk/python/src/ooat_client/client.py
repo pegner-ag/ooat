@@ -222,8 +222,9 @@ class OoatClient:
                           headers={"Idempotency-Key": key} if key else None)
 
     def tap(self, conversation: str, tap: str, text: str | None = None) -> dict:
-        """A button of a reception reply: yes, differently, new_thing, make_task, todo, forget:<mem>, done:<mem>.
-        Returns {conversation, message, decision}; a Differently with a text is decided later, like a message."""
+        """A button of a reception reply: yes, differently, new_thing, make_task, todo, remember,
+        forget:<mem>, done:<mem>. Returns {conversation, message, decision}; a Differently with a text is decided
+        later, like a message."""
         body = {"tap": tap, **({"text": text} if text is not None else {})}
         return self._json("POST", f"/conversations/{quote(conversation)}/taps", body=body)
 

@@ -18,7 +18,8 @@ from .texts import TEXTS
 
 TEXT_OPTIONS = frozenset({"clarify", "narrow_scope"})  # answered with text: their button asks for a reply
 VALUES = ("A", "B", "C")
-TAPS = {"y": "yes", "d": "differently", "n": "new_thing", "t": "make_task", "o": "todo"}  # button data → tap
+# button data → tap
+TAPS = {"y": "yes", "d": "differently", "n": "new_thing", "t": "make_task", "o": "todo", "m": "remember"}
 CODES = {tap: code for code, tap in TAPS.items()}
 REPLACED = frozenset({"escalated", "retried"})  # decisions the next call replaced: never posted
 OWN_KEPT = 500  # how many own message and task ids a bridge keeps (and a bot stores across restarts)

@@ -240,8 +240,9 @@ New event types (all `task: null`, with `body.conversation` or `body.memory`):
   `RECEPTION_DECIDED` on `GET /api/v1/conversations/{id}/events` (JSON, or Server-Sent Events as for tasks), with
   the reply, its buttons and the task it started. `intake_key` makes a resent message idempotent, as for tasks
   (ADR 0016). Scope `submit`.
-- `POST /api/v1/conversations/{id}/taps` — `{tap: "yes" | "differently" | "new_thing" | "make_task" | "forget:<mem>",
-  text?}`. Scope `answer`.
+- `POST /api/v1/conversations/{id}/taps` — `{tap: "yes" | "differently" | "new_thing" | "make_task" | "todo" |
+  "remember" | "forget:<mem>" | "done:<mem>", text?}`. Scope `answer`. `remember` is offered after a Differently
+  correction; it stores the reception's lesson as the operator's memory item (plan 09).
 - `GET /api/v1/conversations/{id}` — messages, decisions, linked tasks. Scope `read`.
 - `GET|PATCH|DELETE /api/v1/memory/{scope}[/{id}]` — list, edit, pin, forget. Reading needs `read`; forgetting
   needs `answer`, so the chat's Forget button works; editing a text or pinning needs a web session (a named

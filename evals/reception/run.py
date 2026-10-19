@@ -1,6 +1,9 @@
 """Measure the reception against a set of messages (design 08 §11, plan 08a decision 12).
 
-    python evals/reception/run.py --config ooat.toml --cases my-messages.json [--project docs]
+    python evals/reception/run.py --config ooat.toml --cases my-messages.json [--project docs] [--min-expected 0.8]
+
+`--cases` is a file or a folder of *.json files (evals/reception/cases/ holds the owner's picked cases).
+`--min-expected` exits with 1 when the share decided as expected is below it (plan 09 decision 9).
 
 Each case is {"text": "...", "expected": "<decision>", "context": [{"person": "...", "reception": "..."}, ...]}:
 the earlier turns are written into a scratch ledger as they were, then the reception decides the text with the
@@ -38,6 +41,22 @@ def load_cases(text: str) -> list[dict]:
             if not isinstance(turn, dict) or not isinstance(turn.get("person"), str):
                 raise ValueError(f"case {number}: each context turn has a person's text (and the reception's reply)")
     return cases
+
+
+def load_folder(path: Path) -> list[dict]:
+    """Every case of the *.json files of a folder, in file-name order; a bad file is named."""
+    cases = []
+    for file in sorted(path.glob("*.json")):
+        try:
+            cases += load_cases(file.read_text(encoding="utf-8"))
+        except ValueError as error:
+            raise ValueError(f"{file.name}: {error}") from None
+    return cases
+
+
+def short_of(result: dict, minimum: float | None) -> bool:
+    """The run falls short when a minimum share is given and fewer cases were decided as expected."""
+    return minimum is not None and result["as_expected"] < minimum
 
 
 def evaluate(cases: list[dict], decide) -> dict:
@@ -107,6 +126,7 @@ def main(argv=None, stdout=sys.stdout) -> int:
     parser.add_argument("--config", required=True)
     parser.add_argument("--cases", required=True)
     parser.add_argument("--project", default="docs")
+    parser.add_argument("--min-expected", type=float, default=None)
     args = parser.parse_args(argv)
     from ooat_core.catalog import routing_path
     from ooat_core.config import load_config
@@ -114,7 +134,8 @@ def main(argv=None, stdout=sys.stdout) -> int:
     from ooat_core.routing import load_routing
 
     config = load_config(args.config)
-    cases = load_cases(Path(args.cases).read_text(encoding="utf-8"))
+    source = Path(args.cases)
+    cases = load_folder(source) if source.is_dir() else load_cases(source.read_text(encoding="utf-8"))
     reception = _reception(config, args.config, Registry.discover(), load_routing(routing_path()))
     result = evaluate(cases, _decider(reception, args.project))
     for row in result["rows"]:
@@ -123,6 +144,9 @@ def main(argv=None, stdout=sys.stdout) -> int:
                      f"{row['usd']:.4f} USD\n")
     stdout.write(f"As expected: {result['as_expected']:.0%}. Without a question: {result['without_question']:.0%}. "
                  f"Mean cost: {result['mean_usd']:.4f} USD per message (target {TARGET_USD:.2f}).\n")
+    if short_of(result, args.min_expected):
+        stdout.write(f"Below the minimum share {args.min_expected:.0%}.\n")
+        return 1
     return 0
 
 

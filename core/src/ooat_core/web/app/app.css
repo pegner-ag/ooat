@@ -40,6 +40,8 @@ textarea { width: 100%; }
 table { width: 100%; border-collapse: collapse; }
 th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
 td.number, th.number { text-align: right; }
+.learn td { overflow-wrap: anywhere; }  /* capability ids are long words */
+.learn .title { font-size: 1.25rem; margin-top: 40px; }
 .columns { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 3fr); gap: 24px; }
 .timeline { list-style: none; padding: 0; margin: 0; }
 .timeline li { padding: 3px 0; }

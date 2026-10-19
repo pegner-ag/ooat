@@ -29,7 +29,8 @@
           "scope": {"enum": ["project", "operator"]}
         }
       }
-    }
+    },
+    "lesson": {"type": "object", "required": ["kind", "text"], "additionalProperties": false, "properties": {"kind": {"enum": ["preference", "fact", "glossary"]}, "text": {"type": "string", "minLength": 1, "maxLength": 300}, "scope": {"enum": ["project", "operator"]}}}
   },
   "allOf": [
     {"if": {"properties": {"decision": {"enum": ["task", "confirm"]}}}, "then": {"required": ["goal"]}},

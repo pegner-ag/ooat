@@ -173,11 +173,24 @@ class Reception:
                 raise ValueError("there is nothing to keep")
             text = last["body"].get("interpretation") or " ".join(
                 conversations.message_text(e) or "" for e in own if e["id"] in last["body"]["messages"])
+            decided["data_class"] = higher_class(decided["data_class"], last["body"]["data_class"])
             item = memory.note(self.ledger, self.store, scope=found.project, kind="todo", text=text,
-                               data_class=message["body"]["data_class"], source=message["id"],
+                               data_class=decided["data_class"], source=message["id"],
                                actor={"kind": "hil", "id": operator}, conversation=found.id, channel=channel)
             decided |= {"decision": "answer", "memory": [item.id], "buttons": [f"done:{item.id}", f"forget:{item.id}"],
                         "reply": reply(f"🧠 Otevřený bod: {item.text}", f"🧠 Open point: {item.text}")}
+        elif tap == "remember":
+            lesson = (last or {}).get("body", {}).get("lesson")
+            if lesson is None or self.store is None:
+                raise ValueError("there is nothing to remember")
+            scope = memory.OPERATOR_SCOPE if lesson.get("scope") == "operator" and lesson["kind"] == "preference" \
+                else found.project
+            decided["data_class"] = higher_class(decided["data_class"], last["body"]["data_class"])
+            item = memory.note(self.ledger, self.store, scope=scope, kind=lesson["kind"], text=lesson["text"],
+                               data_class=decided["data_class"], source=message["id"],
+                               actor={"kind": "hil", "id": operator}, conversation=found.id, channel=channel)
+            decided |= {"decision": "answer", "memory": [item.id], "buttons": [f"forget:{item.id}"],
+                        "reply": reply(f"🧠 Zapamatováno: {item.text}", f"🧠 Remembered: {item.text}")}
         elif tap.startswith(("forget:", "done:")):
             kind, mem_id = tap.split(":", 1)
             self._own_item(found.project, mem_id)
@@ -323,7 +336,8 @@ class Reception:
                 projects=sorted(self.projects), budget_tokens=self.settings.context_tokens)
             base = {"conversation": conversation, "project": found.project, "messages": [m["id"] for m in waiting],
                     "context": context.ids, "data_class": data_class}
-            called = self._ask(base, context.text, said, data_class)
+            marked = self._messages(waiting, marked=True)
+            called = self._ask(base, context.text, marked, data_class)
             if called is None:
                 return self._fallback(found, waiting, base, said)
             decision = called.data
@@ -331,7 +345,7 @@ class Reception:
             if decision["decision"] in ("task", "continue_task") and decision["confidence"] < theta:
                 self._record(base | {"decision": "escalated", "options": [], "buttons": []},
                              called, theta)
-                stronger = self._ask(base, context.text, said, data_class, tier=model.ESCALATION_TIER)
+                stronger = self._ask(base, context.text, marked, data_class, tier=model.ESCALATION_TIER)
                 if stronger is not None:
                     called, decision = stronger, stronger.data
                     theta = self.theta(called.engine, called.model)
@@ -371,10 +385,13 @@ class Reception:
         return self.ledger.append(new_event("RECEPTION_DECIDED", task=None, actor=ACTOR, body=body,
                                             cost=cost if called is None else called.cost))
 
-    def _messages(self, waiting: list[dict]) -> str:
+    def _messages(self, waiting: list[dict], marked: bool = False) -> str:
+        """The waiting messages with their attachments' previews; `marked` names a Differently correction as one,
+        for the model (plan 09 decision 5)."""
         parts = []
         for message in waiting:
-            parts.append(conversations.message_text(message))
+            text = conversations.message_text(message)
+            parts.append(f"Differently: {text}" if marked and message["body"].get("tap") == "differently" else text)
             names = message["body"].get("attachment_names", [])
             for ref, name in zip(message["refs"], names):
                 preview = self.runtime.artifacts.read(ref).decode("utf-8", "replace")
@@ -481,6 +498,17 @@ class Reception:
             if kept:
                 result["memory"] = kept
                 result["buttons"] = [*result["buttons"], *(f"forget:{m}" for m in kept)][:12]
+        lesson = decision.get("lesson")
+        corrected = any(m["body"].get("tap") == "differently" and m["body"].get("tap_text") for m in waiting)
+        cap = self._channel_cap(channel)
+        if (lesson and corrected and self.store is not None and not result.get("read_files")
+                and memory.looks_secret(lesson["text"]) is None
+                and raised_class(data_class, lesson["text"]) == data_class  # a lesson never raises its decision
+                and (cap is None or ORDER.index(data_class) <= ORDER.index(cap))):
+            result["lesson"] = lesson  # offered only: stored by the remember tap (plan 09 decision 5)
+            result["reply"] = "\n\n".join([result["reply"], say(said, f"🧠 Zapamatovat si: {lesson['text']}?",
+                                                                 f"🧠 Remember: {lesson['text']}?")])
+            result["buttons"] = [*result["buttons"], "remember"][:12]
         return result
 
     def _read_files(self, found, said, context, base, final, called, theta) -> dict:

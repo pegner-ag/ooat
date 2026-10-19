@@ -18,7 +18,10 @@ read only unless it is open on the web. Memory lists a project's items and the o
 hand, `POST /memory/{scope}`, web session only), edit, pin, done and forget. The app also has a task page
 (live timeline, the document of every attempt rendered, as source or as a diff,
 attachments, cancel, the rating card; for a task on a project's folders the files OOAT saw change, the diff and
-revert behind a confirm step, also for a limit question's `revert` answer), Usage (spend, calls and tokens by role and by connector) and Connectors (the
+revert behind a confirm step, also for a limit question's `revert` answer), Usage (spend, calls and tokens by role and by connector,
+then What it learns from `GET /learning`: acceptance per capability and task type, decision thresholds, the
+reception's decisions with the Differently and quick cancels that followed them, memory notes forgotten later, and
+the rejected tasks within the reader's cap) and Connectors (the
 consequences card, enable with a typed confirmation, disable, hooks). English or Czech. The app is plain
 JavaScript served from the `ooat-core` wheel; the operator needs no Node.
 
@@ -33,8 +36,17 @@ contract is in `docs/chat-bridge.md`.
 A reception in `ooat-core` (design 08, ADR 0018) turns a person's messages into answers, one question, a
 confirmation or a task with criteria it writes itself, within a conversation that continues across tasks and with
 project memory the operator can forget. It is in the REST API (`/conversations`, `/memory`, `/projects`), the
-Python client, `ooat ask`, the web app's home page and the chat bridge. `evals/reception/` measures it against a
-message set.
+Python client, `ooat ask`, the web app's home page and the chat bridge. After a Differently with a correction it
+may offer a lesson (a lasting preference or fact); the Remember button stores it as the operator's memory item,
+never the reception on its own. `evals/reception/` measures it against a message set; `evals/candidates.py` exports
+corrections and rejected tasks to a file outside the repository, for the owner to pick cases from
+(`evals/reception/cases/`, run with `--min-expected`).
+
+OOAT learns from the ledger without storing what it learns (`learning.py`, plan 09): `p_accept` per capability and
+task type is the mean of a Beta distribution whose prior is the card's `prior.p_accept` weighted as 5 ratings (a
+justified abstention does not count, a lazy one does), and the Gate records it with the expected utility
+`V × p_accept − cost` on its candidate; a task whose expected utility is negative is closed as not worth its cost.
+The cards in `catalog/` keep `"observed": {"n": 0}`.
 
 ## Technology
 In use:

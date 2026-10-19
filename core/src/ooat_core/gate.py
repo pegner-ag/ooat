@@ -15,6 +15,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Literal
 
 from .acceptance import CRITIC_SYSTEM, CRITIC_TIER
+from . import learning
 from .config import Config
 from .connectors import DecisionQuestion, DecisionRequest, ModelRequest
 from .gateway import Gateway, GatewayError
@@ -26,6 +27,7 @@ from .thresholds import GATE_EVENTS, acts_alone, decision_point, threshold
 from .worker import PREVIEW_CHARS, worker_system
 
 ACTOR = {"kind": "system", "id": "ooat-gate"}
+WORKER_CAPABILITY = "cap.general.complete_task"  # runtime.CAPABILITY; the runtime imports this module
 WORKER_TIER = "workhorse"
 # A task that does not state its risk class is judged by the stricter R1 tolerance, never the laxer R0
 # (ADR 0011: below θ the safer outcome applies).
@@ -258,10 +260,16 @@ class Gate:
             missing = f"no permitted route for {data_class} data: {error.message}"
             self._decided(task, "T0", rules, [{"topology": "T2", "eliminated_by": rules or ["A10"]}], decided)
             return self._close(task, data_class, budget, "CLOSED_ABSTAINED", "Not run: no permitted route.", missing)
-        candidates = [{"topology": "T2", "model_usd": estimate}]
-        if value is not None and estimate > value:
+        p = learning.p_accept(self._ledger.events(types=list(learning.EVENTS)), WORKER_CAPABILITY,
+                              submitted["body"].get("task_type"), learning.card_prior(WORKER_CAPABILITY))
+        candidate = {"topology": "T2", "model_usd": estimate, "p_accept": round(p, 4)}
+        if value is not None:  # spec §6 with no HIL or silent-error term measured yet (plan 09 decision 4)
+            candidate["eu_usd"] = value * p - estimate
+        candidates = [candidate]
+        if value is not None and candidate["eu_usd"] < 0:
             self._decided(task, "T0", rules, candidates, decided)
-            missing = f"the estimated cost {estimate:.4f} USD exceeds the task value {value:.2f} USD"
+            missing = (f"the estimated cost {estimate:.4f} USD exceeds the task's expected value {value * p:.4f} USD "
+                       f"(value {value:.2f} USD × acceptance {p:.2f})")
             return self._close(task, data_class, budget, "CLOSED_ABSTAINED", "Not run: not worth its cost.", missing,
                                estimate)
 
